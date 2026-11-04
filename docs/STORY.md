@@ -68,6 +68,11 @@ where it sank, with its cargo, to be recovered on a later dive. The pilot
 is not there to rescue anyone. Okafor's last message speaks to them
 directly: "Do not come to rescue me. Come to listen."
 
+Their first sub, the Lantern, is a deep research submersible: its hull is
+marked LANTERN, with the designation DSV-7 and the placard "TEST DEPTH
+11 000 M" (the hadal floor lies at about 10 900 m). Whose seventh DSV it was
+is as open as who hired the pilot.
+
 ## The crew
 
 - **Commander R. Hale.** Station commander, practical and protective. Hale

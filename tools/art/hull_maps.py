@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Paint-shop maps for a submarine's fairing: an RGB multiply (panel seams,
-rivets, grime, rust streaks, hatches and lettering) and the matching normal
+rivets, grime, rust streaks, hatches, the name, hull designation and depth
+rating) and the matching normal
 map. They wrap the fairing's UVs: u runs stern to bow, v round each section
 from the keel (0), up the near side (0.25), over the deck (0.5) and down the
 far side (0.75), spaced evenly by distance.
@@ -22,7 +23,6 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = os.path.join(ROOT, "assets", "subs")
 FONT = os.path.join(ROOT, "assets", "fonts", "ChakraPetch-SemiBold.ttf")
-LOGO = os.path.join(ROOT, "assets", "branding", "lantern.png")
 W, H = 2048, 1024
 rng = np.random.default_rng(7)
 
@@ -116,12 +116,6 @@ def text_mask(text, width_px, height_px, size=220):
     return np.asarray(im, dtype=np.float32) / 255.0
 
 
-def logo_mask(width_px, height_px):
-    im = Image.open(LOGO).split()[-1]
-    im = im.resize((max(int(width_px), 1), max(int(height_px), 1)), Image.LANCZOS)
-    return np.asarray(im, dtype=np.float32) / 255.0
-
-
 def smooth_noise(shape, cells, seed):
     g = np.random.default_rng(seed).random((cells[0] + 3, cells[1] + 3))
     im = Image.fromarray((g * 255).astype(np.uint8)).resize((shape[1], shape[0]), Image.BICUBIC)
@@ -198,35 +192,26 @@ def paint_lantern(hull):
                 mask[sl + 1:] = fade
             stamp(paint, mask * rng.uniform(0.15, 0.35), c, r, np.array([0.55, 0.38, 0.25]))
 
-    # The name and hull number on both sides, a lantern by the name.
+    # The name, the hull designation and the depth rating on both sides.
     def letter(mask, x, v, far):
         m = mask[:, ::-1] if far else mask[::-1, :]
         stamp(paint, m * 0.9, hull.col(x), hull.row(v), np.array([0.07, 0.07, 0.08]))
         stamp(height, m * 0.0004, hull.col(x), hull.row(v), 1.0, "add")
 
-    name_h = 0.17
+    def text(words, height_world, x, width_world=None):
+        mask = text_mask(words, None, height_world * hull.px_v(x))
+        width = width_world * hull.px_x if width_world else mask.shape[1] * hull.px_x / hull.px_v(x)
+        return np.asarray(Image.fromarray((mask * 255).astype(np.uint8)).resize(
+            (int(width), mask.shape[0]), Image.LANCZOS), dtype=np.float32) / 255
+
+    # Below the name is falling v on the near side and rising v on the far side.
     for far in (False, True):
-        v_mid = 0.75 + 0.012 if far else 0.25 - 0.012
-        name = text_mask("LANTERN", None, name_h * hull.px_v(-0.1))
-        name = np.asarray(Image.fromarray((name * 255).astype(np.uint8)).resize(
-            (int(name.shape[1] * hull.px_x / hull.px_v(-0.1)), name.shape[0])), dtype=np.float32) / 255
-        width_world = name.shape[1] / hull.px_x
-        logo_h = name_h * 1.35
-        logo_w = logo_h * 416 / 650
-        x_name = -0.08 + (logo_w + 0.06) / 2 * (-1 if far else 1)
-        x_logo = x_name - (width_world / 2 + 0.05 + logo_w / 2) * (-1 if far else 1)
-        if far:
-            # Seen from the far side the bow is on the left: the lantern goes on the right of the name.
-            x_logo = x_name + (width_world / 2 + 0.05 + logo_w / 2)
-        else:
-            x_logo = x_name - (width_world / 2 + 0.05 + logo_w / 2)
-        letter(name, x_name, v_mid, far)
-        logo = logo_mask(logo_w * hull.px_x, logo_h * hull.px_v(x_logo))
-        letter(logo, x_logo, v_mid, far)
-        number = text_mask("KK-01", 0.26 * hull.px_x, 0.07 * hull.px_v(0.75))
-        letter(number, 0.76, (0.75 + 0.04) if far else (0.25 - 0.04), far)
-        tag = text_mask("NO STEP", 0.16 * hull.px_x, 0.035 * hull.px_v(-1.7))
-        letter(tag, -1.72, 0.5 + (0.035 if far else -0.035), far)
+        side = 1 if far else -1
+        v_mid = 0.75 - side * 0.012 if far else 0.25 + side * 0.012
+        letter(text("LANTERN", 0.17, -0.12), -0.12, v_mid, far)
+        letter(text("TEST DEPTH 11 000 M", 0.032, -0.12), -0.12, v_mid + side * 0.042, far)
+        letter(text("DSV-7", 0.07, 0.76, 0.24), 0.76, (0.75 + 0.04) if far else (0.25 - 0.04), far)
+        letter(text("NO STEP", 0.035, -1.72, 0.16), -1.72, 0.5 + (0.035 if far else -0.035), far)
 
     # A bolted access hatch low on each side, aft of the name.
     for far in (False, True):
@@ -254,7 +239,7 @@ def paint_lantern(hull):
 
     # A vent grille high on each side near the bow: a row of recessed slots.
     for far in (False, True):
-        vc = 0.75 + 0.1 if far else 0.25 + 0.1
+        vc = 0.75 - 0.1 if far else 0.25 + 0.1
         for k in range(7):
             x = 0.6 + k * 0.045
             per = np.interp((x - hull.x0) / hull.length, hull.u, hull.perimeter)
