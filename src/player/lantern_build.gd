@@ -90,7 +90,7 @@ static func mounts() -> Dictionary:
 	out[&"flare"] = SubEquipment.frame_at(Vector3(-0.7, f.deck_y(-0.7, 0.0) - 0.01, 0.0), up)
 	out[&"decoy"] = f.mount(-1.28, 0.38)
 	out[&"shock"] = SubEquipment.frame_at(Vector3(1.5, -0.65, 0.0), up)
-	var torpedo := SubEquipment.frame_at(Vector3(-0.25, -0.36, 0.53), Vector3(0.0, -0.3, 1.0))
+	var torpedo: Transform3D = f.mount(-0.75, 0.215)
 	out[&"torpedo"] = [torpedo, SubEquipment.mirror(torpedo)]
 	out[&"drive"] = [f.mount(-1.62, 0.12), f.mount(-1.62, 0.88)]
 	out[&"foil"] = [f.mount(0.55, 0.08), f.mount(0.55, 0.92)]
