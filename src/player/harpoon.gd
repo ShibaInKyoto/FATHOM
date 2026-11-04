@@ -1,16 +1,17 @@
 class_name Harpoon
 extends Node3D
-## The submarine's tethered harpoon. Held, it flies out and stays out: it
-## spears a creature (and pulls free once the blow lands), hooks a cache and
-## reels it in, or anchors to rock so the submarine can winch itself along.
-## Let go of the trigger and it comes home, whatever it was doing; it cannot
-## be sent out again until it is back.
+## The submarine's tethered harpoon. A press sends it out to the end of its
+## line or the first thing in the way, straight through the crosshair. A tap
+## brings it straight back from whatever it struck: it spears a creature
+## (and pulls free once the blow lands) and comes home. Held, it stays put:
+## anchored in rock it winches the submarine along, hooked in a cache it
+## reels the catch in; let go and it comes home. A press while it is on its
+## way home fires again the moment it is back.
 
 enum State { IDLE, FLYING, ANCHORED, ATTACHED, RETRACTING }
 
 const SPEED := 48.0
-const RETRACT_SPEED := 60.0
-const COOLDOWN := 0.3
+const RETRACT_SPEED := 90.0
 ## A dragged catch that comes no closer for this long (snagged on rock) is let go.
 const DRAG_STALL := 1.2
 
@@ -19,12 +20,13 @@ var tip := Vector2.ZERO
 var direction := Vector2.RIGHT
 var target: Entity
 var holding := false
-## Thrown by script (autopilot, tests): let go as soon as it lands.
-var _throwing := false
+## Pressed again on its way home: fire as soon as it is back.
+var _queued := false
+## The player's own shot: aimed from the muzzle through the crosshair.
+var _at_crosshair := false
 
 var _sub: Submarine
 var _travelled := 0.0
-var _cooldown := 0.0
 var _stick_timer := 0.0
 var _drag_closest := INF
 var _drag_stall := 0.0
@@ -90,13 +92,24 @@ func _origin() -> Vector2:
 	return _sub.launch_point(&"harpoon", 1.2)
 
 
-func fire(aim: Vector2) -> void:
+## The trigger goes down: fires along [param aim], or (for the player, with
+## [param at_crosshair]) from the muzzle through the crosshair. Pressed on
+## its way home, it fires again the moment it is back.
+func fire(aim: Vector2, at_crosshair := false) -> void:
 	holding = true
-	if state != State.IDLE or _cooldown > 0.0 or not _sub.alive:
+	_at_crosshair = at_crosshair
+	if state == State.RETRACTING:
+		_queued = true
 		return
+	if state != State.IDLE or not _sub.alive:
+		return
+	_launch(aim)
+
+
+func _launch(aim: Vector2) -> void:
 	state = State.FLYING
-	direction = aim.normalized()
 	tip = _origin()
+	direction = _sub.aim_from(tip) if _at_crosshair else aim.normalized()
 	_travelled = 0.0
 	visible = true
 	_sub.model.set_harpoon_loaded(false)
@@ -104,27 +117,21 @@ func fire(aim: Vector2) -> void:
 	_sub.level.emit_noise(_sub.pos, 8.0 * _sub.stats.noise_mult, _sub)
 
 
+## The trigger comes up. Out on its line it carries on to whatever it
+## strikes and then comes home; anchored or reeling a catch, it lets go now.
 func release() -> void:
 	holding = false
-	_throwing = false
-	if state == State.FLYING or state == State.ANCHORED or state == State.ATTACHED and _stick_timer <= 0.0:
+	if state == State.ANCHORED or state == State.ATTACHED and _stick_timer <= 0.0:
 		_retract()
 
 
-## Fires and lets go once it lands or reaches the end of its line, as a tap
-## of the trigger held just long enough (for scripted pilots).
+## A tap of the trigger (for scripted pilots): out, and straight back.
 func throw(aim: Vector2) -> void:
 	fire(aim)
-	holding = false
-	_throwing = state == State.FLYING
+	release()
 
 
 func tick(delta: float) -> void:
-	_cooldown = maxf(_cooldown - delta, 0.0)
-	if _throwing and state != State.FLYING:
-		_throwing = false
-		if state == State.ANCHORED or state == State.ATTACHED and _stick_timer <= 0.0:
-			_retract()
 	match state:
 		State.FLYING:
 			_fly(delta)
@@ -139,7 +146,9 @@ func tick(delta: float) -> void:
 				state = State.IDLE
 				visible = false
 				_sub.model.set_harpoon_loaded(true)
-				_cooldown = COOLDOWN
+				if _queued and _sub.alive:
+					_queued = false
+					_launch(_sub.aim)
 			else:
 				tip += to.normalized() * step
 	if visible:
@@ -174,13 +183,17 @@ func _hit_entity(e: Entity) -> void:
 		_sub.add_battery(_sub.stats.harpoon_leech)
 	match reaction:
 		Entity.HarpoonReaction.DRAG:
+			tip = e.pos
+			Audio.play_at(&"harpoon_hook", tip, -2.0)
+			if not holding:
+				# A tap: the barb glances off and comes home.
+				_retract()
+				return
 			target = e
 			_target_offset = Vector2.ZERO
-			tip = e.pos
 			state = State.ATTACHED
 			_drag_closest = INF
 			_drag_stall = 0.0
-			Audio.play_at(&"harpoon_hook", tip, -2.0)
 		Entity.HarpoonReaction.STICK:
 			Events.hitstop.emit(0.035)
 			Events.shake_requested.emit(0.15)
@@ -236,6 +249,7 @@ func _drag(delta: float) -> void:
 func _retract() -> void:
 	state = State.RETRACTING
 	target = null
+	_queued = false
 
 
 func _update_visuals() -> void:

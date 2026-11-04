@@ -13,7 +13,7 @@ const GAMEPAD: Dictionary[StringName, String] = {
 const CONTROLS := [
 	["Move", &"move", "Left stick"],
 	["Aim lamp and tools", "Mouse", "Right stick"],
-	["Harpoon (hold to winch)", &"fire", "RT"],
+	["Harpoon (hold to reel or winch)", &"fire", "RT"],
 	["Use tool", &"tool", "RB"],
 	["Cycle tool", &"cycle_tool", "LB"],
 	["Sonar ping", &"ping", "A"],

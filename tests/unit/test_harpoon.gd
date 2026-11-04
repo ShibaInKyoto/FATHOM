@@ -1,7 +1,9 @@
 extends TestCase
-## The harpoon strikes a creature and pulls free, reels in a cache while the
-## trigger is held, comes home the moment it is let go, and lets go of a
-## catch snagged on rock rather than staying hooked (and useless) for good.
+## The harpoon flies to the end of its line or the first thing it strikes,
+## then comes straight home unless the trigger is held; held, it reels a
+## cache in until let go. It strikes a creature and pulls free, fires again
+## the moment it is home if pressed on the way, goes through the crosshair,
+## and lets go of a catch snagged on rock rather than staying hooked.
 
 const DT := 1.0 / 60.0
 
@@ -66,20 +68,47 @@ func test_strikes_a_creature_and_pulls_free() -> void:
 	level.free()
 
 
-func test_letting_go_brings_it_home() -> void:
+func test_a_tap_flies_out_and_comes_straight_home() -> void:
 	var parts := _stage(null)
 	var level: Level = parts[0]
 	var sub: Submarine = parts[1]
 	sub.harpoon.fire(Vector2.RIGHT)
-	for i in 6:
-		sub.harpoon.tick(DT)
-	check_eq(sub.harpoon.state, Harpoon.State.FLYING, "out on the line while held")
+	sub.harpoon.tick(DT)
 	sub.harpoon.release()
-	check_eq(sub.harpoon.state, Harpoon.State.RETRACTING, "let go, it turns for home")
+	check_eq(sub.harpoon.state, Harpoon.State.FLYING, "let go early, it carries on out")
+	_tick_while(sub, Harpoon.State.FLYING, 2.0)
+	check_eq(sub.harpoon.state, Harpoon.State.RETRACTING, "then turns for home by itself")
+	# Pressed again on the way home: it goes straight back out on arrival.
 	sub.harpoon.fire(Vector2.RIGHT)
-	check_eq(sub.harpoon.state, Harpoon.State.RETRACTING, "and cannot be sent out again on the way")
+	sub.harpoon.release()
+	check_eq(sub.harpoon.state, Harpoon.State.RETRACTING, "not out again before it is back")
 	_tick_while(sub, Harpoon.State.RETRACTING, 2.0)
-	check_eq(sub.harpoon.state, Harpoon.State.IDLE, "until it is back")
+	check_eq(sub.harpoon.state, Harpoon.State.FLYING, "but out again the moment it is, with no wait")
+	level.free()
+
+
+func test_a_tap_glances_off_a_cache() -> void:
+	var cache := SalvageCache.new()
+	var parts := _stage(cache)
+	var level: Level = parts[0]
+	var sub: Submarine = parts[1]
+	sub.harpoon.throw(Vector2.RIGHT)
+	_tick_while(sub, Harpoon.State.FLYING, 0.5)
+	check_eq(sub.harpoon.state, Harpoon.State.RETRACTING, "not held, it does not hook the catch")
+	level.free()
+
+
+func test_it_flies_through_the_crosshair() -> void:
+	var parts := _stage(null)
+	var level: Level = parts[0]
+	var sub: Submarine = parts[1]
+	sub.aim = Vector2(1.0, 0.4).normalized()
+	var mark := sub.aim_point()
+	sub.harpoon.fire(sub.aim, true)
+	var start := sub.harpoon.tip
+	var miss := ((mark - start) - (mark - start).project(sub.harpoon.direction)).length()
+	check(miss < 0.01, "the line from the muzzle runs through the crosshair (off by %.3f m)" % miss)
+	check(start.distance_to(sub.pos) > 0.1, "from the launcher, off the hull's centre")
 	level.free()
 
 

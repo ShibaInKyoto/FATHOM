@@ -14,6 +14,8 @@ const SCAN_TIME := 1.6
 const POWER_GRACE := 10.0
 ## How fast the right stick swings the lamp round (radians a second).
 const AIM_TURN_RATE := 12.0
+## How far out along the aim a gamepad's crosshair sits.
+const RETICLE_REACH := 9.0
 
 var level: Level
 var run: RunState
@@ -53,6 +55,8 @@ var leak: GPUParticles3D
 ## Glowing plankton stirred up by fast movement (dark biomes only).
 var wake: GPUParticles3D
 var beam: MeshInstance3D
+## The world point under the mouse crosshair (INF until the mouse aims).
+var _mouse_point := Vector2.INF
 var _beam_mesh: CylinderMesh
 
 var _yaw := 0.0
@@ -234,13 +238,34 @@ func _update_aim(delta: float) -> void:
 		if absf(dir.z) > 0.0001:
 			var t := -origin.z / dir.z
 			var hit := origin + dir * t
-			var to := Vector2(hit.x, hit.y) - pos
+			_mouse_point = Vector2(hit.x, hit.y)
+			var to := _mouse_point - pos
 			if to.length() > 0.5:
 				aim = to.normalized()
 	if aim.x > 0.2:
 		facing = 1.0
 	elif aim.x < -0.2:
 		facing = -1.0
+
+
+## The world point the crosshair marks: under the mouse, or out along the
+## aim for a gamepad.
+func aim_point() -> Vector2:
+	if Settings.using_gamepad or _mouse_point == Vector2.INF:
+		return pos + aim * RETICLE_REACH
+	return _mouse_point
+
+
+## Which way a shot leaving [param origin] must go to pass through the
+## crosshair. The launchers sit off the hull's centre, so a shot sent along
+## the aim itself would run parallel to the line through the crosshair and
+## miss it; this one goes from the muzzle to the crosshair. With the
+## crosshair too close or behind the muzzle it falls back to the aim.
+func aim_from(origin: Vector2) -> Vector2:
+	var to := aim_point() - origin
+	if to.length() < 1.0 or to.normalized().dot(aim) < 0.5:
+		return aim
+	return to.normalized()
 
 
 ## [param from] turned towards [param to] by at most [param max_angle]
@@ -260,11 +285,11 @@ func _handle_actions() -> void:
 	if Input.is_action_just_pressed(&"ping"):
 		try_ping()
 	if Input.is_action_just_pressed(&"fire"):
-		harpoon.fire(aim)
+		harpoon.fire(aim, true)
 	if Input.is_action_just_released(&"fire"):
 		harpoon.release()
 	if Input.is_action_just_pressed(&"tool"):
-		tools.use(aim)
+		tools.use(aim, true)
 	if Input.is_action_just_pressed(&"cycle_tool"):
 		tools.cycle()
 

@@ -26,7 +26,7 @@ func _draw() -> void:
 	# Reticle: mouse cursor, or a point along the aim for gamepads.
 	var reticle: Vector2
 	if Settings.using_gamepad:
-		var p := sub.pos + sub.aim * 9.0
+		var p := sub.pos + sub.aim * Submarine.RETICLE_REACH
 		reticle = cam.unproject_position(Vector3(p.x, p.y, 0))
 	else:
 		reticle = get_local_mouse_position()

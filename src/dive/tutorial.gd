@@ -43,7 +43,7 @@ func _text(step: StringName) -> String:
 		&"scan":
 			return "Keep your lamp on a creature to scan it.  Scans earn research for new submarines."
 		&"harpoon":
-			return "%s harpoon - hook caches to drag them in, spear creatures, hold on rock to winch." \
+			return "%s harpoon - tap to spear creatures; hold to reel caches in or winch yourself to rock." \
 				% Prompt.key(&"fire")
 		&"noise":
 			return "Moving fast is loud (the faint ring).  Hunters follow noise.  %s boosts - loudly." % Prompt.key(&"boost")

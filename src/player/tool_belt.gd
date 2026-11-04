@@ -10,6 +10,8 @@ const COOLDOWNS: Dictionary[StringName, float] = {&"flare": 0.6, &"torpedo": 0.9
 var index := 0
 var _sub: Submarine
 var _cooldown := 0.0
+## Whether the shot being made goes through the crosshair (see [method use]).
+var _at_crosshair := false
 
 
 func setup(sub: Submarine) -> void:
@@ -49,7 +51,11 @@ func tick(delta: float) -> void:
 	_cooldown = maxf(_cooldown - delta, 0.0)
 
 
-func use(aim: Vector2) -> void:
+## Uses the selected tool towards [param aim]; with [param at_crosshair]
+## (the player's own shots) each launcher aims from its muzzle through the
+## crosshair instead.
+func use(aim: Vector2, at_crosshair := false) -> void:
+	_at_crosshair = at_crosshair
 	var tool := current()
 	if tool == &"" or _cooldown > 0.0 or not _sub.alive:
 		return
@@ -77,6 +83,7 @@ func _fire_flare(aim: Vector2) -> bool:
 	_sub.run.flares -= 1
 	var flare := Flare.new()
 	flare.pos = _sub.launch_point(&"flare", 1.4)
+	aim = _towards(flare.pos, aim)
 	flare.vel = aim * 17.0 + _sub.vel * 0.5
 	_sub.level.add_entity(flare)
 	Audio.play_at(&"flare_launch", _sub.pos, -2.0)
@@ -90,6 +97,7 @@ func _launch_decoy(aim: Vector2) -> bool:
 	_sub.run.decoys -= 1
 	var decoy := Decoy.new()
 	decoy.pos = _sub.launch_point(&"decoy", 1.4)
+	aim = _towards(decoy.pos, aim)
 	decoy.vel = aim * 13.0 + _sub.vel * 0.5
 	_sub.level.add_entity(decoy)
 	Audio.play_at(&"flare_launch", _sub.pos, -4.0, 0.05, 0.7)
@@ -103,6 +111,7 @@ func _fire_torpedo(aim: Vector2) -> bool:
 	_sub.run.torpedoes -= 1
 	var torpedo := Torpedo.new()
 	torpedo.pos = _sub.launch_point(&"torpedo", 1.8)
+	aim = _towards(torpedo.pos, aim)
 	# Straight down the aim, carrying only the sub's speed along it.
 	torpedo.vel = aim * (8.0 + maxf(_sub.vel.dot(aim), 0.0))
 	torpedo.damage = _sub.stats.torpedo_damage
@@ -111,6 +120,12 @@ func _fire_torpedo(aim: Vector2) -> bool:
 	Audio.play_at(&"torpedo_launch", _sub.pos, 0.0)
 	_sub.level.emit_noise(_sub.pos, 20.0, _sub)
 	return true
+
+
+## The direction a shot from [param origin] goes: through the crosshair for
+## the player's shots, else along [param aim].
+func _towards(origin: Vector2, aim: Vector2) -> Vector2:
+	return _sub.aim_from(origin) if _at_crosshair else aim
 
 
 func _shock() -> bool:
