@@ -9,6 +9,8 @@ signal changed
 enum Quality { LOW, MEDIUM, HIGH, ULTRA }
 
 const PATH := "user://settings.cfg"
+## A binding with this device answers every pad, keyboard and mouse.
+const ALL_DEVICES := -1
 const QUALITY_NAMES: PackedStringArray = ["Low", "Medium", "High", "Ultra"]
 ## Actions whose primary keyboard or mouse binding the player can change.
 ## Gamepad bindings, the arrow keys and pause stay fixed.
@@ -190,6 +192,21 @@ func _register_inputs() -> void:
 		var e := _joy(pair[1])
 		if not InputMap.action_has_event(pair[0], e):
 			InputMap.action_add_event(pair[0], e)
+	_any_pad()
+
+
+## Every gamepad binding, Godot's own menu actions' included, answers any
+## pad. An event made in code belongs to device 0 alone, and the system may
+## number the player's pad 1 or higher (a second controller, a virtual one
+## from Steam Input, a wheel or a drawing tablet plugged in first): then not
+## one action would answer it.
+func _any_pad() -> void:
+	for action in InputMap.get_actions():
+		for e in InputMap.action_get_events(action):
+			if (e is InputEventJoypadButton or e is InputEventJoypadMotion) and e.device != ALL_DEVICES:
+				InputMap.action_erase_event(action, e)
+				e.device = ALL_DEVICES
+				InputMap.action_add_event(action, e)
 
 
 func _set_events(action: StringName, events: Array) -> void:
@@ -309,18 +326,21 @@ static func event_name(e: InputEvent) -> String:
 static func _key(code: Key) -> InputEventKey:
 	var e := InputEventKey.new()
 	e.physical_keycode = code
+	e.device = ALL_DEVICES
 	return e
 
 
 static func _mouse(button: MouseButton) -> InputEventMouseButton:
 	var e := InputEventMouseButton.new()
 	e.button_index = button
+	e.device = ALL_DEVICES
 	return e
 
 
 static func _joy(button: JoyButton) -> InputEventJoypadButton:
 	var e := InputEventJoypadButton.new()
 	e.button_index = button
+	e.device = ALL_DEVICES
 	return e
 
 
@@ -328,4 +348,5 @@ static func _axis(axis: JoyAxis, value: float) -> InputEventJoypadMotion:
 	var e := InputEventJoypadMotion.new()
 	e.axis = axis
 	e.axis_value = value
+	e.device = ALL_DEVICES
 	return e

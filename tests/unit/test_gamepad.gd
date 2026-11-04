@@ -1,7 +1,7 @@
 extends TestCase
-## A gamepad drives the menus (A presses, B backs out), and the right stick
-## swings the lamp round quickly but smoothly, over the top when it turns
-## right about.
+## A gamepad drives the menus (A presses, B backs out) and the sub, whichever
+## device number the system gives it, and the right stick swings the lamp
+## round quickly but smoothly, over the top when it turns right about.
 
 
 func test_a_presses_and_b_backs_out() -> void:
@@ -13,6 +13,38 @@ func test_a_presses_and_b_backs_out() -> void:
 	b.pressed = true
 	check(a.is_action(&"ui_accept"), "A presses the focused button")
 	check(b.is_action(&"ui_cancel"), "B backs out")
+
+
+func test_every_action_answers_a_pad_numbered_anything() -> void:
+	# The system may number the player's pad 1 or higher; events made in code
+	# default to device 0, and bindings made that way ignore every other pad.
+	for device: int in [0, 1, 3, 7]:
+		var button := func(b: JoyButton) -> InputEventJoypadButton:
+			var e := InputEventJoypadButton.new()
+			e.device = device
+			e.button_index = b
+			e.pressed = true
+			return e
+		var axis := func(a: JoyAxis, v: float) -> InputEventJoypadMotion:
+			var e := InputEventJoypadMotion.new()
+			e.device = device
+			e.axis = a
+			e.axis_value = v
+			return e
+		check((button.call(JOY_BUTTON_A) as InputEvent).is_action(&"ui_accept"), "A presses buttons (pad %d)" % device)
+		check((button.call(JOY_BUTTON_B) as InputEvent).is_action(&"ui_cancel"), "B backs out (pad %d)" % device)
+		check((button.call(JOY_BUTTON_DPAD_DOWN) as InputEvent).is_action(&"ui_down"), "the d-pad moves focus (pad %d)" %
+			device)
+		check((axis.call(JOY_AXIS_LEFT_Y, 1.0) as InputEvent).is_action(&"ui_down"), "so does the stick (pad %d)" % device)
+		check((axis.call(JOY_AXIS_LEFT_X, 1.0) as InputEvent).is_action(&"move_right"), "the left stick moves (pad %d)" %
+			device)
+		check((axis.call(JOY_AXIS_RIGHT_Y, -1.0) as InputEvent).is_action(&"aim_up"), "the right stick aims (pad %d)" %
+			device)
+		check((axis.call(JOY_AXIS_TRIGGER_RIGHT, 1.0) as InputEvent).is_action(&"fire"), "the trigger fires (pad %d)" %
+			device)
+		check((button.call(JOY_BUTTON_RIGHT_SHOULDER) as InputEvent).is_action(&"tool"), "the bumper uses the tool (pad %d)" %
+			device)
+		check((button.call(JOY_BUTTON_START) as InputEvent).is_action(&"pause"), "Start pauses (pad %d)" % device)
 
 
 func test_the_lamp_swings_round_smoothly() -> void:

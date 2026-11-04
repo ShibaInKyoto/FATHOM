@@ -71,9 +71,9 @@ func _process(delta: float) -> void:
 	var orbit := Input.get_vector(&"aim_left", &"aim_right", &"aim_up", &"aim_down")
 	_turn(orbit * ORBIT_SPEED * delta)
 	var zoom := 0.0
-	if Input.is_physical_key_pressed(KEY_Q) or Input.is_joy_button_pressed(0, JOY_BUTTON_LEFT_SHOULDER):
+	if Input.is_physical_key_pressed(KEY_Q) or _pad_pressed(JOY_BUTTON_LEFT_SHOULDER):
 		zoom += 1.0
-	if Input.is_physical_key_pressed(KEY_E) or Input.is_joy_button_pressed(0, JOY_BUTTON_RIGHT_SHOULDER):
+	if Input.is_physical_key_pressed(KEY_E) or _pad_pressed(JOY_BUTTON_RIGHT_SHOULDER):
 		zoom -= 1.0
 	_distance = clampf(_distance - zoom * ZOOM_SPEED * delta, MIN_DISTANCE, MAX_DISTANCE)
 	_camera.h_offset = 0.0
@@ -126,3 +126,11 @@ func _close() -> void:
 			cl.visible = true
 	closed.emit()
 	queue_free()
+
+
+## Whether [param button] is held on any pad connected.
+static func _pad_pressed(button: JoyButton) -> bool:
+	for pad in Input.get_connected_joypads():
+		if Input.is_joy_button_pressed(pad, button):
+			return true
+	return false
