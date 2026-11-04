@@ -101,7 +101,7 @@ static func mounts() -> Dictionary:
 	# The launchers ride the roof ridge behind the deckhouse.
 	out[&"decoy"] = SubEquipment.frame_at(Vector3(-0.27, f.deck_y(-0.27, 0.0) - 0.01, 0.0), up)
 	out[&"flare"] = SubEquipment.frame_at(Vector3(-0.78, f.deck_y(-0.78, 0.0) - 0.01, 0.0), up)
-	var torpedo := SubEquipment.frame_at(Vector3(0.4, -0.1, f.side_z(0.4, -0.1) - 0.02), Vector3(0.0, -0.3, 1.0))
+	var torpedo := SubEquipment.frame_at(Vector3(0.0, -0.1, f.side_z(0.0, -0.1) - 0.02), Vector3(0.0, -0.3, 1.0))
 	out[&"torpedo"] = [torpedo, SubEquipment.mirror(torpedo)]
 	out[&"drive"] = [f.mount(-1.5, 0.2), f.mount(-1.5, 0.8)]
 	out[&"foil"] = [f.mount(0.1, 0.21), f.mount(0.1, 0.79)]

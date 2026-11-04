@@ -46,7 +46,7 @@ static func mounts() -> Dictionary:
 		deck.append_array(pair.call(d))
 	out[&"deck"] = deck
 	var flank: Array = []
-	for d: Vector3 in [Vector3(-0.42, -0.32, 0.85), Vector3(-0.72, -0.2, 0.66), Vector3(-0.15, -0.62, 0.77),
+	for d: Vector3 in [Vector3(-0.62, -0.48, 0.62), Vector3(-0.72, -0.2, 0.66), Vector3(-0.15, -0.62, 0.77),
 			Vector3(-0.3, 0.42, 0.86)]:
 		flank.append_array(pair.call(d))
 	out[&"flank"] = flank

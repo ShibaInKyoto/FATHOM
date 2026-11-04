@@ -99,7 +99,8 @@ static func mounts() -> Dictionary:
 		belly.append(SubEquipment.frame_at(Vector3(x, f.keel_y(x, 0.0) + 0.01, 0.0), down))
 	out[&"belly"] = belly
 	out[&"power"] = SubEquipment.frame_at(Vector3(0.3, f.keel_y(0.3, 0.0) + 0.01, 0.0), down)
-	out[&"galvanic"] = Vector3(-1.3, 0.75, 0.075)
+	# Ending short of the dive planes' roots.
+	out[&"galvanic"] = Vector3(-1.3, 0.42, 0.075)
 	return out
 
 

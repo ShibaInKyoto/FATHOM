@@ -7,7 +7,8 @@ extends Node3D
 ## at:<muzzle>[:<pitch>,<yaw>[:<x>,<y>,<z>]] for a close look at one piece of equipment, the camera
 ## that far from its muzzle (at:flare, at:torpedo:0,-90:-0.3,0,1.2); pt:<x>,<y>,<z>[...] the same
 ## round a point in the model's own space.
-## "full" fits every module card once (two of each card that stacks). The aim turns the lamp
+## "full" fits every module card once (two of each card that stacks), "max" every card stacked to its
+## limit. The aim turns the lamp
 ## that many degrees round from the screen's right; "flash" shows the shock emitter firing,
 ## "boost" the Overdrive boosters hot.
 
@@ -20,10 +21,10 @@ func _ready() -> void:
 	var frame := StringName(args[1]) if args.size() > 1 else &"lantern"
 	var skin := SubSkins.find(args[2]) if args.size() > 2 and args[2] != "-" else null
 	var modules: Array[StringName] = []
-	var full := args.size() > 3 and args[3] == "full"
+	var full := args.size() > 3 and (args[3] == "full" or args[3] == "max")
 	if full:
 		for def in Catalog.modules():
-			for k in mini(def.max_stacks, 2):
+			for k in (def.max_stacks if args[3] == "max" else mini(def.max_stacks, 2)):
 				modules.append(def.id)
 	elif args.size() > 3 and args[3] != "-" and args[3] != "":
 		for m in args[3].split(","):
@@ -53,7 +54,8 @@ func _ready() -> void:
 	# Three views in a row: three-quarter, side, top; or one of them close up.
 	var views := [Vector3(-12, -32, 0), Vector3(0, 0, 0), Vector3(80, 0, 0)]
 	var single := {"close": Vector3(-14, -35, 0), "side": Vector3.ZERO, "top": Vector3(80, 0, 0),
-		"rear": Vector3(-10, 140, 0), "far": Vector3(0, 180, 0), "bow": Vector3(-6, -62, 0), "dome": Vector3(-5, -55, 0),
+		"rear": Vector3(-10, 140, 0), "far": Vector3(0, 180, 0), "bow": Vector3(-6, -62, 0),
+		"stern": Vector3(-12, 145, 0), "under": Vector3(-60, -20, 0), "dome": Vector3(-5, -55, 0),
 		"port": Vector3(-4, -80, 0), "upper": Vector3(-30, -40, 0), "lamp": Vector3(-8, -50, 0),
 		"harpoon": Vector3(-10, -30, 0), "sonar": Vector3(35, -30, 0), "compass": Vector3(30, 25, 0),
 		"keel": Vector3(-40, -25, 0)}
