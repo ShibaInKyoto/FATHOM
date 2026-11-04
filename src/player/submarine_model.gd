@@ -44,6 +44,8 @@ var _equipment: Node3D
 var _equip_props: Array[Node3D] = []
 var _muzzles: Dictionary[StringName, Node3D] = {}
 var _lamp_head: Node3D
+## The harpoon's loaded spear, hidden while it is out.
+var _harpoon_spear: Node3D
 var _track_min := -PI * 0.5
 var _track_max := PI * 0.5
 ## How far out the socket sits along the track, sampled evenly from its
@@ -197,6 +199,7 @@ func equipment_root() -> Node3D:
 		_lamp_head.get_parent().remove_child(_lamp_head)
 		_lamp_head.queue_free()
 	_lamp_head = null
+	_harpoon_spear = null
 	lamp_swivel = null
 	lamp_lens = null
 	_equipment = Node3D.new()
@@ -216,6 +219,21 @@ func set_lamp_head(head: Node3D, swivel: Node3D, lens: Node3D) -> void:
 	_lamp_head = head
 	lamp_swivel = swivel
 	lamp_lens = lens
+
+
+func set_harpoon_spear(spear: Node3D) -> void:
+	_harpoon_spear = spear
+
+
+## The spear loaded in the harpoon launcher (null if it has none).
+func harpoon_spear() -> Node3D:
+	return _harpoon_spear
+
+
+## Shows or hides the spear in the launcher (hidden while the harpoon is out).
+func set_harpoon_loaded(loaded: bool) -> void:
+	if _harpoon_spear:
+		_harpoon_spear.visible = loaded
 
 
 ## Bakes the parts under [param node] that share a material into one mesh each.

@@ -42,6 +42,13 @@ func setup(sub: Submarine) -> void:
 	steel.roughness = 0.3
 	_spear = Node3D.new()
 	add_child(_spear)
+	# The spear that flies is the one loaded in the launcher, cards and all.
+	var loaded := sub.model.harpoon_spear() if sub.model else null
+	if loaded:
+		var copy := loaded.duplicate() as Node3D
+		copy.transform = Transform3D(Basis().scaled(Vector3.ONE * 1.8), Vector3(-0.08, 0, 0))
+		copy.visible = true
+		_spear.add_child(copy)
 	var shaft := MeshInstance3D.new()
 	var cone := CylinderMesh.new()
 	cone.top_radius = 0.0
@@ -51,7 +58,10 @@ func setup(sub: Submarine) -> void:
 	shaft.mesh = cone
 	shaft.material_override = steel
 	shaft.rotation_degrees = Vector3(0, 0, -90)
-	_spear.add_child(shaft)
+	if loaded == null:
+		_spear.add_child(shaft)
+	else:
+		shaft.free()
 	var glow := MeshInstance3D.new()
 	glow.mesh = MeshKit.sphere(0.07)
 	glow.material_override = MeshKit.emissive_material(Color(1.0, 0.5, 0.2), 6.0)
@@ -89,6 +99,7 @@ func fire(aim: Vector2) -> void:
 	tip = _origin()
 	_travelled = 0.0
 	visible = true
+	_sub.model.set_harpoon_loaded(false)
 	Audio.play(&"harpoon_fire", -3.0)
 	_sub.level.emit_noise(_sub.pos, 8.0 * _sub.stats.noise_mult, _sub)
 
@@ -127,6 +138,7 @@ func tick(delta: float) -> void:
 			if to.length() <= step + 1.0:
 				state = State.IDLE
 				visible = false
+				_sub.model.set_harpoon_loaded(true)
 				_cooldown = COOLDOWN
 			else:
 				tip += to.normalized() * step

@@ -304,47 +304,140 @@ static func default_track(model: SubmarineModel, length: float, radius: float) -
 
 # --- The harpoon ---------------------------------------------------------------------
 
-## The harpoon launcher: a barrel on a bracket with the spear's head showing
-## and its reel behind. Each Harpoon level lengthens the barrel and adds a
-## sight, a muzzle brake, a brace; Serrated barbs the head, Twin Reel adds a
-## second drum, a Galvanic Barb turns the head copper and lit, Glass Cannon
-## bands the barrel in red.
+## The harpoon launcher: a pneumatic gun on a pedestal, its loaded spear's
+## head at the muzzle, an air tank under the barrel and a reel of cable at
+## the breech. Its cards each change it, and again as they stack: Serrated
+## Harpoon rakes barbs round the head (a second row at two, a saw-toothed
+## muzzle at three); Twin Reel adds a second drum and a cable guide (a winch
+## motor and a longer barrel at two); a Galvanic Barb turns the head copper
+## behind an insulator, wired to a capacitor (a copper coil round the barrel
+## and a lit muzzle at two); Glass Cannon mounts a glass accumulator glowing
+## red over the barrel, with red vents along it. The loaded spear is the one
+## that flies, so what the harpoon throws matches what it carries.
 func _harpoon() -> void:
 	var mount: Variant = _mount(&"harpoon")
 	if mount == null:
 		return
-	var h := 0.085
-	var length := 0.26
-	_put(HullMesh.rounded_box(Vector3(0.2, 0.07, 0.09), 0.02), "metal", mount, _at(Vector3(-0.02, 0.03, 0)))
-	_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.14, 0.001), Vector2(-0.14, 0.036), Vector2(-0.12, 0.04),
-		Vector2(length - 0.03, 0.034), Vector2(length - 0.02, 0.042), Vector2(length, 0.042), Vector2(length, 0.024),
-		Vector2(length, 0.024), Vector2(length - 0.05, 0.024)]), 16), "metal", mount,
-		_at(Vector3(0, h, 0)))
-	var leech := _n(&"leech") > 0
-	var tip := length + 0.11
-	_put(HullMesh.lathe(PackedVector2Array([Vector2(length - 0.02, 0.016), Vector2(length + 0.04, 0.02),
-		Vector2(tip, 0.001)]), 10), "copper" if leech else "steel", mount, _at(Vector3(0, h, 0)))
-	if _n(&"serrated") > 0:
-		for k in 3 + _n(&"serrated"):
-			var a := TAU * k / (3 + _n(&"serrated"))
+	# The main weapon: drawn a size up so it reads at a glance.
+	mount = (mount as Transform3D).scaled_local(Vector3.ONE * 1.35)
+	var serrated := mini(_n(&"serrated"), 3)
+	var reels := mini(_n(&"twin_reel"), 2)
+	var galvanic := mini(_n(&"leech"), 2)
+	var glass := _n(&"glass_cannon") > 0
+	var h := 0.1
+	var muzzle := 0.24 + (0.08 if reels >= 2 else 0.0)
+	# Base plate, pedestal and breech.
+	_put(HullMesh.rounded_box(Vector3(0.2, 0.025, 0.11), 0.008), "metal", mount, _at(Vector3(-0.02, 0.012, 0)))
+	_put(HullMesh.rounded_box(Vector3(0.08, 0.07, 0.07), 0.015), "metal", mount, _at(Vector3(-0.04, 0.055, 0)))
+	_put(HullMesh.rounded_box(Vector3(0.09, 0.075, 0.07), 0.018), "metal", mount, _at(Vector3(-0.14, h, 0)))
+	# The barrel, open at the muzzle, a ring round its mouth.
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.1, 0.026), Vector2(muzzle - 0.03, 0.026),
+		Vector2(muzzle - 0.025, 0.035), Vector2(muzzle, 0.035), Vector2(muzzle, 0.018), Vector2(muzzle, 0.018),
+		Vector2(muzzle - 0.06, 0.018)]), 18), "metal", mount, _at(Vector3(0, h, 0)))
+	# The air tank under it, a brass gauge on its side.
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.13, 0.001), Vector2(-0.12, 0.018), Vector2(-0.1, 0.021),
+		Vector2(0.1, 0.021), Vector2(0.12, 0.018), Vector2(0.13, 0.001)]), 14), "steel", mount,
+		_at(Vector3(0.0, h - 0.048, 0)))
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.004, 0.016), Vector2(0.006, 0.016), Vector2(0.006, 0.001)]), 12),
+		"brass", mount, _at(Vector3(-0.06, h - 0.048, 0.02), Vector3(0, -90, 0)))
+	for x: float in [-0.08, 0.08]:
+		_put(HullMesh.rounded_box(Vector3(0.016, 0.07, 0.05), 0.005, 1), "metal", mount, _at(Vector3(x, h - 0.03, 0)))
+	# The reel: a drum of cable on the breech's side, a second on the other for Twin Reel.
+	var drum_r := 0.046 + (0.012 if reels >= 2 else 0.0)
+	for k in 1 + mini(reels, 1):
+		var z := 0.075 if k == 0 else -0.075
+		var spin := Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(-0.14, h, z))
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.022, 0.001), Vector2(-0.022, drum_r), Vector2(-0.016, drum_r),
+			Vector2(-0.016, drum_r * 0.6), Vector2(0.016, drum_r * 0.6), Vector2(0.016, drum_r), Vector2(0.022, drum_r),
+			Vector2(0.022, 0.001)]), 20), "metal", mount, spin)
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.016, drum_r * 0.6), Vector2(-0.015, drum_r * 0.85),
+			Vector2(0.015, drum_r * 0.85), Vector2(0.016, drum_r * 0.6)]), 20), "rubber", mount, spin)
+	if reels >= 1:
+		# A cable guide over the breech: a sheave on a little arch.
+		_put(HullMesh.pipe(PackedVector3Array([Vector3(-0.17, h + 0.035, -0.04), Vector3(-0.15, h + 0.08, 0.0),
+			Vector3(-0.17, h + 0.035, 0.04)]), 0.006, 6, 0.03), "steel", mount)
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.008, 0.001), Vector2(-0.008, 0.02), Vector2(0.008, 0.02),
+			Vector2(0.008, 0.001)]), 12), "steel", mount, Transform3D(Basis(Vector3.UP, PI * 0.5),
+			Vector3(-0.15, h + 0.07, 0.0)))
+	if reels >= 2:
+		# The winch motor behind the drums.
+		var motor := _at(Vector3(-0.22, h, 0))
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.05, 0.001), Vector2(-0.05, 0.032), Vector2(0.04, 0.032),
+			Vector2(0.04, 0.001)]), 16), "steel", mount, motor)
+		for k in 4:
+			_put(HullMesh.lathe(_torus(0.034, 0.004, 6), 16), "metal", mount, motor * _at(Vector3(-0.035 + k * 0.022, 0, 0)))
+	if galvanic >= 1:
+		# A lead from the head back along the barrel to a capacitor on the breech.
+		_put(HullMesh.pipe(PackedVector3Array([Vector3(muzzle - 0.04, h + 0.03, 0), Vector3(-0.08, h + 0.03, 0),
+			Vector3(-0.12, h + 0.045, 0)]), 0.005, 6, 0.02), "copper", mount)
+		_put(HullMesh.rounded_box(Vector3(0.05, 0.03, 0.045), 0.008), "olive", mount, _at(Vector3(-0.14, h + 0.052, 0)))
+		_led(mount, Vector3(-0.114, h + 0.055, 0.0), POWER, 0.008)
+	if galvanic >= 2:
+		var coil := PackedVector3Array()
+		for k in 41:
+			var a := TAU * 4.0 * k / 40.0
+			coil.append(Vector3(lerpf(muzzle * 0.35, muzzle - 0.04, k / 40.0), h + cos(a) * 0.032, sin(a) * 0.032))
+		_put(HullMesh.pipe(coil, 0.0045, 5), "copper", mount)
+		_put(HullMesh.lathe(_torus(0.036, 0.005, 6), 18, 0.0), POWER.to_html(), mount, _at(Vector3(muzzle, h, 0)))
+	if serrated >= 3:
+		# A saw-toothed crown round the muzzle.
+		for k in 8:
+			var a := TAU * k / 8.0
 			var dir := Vector3(0, cos(a), sin(a))
-			_put(HullMesh.pipe(PackedVector3Array([Vector3(length + 0.06, h, 0) + dir * 0.012,
-				Vector3(length + 0.02, h, 0) + dir * 0.04]), 0.005, 4), "steel", mount)
-	if leech:
-		_put(HullMesh.lathe(_torus(0.026, 0.005, 8), 16, 0.0), POWER.to_html(), mount, _at(Vector3(length + 0.03, h, 0)))
-	var drums := 1 + mini(_n(&"twin_reel"), 1)
-	for k in drums:
-		var z := (0.06 if k == 0 else -0.06)
-		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.025, 0.001), Vector2(-0.025, 0.055), Vector2(-0.018, 0.055),
-			Vector2(-0.018, 0.035), Vector2(0.018, 0.035), Vector2(0.018, 0.055), Vector2(0.025, 0.055),
-			Vector2(0.025, 0.001)]), 18), "metal", mount, Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(-0.08, h, z)))
-		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.018, 0.034), Vector2(-0.017, 0.042), Vector2(0.017, 0.042),
-			Vector2(0.018, 0.034)]), 18), "rubber", mount, Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(-0.08, h, z)))
-	if _n(&"glass_cannon") > 0:
-		for x: float in [0.05, length - 0.08]:
-			_put(HullMesh.lathe(_torus(0.038, 0.006, 8), 16, 0.0), WEAPON.to_html(), mount, _at(Vector3(x, h, 0)))
-	_led(mount, Vector3(-0.1, h + 0.04, 0.0), WEAPON)
-	m.add_muzzle(&"harpoon", mount * Vector3(length, h, 0))
+			_put(HullMesh.pipe(PackedVector3Array([Vector3(muzzle - 0.005, h, 0) + dir * 0.032,
+				Vector3(muzzle + 0.025, h, 0) + dir * 0.026]), 0.006, 4), "steel", mount)
+	if glass:
+		# The glass accumulator, its core glowing, and red vents along the barrel.
+		var tube := _at(Vector3(0.02, h + 0.055, 0))
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.09, 0.001), Vector2(-0.085, 0.018), Vector2(0.085, 0.018),
+			Vector2(0.09, 0.001)]), 14), "glass", mount, tube)
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.07, 0.001), Vector2(-0.065, 0.009), Vector2(0.065, 0.009),
+			Vector2(0.07, 0.001)]), 10, 0.0), WEAPON.to_html(), mount, tube)
+		for x: float in [-0.09, 0.09]:
+			_put(HullMesh.rounded_box(Vector3(0.016, 0.04, 0.03), 0.005, 1), "metal", mount, _at(Vector3(x + 0.02,
+				h + 0.035, 0)))
+		for k in 3:
+			for sgn: float in [-1.0, 1.0]:
+				_put(HullMesh.rounded_box(Vector3(0.018, 0.006, 0.003), 0.001, 1), WEAPON.to_html(), mount,
+					_at(Vector3(0.03 + k * 0.035, h, sgn * 0.0265)))
+	_led(mount, Vector3(-0.14, h + 0.04, 0.0) if galvanic == 0 else Vector3(-0.185, h + 0.02, 0.0), WEAPON)
+	# The loaded spear: kept apart, so it can be hidden while the harpoon is out.
+	var spear := Node3D.new()
+	spear.name = "Spear"
+	spear.transform = mount * _at(Vector3(muzzle + 0.005, h, 0))
+	root.add_child(spear)
+	_spear(spear, serrated, galvanic)
+	m.merge_under(spear)
+	m.set_harpoon_spear(spear)
+	m.add_muzzle(&"harpoon", mount * Vector3(muzzle + 0.1, h, 0))
+
+
+## The spear's head, along +X from [param node]'s origin: a steel point with
+## two flukes, raked barbs for Serrated Harpoon (longer and in two rows as it
+## stacks), copper behind an insulator collar for a Galvanic Barb.
+func _spear(node: Node3D, serrated: int, galvanic: int) -> void:
+	var here := Transform3D.IDENTITY
+	var metal := "copper" if galvanic > 0 else "steel"
+	var length := 0.11 * (1.0 + 0.25 * maxi(serrated - 1, 0))
+	_put(HullMesh.pipe(PackedVector3Array([Vector3(-0.06, 0, 0), Vector3(0.02, 0, 0)]), 0.009, 8), "steel", here,
+		Transform3D.IDENTITY, node)
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(0.0, 0.001), Vector2(0.0, 0.017), Vector2(length * 0.3, 0.02),
+		Vector2(length, 0.001)]), 12), metal, here, Transform3D.IDENTITY, node)
+	if galvanic > 0:
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.018, 0.001), Vector2(-0.018, 0.016), Vector2(-0.002, 0.016),
+			Vector2(-0.002, 0.001)]), 12), "ceramic", here, Transform3D.IDENTITY, node)
+	for k in 2:
+		var sgn := 1.0 if k == 0 else -1.0
+		_put(HullMesh.rounded_box(Vector3(0.04, 0.003, 0.02), 0.001, 1), "steel", here,
+			_at(Vector3(0.01, 0, sgn * 0.022)), node)
+	var rows := mini(serrated, 2)
+	for row in rows:
+		var x := length * (0.25 + 0.35 * row)
+		for k in 3:
+			var a := TAU * k / 3.0 + row * PI / 3.0
+			var out := Vector3(0, cos(a), sin(a))
+			_put(HullMesh.pipe(PackedVector3Array([Vector3(x + 0.02, 0, 0) + out * 0.012,
+				Vector3(x - 0.03, 0, 0) + out * 0.055]), 0.007, 5), metal, here, Transform3D.IDENTITY, node)
 
 
 # --- The tools -----------------------------------------------------------------------
