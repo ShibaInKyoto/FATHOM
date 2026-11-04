@@ -99,13 +99,18 @@ static func mounts() -> Dictionary:
 		deck.append_array([f.mount(p.x, p.y), f.mount(p.x, 1.0 - p.y)])
 	out[&"deck"] = deck
 	var flank: Array = []
-	for x: float in [-1.2, -0.6, 0.0, 0.6]:
-		flank.append_array([f.mount(x, 0.12), f.mount(x, 0.88)])
+	# High on the flanks, between the lettering and the deck's shoulder.
+	for x: float in [-1.25, -0.65, -0.05, 0.55]:
+		flank.append_array([f.mount(x, 0.32), f.mount(x, 0.68)])
 	out[&"flank"] = flank
 	var belly: Array = []
 	for x: float in [-0.85, -0.3, 0.25]:
 		belly.append(SubEquipment.frame_at(Vector3(x, -0.6, 0.0), Vector3.DOWN))
 	out[&"belly"] = belly
+	# The battery pack strapped outboard on the frame's near side, between its posts.
+	out[&"power"] = SubEquipment.frame_at(Vector3(-0.8, -0.66, 0.535), Vector3.BACK)
+	# The Galvanic Hull's electrode studs: from x, to x, how far round.
+	out[&"galvanic"] = Vector3(-1.3, 0.75, 0.19)
 	return out
 
 

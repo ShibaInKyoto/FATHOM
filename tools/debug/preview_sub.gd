@@ -2,12 +2,14 @@ extends Node3D
 ## Debug helper: one submarine frame close up under studio light, from a
 ## three-quarter angle, side on and from above, with its equipment fitted.
 ## Usage: xvfb-run godot --path . res://tools/debug/preview_sub.tscn -- <out.png> <frame> [skin id|-]
-## [modules,...|-|full] [view|-] [aim degrees|-] [flash]
+## [modules,...|-|full] [view|-] [aim degrees|-] [flash|boost]
 ## Views: close, side, far, rear, top, bow, dome, port, upper (one view, filling the frame), or
 ## at:<muzzle>[:<pitch>,<yaw>[:<x>,<y>,<z>]] for a close look at one piece of equipment, the camera
-## that far from its muzzle (at:flare, at:torpedo:0,-90:-0.3,0,1.2).
+## that far from its muzzle (at:flare, at:torpedo:0,-90:-0.3,0,1.2); pt:<x>,<y>,<z>[...] the same
+## round a point in the model's own space.
 ## "full" fits every module card once (two of each card that stacks). The aim turns the lamp
-## that many degrees round from the screen's right; "flash" shows the shock emitter firing.
+## that many degrees round from the screen's right; "flash" shows the shock emitter firing,
+## "boost" the Overdrive boosters hot.
 
 var _frames := 0
 var _aims: Array = []
@@ -58,7 +60,7 @@ func _ready() -> void:
 	var one: String = args[4] if args.size() > 4 else ""
 	if single.has(one):
 		views = [single[one]]
-	var focus := one.substr(3).get_slice(":", 0) if one.begins_with("at:") else ""
+	var focus := one.substr(3).get_slice(":", 0) if one.begins_with("at:") or one.begins_with("pt:") else ""
 	if focus != "":
 		var turn := one.get_slice(":", 2).split_floats(",") if one.count(":") > 1 else PackedFloat64Array([30, -40])
 		views = [Vector3(turn[0], turn[1], 0)]
@@ -74,6 +76,8 @@ func _ready() -> void:
 		if args.size() > 6 and args[6] == "flash":
 			m.flash_shock()
 			m.animate(0.0, 0.0)
+		elif args.size() > 6 and args[6] == "boost":
+			m.animate(2.0, 1.6)
 		if args.size() > 5 and args[5] != "-":
 			var a := deg_to_rad(float(args[5]))
 			_aims.append([m, Vector3(cos(a), sin(a), 0.0)])
@@ -95,12 +99,17 @@ func _ready() -> void:
 		cam.position = Vector3(0.0, -0.2, 3.4)
 	elif one == "compass":
 		cam.position = Vector3(0.96, 0.42, 1.15)
-	if focus != "" and last.muzzle(StringName(focus)) != null:
+	if focus != "":
+		var target: Variant = last.muzzle(StringName(focus))
+		if one.begins_with("pt:"):
+			var p := focus.split_floats(",")
+			target = last.global_transform * Vector3(p[0], p[1], p[2])
 		var off := Vector3(-0.1, -0.07, 1.0)
 		if one.count(":") > 2:
 			var o := one.get_slice(":", 3).split_floats(",")
 			off = Vector3(o[0], o[1], o[2])
-		cam.position = (last.muzzle(StringName(focus)) as Vector3) + off
+		if target != null:
+			cam.position = (target as Vector3) + off
 	cam.fov = 42
 	add_child(cam)
 

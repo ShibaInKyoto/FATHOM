@@ -52,6 +52,9 @@ static func mounts() -> Dictionary:
 	out[&"flank"] = flank
 	out[&"belly"] = [on.call(Vector3(-0.5, -0.87, 0.0)), on.call(Vector3(0.42, -0.9, 0.0)),
 		on.call(Vector3(-0.78, -0.62, 0.0))]
+	# The battery pack on the outboard face of the near battery box.
+	out[&"power"] = SubEquipment.frame_at(Vector3(-0.19, -1.09, 0.53), Vector3.BACK)
+	out[&"galvanic"] = Vector3(-0.62, 0.5, 0.19)
 	return out
 
 

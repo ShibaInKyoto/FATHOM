@@ -95,9 +95,11 @@ static func mounts() -> Dictionary:
 		flank.append_array([f.mount(x, 0.14), f.mount(x, 0.86)])
 	out[&"flank"] = flank
 	var belly: Array = []
-	for x: float in [0.35, -0.95, -1.35]:
+	for x: float in [-0.95, -1.35, 0.8]:
 		belly.append(SubEquipment.frame_at(Vector3(x, f.keel_y(x, 0.0) + 0.01, 0.0), down))
 	out[&"belly"] = belly
+	out[&"power"] = SubEquipment.frame_at(Vector3(0.3, f.keel_y(0.3, 0.0) + 0.01, 0.0), down)
+	out[&"galvanic"] = Vector3(-1.3, 0.75, 0.075)
 	return out
 
 

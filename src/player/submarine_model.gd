@@ -20,6 +20,8 @@ var hull_material: ShaderMaterial
 ## Where equipment goes on this frame (see SubEquipment): a Transform3D or an
 ## Array of them for each mount or row of mounts.
 var mounts: Dictionary = {}
+## The hull's skin (for pieces that follow its curve), or null for a frame without one.
+var hull_skin: HullFairing
 ## The lamp's track, built into the frame: a pivot at the bow that swings
 ## round to the aim, and the socket on it that the lamp head (equipment) fits
 ## into. Past the ends of the track the head tilts on in its socket; its
@@ -64,6 +66,9 @@ var _pulse := false
 var _shock_glow: StandardMaterial3D
 var _shock_base := 0.0
 var _shock_flash := 0.0
+## The Overdrive boosters' glow and how hot it is (0..1).
+var _boost_glow: StandardMaterial3D
+var _boost_heat := 0.0
 
 
 ## Builds the frame's model in [param skin] (its factory paint if null).
@@ -84,15 +89,19 @@ func build(frame_id: StringName, skin: SubSkins.Livery = null) -> void:
 		_:
 			LanternBuild.build(self)
 	_merge_static()
+	hull_skin = null
 	match frame_id:
 		&"mako":
 			mounts = MakoBuild.mounts()
+			hull_skin = MakoBuild.fairing()
 		&"bathysphere":
 			mounts = BathysphereBuild.mounts()
+			hull_skin = BathysphereBuild.fairing()
 		&"whisper":
 			mounts = SubEquipment.default_mounts(3.8, 0.45)
 		_:
 			mounts = LanternBuild.mounts()
+			hull_skin = LanternBuild.fairing()
 	_frame_paints = _paints.size()
 
 
@@ -163,6 +172,10 @@ func animate(delta: float, thrust: float) -> void:
 	_strobe_t += delta
 	if strobe:
 		strobe.visible = fmod(_strobe_t, 1.6) < 0.08
+	if _boost_glow:
+		var target := clampf((thrust - 1.05) / 0.5, 0.0, 1.0)
+		_boost_heat = lerpf(_boost_heat, target, 1.0 - exp(-5.0 * delta))
+		_boost_glow.emission_energy_multiplier = 0.8 + 7.0 * _boost_heat
 	if _shock_glow:
 		_shock_flash = maxf(_shock_flash - delta * 2.2, 0.0)
 		var flicker := 0.8 + 0.2 * sin(_strobe_t * 23.0) * sin(_strobe_t * 7.3)
@@ -210,6 +223,7 @@ func equipment_root() -> Node3D:
 	_lamp_head = null
 	_harpoon_spear = null
 	_shock_glow = null
+	_boost_glow = null
 	lamp_swivel = null
 	lamp_lens = null
 	_equipment = Node3D.new()
@@ -235,6 +249,11 @@ func set_lamp_head(head: Node3D, swivel: Node3D, lens: Node3D) -> void:
 func set_shock_glow(mat: StandardMaterial3D) -> void:
 	_shock_glow = mat
 	_shock_base = mat.emission_energy_multiplier
+
+
+## The Overdrive boosters' glowing parts, heated up by animate() while boosting.
+func set_boost_glow(mat: StandardMaterial3D) -> void:
+	_boost_glow = mat
 
 
 ## Flares the shock emitter (as its pulse goes off).

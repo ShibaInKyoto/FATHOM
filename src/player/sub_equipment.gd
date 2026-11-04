@@ -53,6 +53,7 @@ static func default_mounts(length: float, radius: float) -> Dictionary:
 	for x: float in [-0.4, 0.0, 0.4]:
 		belly.append(frame_at(Vector3(x * h, -radius, 0.0), Vector3.DOWN))
 	out[&"belly"] = belly
+	out[&"power"] = frame_at(Vector3(-h * 0.1, -radius, 0.0), Vector3.DOWN)
 	return out
 
 
@@ -70,6 +71,12 @@ func _build() -> void:
 	_materials()
 	for row: StringName in [&"deck", &"flank", &"belly"]:
 		_free[row] = (m.mounts.get(row, []) as Array).duplicate()
+	# Deck pieces fill the near side (towards the camera) before the far.
+	var near: Array = []
+	var far: Array = []
+	for t: Transform3D in _free[&"deck"]:
+		(near if t.origin.z > -0.001 else far).append(t)
+	_free[&"deck"] = near + far
 	_lamp()
 	_harpoon()
 	_sonar()
@@ -429,87 +436,326 @@ func _sonar() -> void:
 
 # --- Module cards --------------------------------------------------------------------
 
-## Bolted armour plates along the flanks, a pair for each Reinforced Plating
-## card; Repair Nanites dock little pods on the deck.
+## Reinforced Plating: a pair of armour plates for each card, low on the
+## flanks, the first midships and the rest spreading fore and aft. On a hull
+## with a skin they are curved to it, chamfered and bolted; otherwise flat.
+## Repair Nanites put a canister of glowing nanite fluid on the deck, a hose
+## into the hull, and at two a little repair crawler perched beside it. The
+## Galvanic Hull sets a row of electrode studs along each flank (see _galvanic).
 func _armour() -> void:
-	for k in _n(&"plating"):
-		for mount: Transform3D in _take_pair(&"flank"):
-			_put(HullMesh.rounded_box(Vector3(0.32, 0.02, 0.22), 0.008), "metal", mount, _at(Vector3(0, 0.008, 0)))
-			_put(HullMesh.rounded_box(Vector3(0.3, 0.022, 0.2), 0.01), "paint", mount, _at(Vector3(0, 0.016, 0)))
-			for c: Vector2 in [Vector2(0.12, 0.075), Vector2(-0.12, 0.075), Vector2(0.12, -0.075), Vector2(-0.12, -0.075)]:
-				_put(HullMesh.bolt_head(0.01), "steel", mount, _at(Vector3(c.x, 0.027, c.y), Vector3(0, 0, 90)))
-			_led(mount, Vector3(0.0, 0.029, 0.0), HULL, 0.008)
-	for k in _n(&"nanites"):
-		var mount: Variant = _take(&"deck")
-		if mount == null:
-			break
-		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.01, 0.06), Vector2(0.02, 0.06), Vector2(0.025, 0.05),
-			Vector2(0.025, 0.001)]), 16), "metal", mount, _stand(Vector3.ZERO))
-		_put(HullMesh.lathe(_cap(0.05, 8), 16), "glass", mount, _stand(Vector3(0, 0.025, 0)))
-		_put(HullMesh.lathe(_ball(0.025, 8), 12, 0.0), HULL.to_html(), mount, _at(Vector3(0, 0.045, 0)))
+	var plates := mini(_n(&"plating"), 4)
+	if plates > 0:
+		var flank: Array = m.mounts.get(&"flank", [])
+		var mid := 0.0
+		for t: Transform3D in flank:
+			mid += t.origin.x / flank.size()
+		var pairs: Array = []
+		for k in flank.size() / 2:
+			pairs.append([flank[k * 2], flank[k * 2 + 1]])
+		pairs.sort_custom(func(a: Array, b: Array) -> bool:
+			return absf((a[0] as Transform3D).origin.x - mid) < absf((b[0] as Transform3D).origin.x - mid))
+		for k in mini(plates, pairs.size()):
+			for mount: Transform3D in pairs[k]:
+				_fitted_once("plate/%s/%s" % [mount.origin, k == 0], _plate.bind(mount, k == 0))
+	var galvanic := mini(_n(&"shock_hull"), 2)
+	if galvanic > 0:
+		_fitted_once("galvanic/%d" % galvanic, _galvanic)
+	_nanites()
 
 
-## Under the belly: a capacitor for each Capacitor Bank, a glowing tank for the Bio-Converter, an ink bladder for
-## the Ink Sac, a scoop for the Scavenger Protocol.
+## One armour plate over [param mount], with a light on the first pair.
+func _plate(mount: Transform3D, lit: bool) -> void:
+	var f := m.hull_skin
+	if f == null:
+		_put(HullMesh.rounded_box(Vector3(0.34, 0.03, 0.2), 0.008), "armor", mount, _at(Vector3(0, 0.01, 0)))
+		for c: Vector2 in [Vector2(0.14, 0.075), Vector2(-0.14, 0.075), Vector2(0.14, -0.075), Vector2(-0.14, -0.075)]:
+			_put(HullMesh.bolt_head(0.01), "steel", mount, _at(Vector3(c.x, 0.025, c.y), Vector3(0, 0, 90)))
+		if lit:
+			_led(mount, Vector3(0.15, 0.027, 0.0), HULL, 0.008)
+		return
+	var uv := _skin_uv(mount.origin)
+	var hx := 0.19
+	var hv := 0.085 / _arc_rate(uv)
+	var lift := 0.016
+	var bevel := Vector2(0.012, 0.012 / _arc_rate(uv))
+	var face := func(u: float, w: float) -> Vector3:
+		return f.on_skin(uv.x + lerpf(-hx + bevel.x, hx - bevel.x, u), uv.y + lerpf(-hv + bevel.y, hv - bevel.y, w),
+			lift)
+	_put(HullMesh.surface(face, 10, 6), "armor", Transform3D.IDENTITY)
+	# The chamfer round its edge, from the skin up to the face.
+	var corners := [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]
+	var centre := f.on_skin(uv.x, uv.y, 0.0)
+	for k in 4:
+		var a: Vector2 = corners[k]
+		var b: Vector2 = corners[(k + 1) % 4]
+		var edge := func(u: float, t: float) -> Vector3:
+			var c := a.lerp(b, u)
+			var low := f.on_skin(uv.x + c.x * hx, uv.y + c.y * hv, 0.0)
+			var high := f.on_skin(uv.x + c.x * (hx - bevel.x), uv.y + c.y * (hv - bevel.y), lift)
+			return low.lerp(high, t)
+		var n := (edge.call(0.55, 0.5) - edge.call(0.45, 0.5) as Vector3).cross(edge.call(0.5, 0.6) - edge.call(0.5, 0.4))
+		var out: Vector3 = (edge.call(0.5, 0.0) as Vector3) - centre
+		_put(HullMesh.surface(edge, 10 if k % 2 == 0 else 6, 1, n.dot(out) < 0.0), "armor", Transform3D.IDENTITY)
+	# Bolts round the face.
+	for c: Vector2 in [Vector2(-0.8, -0.62), Vector2(0.0, -0.62), Vector2(0.8, -0.62), Vector2(-0.8, 0.62),
+			Vector2(0.0, 0.62), Vector2(0.8, 0.62)]:
+		var x := uv.x + c.x * hx
+		var v := uv.y + c.y * hv
+		var nrm := f.normal_at(x, v)
+		_put(HullMesh.bolt_head(0.009), "steel", Transform3D(Basis(Quaternion(Vector3.RIGHT, nrm)),
+			f.on_skin(x, v, lift - 0.001)))
+	if lit:
+		var x := uv.x + 0.9 * hx
+		_put(HullMesh.lathe(_ball(0.008, 6), 8, 0.0), HULL.to_html(), Transform3D(Basis(),
+			f.on_skin(x, uv.y, lift + 0.002)))
+
+
+## Where [param at] lies on the hull's skin: its x and how far round (v).
+func _skin_uv(at: Vector3) -> Vector2:
+	var f := m.hull_skin
+	var best := 0.0
+	var dist := INF
+	for k in 96:
+		var v := k / 96.0
+		var d := f.on_skin(at.x, v, 0.0).distance_squared_to(at)
+		if d < dist:
+			dist = d
+			best = v
+	var step := 1.0 / 96.0
+	for k in 12:
+		step *= 0.5
+		for v: float in [best - step, best + step]:
+			var d := f.on_skin(at.x, v, 0.0).distance_squared_to(at)
+			if d < dist:
+				dist = d
+				best = v
+	return Vector2(at.x, best)
+
+
+## How far along the skin one unit of v goes at [param uv].
+func _arc_rate(uv: Vector2) -> float:
+	var f := m.hull_skin
+	return maxf(f.on_skin(uv.x, uv.y + 0.01, 0.0).distance_to(f.on_skin(uv.x, uv.y - 0.01, 0.0)) / 0.02, 0.05)
+
+
+## The Galvanic Hull: ceramic studs with live copper tips in a row along each
+## flank (the frame's "galvanic" line: from x, to x, how far round), and at
+## two arcs leaping between them. Without a line, live strips on the flanks.
+func _galvanic() -> void:
+	var level := mini(_n(&"shock_hull"), 2)
+	if level == 0:
+		return
+	var line: Variant = m.mounts.get(&"galvanic")
+	if line == null or m.hull_skin == null:
+		for mount: Transform3D in m.mounts.get(&"flank", []):
+			_put(HullMesh.pipe(PackedVector3Array([Vector3(-0.2, 0.012, 0), Vector3(0.2, 0.012, 0)]), 0.006, 6), "arc",
+				mount)
+			for x: float in [-0.2, 0.2]:
+				_put(HullMesh.lathe(_cap(0.016, 5), 8), "ceramic", mount, _stand(Vector3(x, 0.0, 0)))
+		return
+	var f := m.hull_skin
+	var l := line as Vector3
+	var count := maxi(roundi((l.y - l.x) / 0.19), 2) + 1
+	for v: float in [l.z, 1.0 - l.z]:
+		var tips := PackedVector3Array()
+		for k in count:
+			var x := lerpf(l.x, l.y, float(k) / (count - 1))
+			var nrm := f.normal_at(x, v)
+			var t := Transform3D(Basis(Quaternion(Vector3.RIGHT, nrm)), f.on_skin(x, v, -0.004))
+			_put(HullMesh.lathe(PackedVector2Array([Vector2(0.0, 0.001), Vector2(0.0, 0.014), Vector2(0.008, 0.014),
+				Vector2(0.012, 0.01), Vector2(0.016, 0.014), Vector2(0.02, 0.014), Vector2(0.024, 0.008),
+				Vector2(0.026, 0.001)]), 10), "ceramic", t)
+			_put(HullMesh.lathe(PackedVector2Array([Vector2(0.024, 0.001), Vector2(0.024, 0.006), Vector2(0.03, 0.006),
+				Vector2(0.032, 0.001)]), 8), "copper", t)
+			_put(HullMesh.lathe(_ball(0.0055, 6), 8, 0.0), "arc", t * _at(Vector3(0.036, 0, 0)))
+			tips.append(t * Vector3(0.036, 0, 0))
+		if level >= 2:
+			var jag := [0.0, 0.011, -0.008, 0.013, -0.01, 0.006, 0.0]
+			for k in count - 1:
+				var arc := PackedVector3Array()
+				var nrm := f.normal_at(lerpf(l.x, l.y, (k + 0.5) / (count - 1)), v)
+				var side := nrm.cross(Vector3.RIGHT).normalized()
+				for j in jag.size():
+					var s := float(j) / (jag.size() - 1)
+					arc.append(tips[k].lerp(tips[k + 1], s) + side * jag[(j + k) % jag.size()] + nrm * 0.008 * sin(s * PI))
+				_put(HullMesh.pipe(arc, 0.0022, 4), "arc", Transform3D.IDENTITY)
+		var lead := f.on_skin(l.y, v, 0.03)
+		_put(HullMesh.lathe(_ball(0.008, 6), 8, 0.0), WEAPON.to_html(), Transform3D(Basis(), lead + Vector3(0.03, 0, 0)))
+
+
+## Repair Nanites: a canister of glowing nanite fluid on the deck, a hose
+## into the hull, and with two cards a repair crawler perched beside it.
+func _nanites() -> void:
+	var level := mini(_n(&"nanites"), 2)
+	if level == 0:
+		return
+	var mount: Variant = _take(&"deck")
+	if mount == null:
+		return
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.01, 0.001), Vector2(-0.01, 0.046), Vector2(0.018, 0.046),
+		Vector2(0.024, 0.04), Vector2(0.024, 0.001)]), 18), "metal", mount, _stand(Vector3.ZERO))
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(0.02, 0.001), Vector2(0.02, 0.036), Vector2(0.13, 0.036),
+		Vector2(0.13, 0.001)]), 18), "glass", mount, _stand(Vector3.ZERO))
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(0.024, 0.001), Vector2(0.024, 0.03), Vector2(0.104, 0.03),
+		Vector2(0.11, 0.024), Vector2(0.112, 0.001)]), 14, 0.0), "nanite", mount, _stand(Vector3.ZERO))
+	for y: float in [0.02, 0.13]:
+		_put(HullMesh.lathe(_torus(0.037, 0.005, 6), 18), "brass", mount, _stand(Vector3(0, y, 0)))
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(0.13, 0.001), Vector2(0.13, 0.03), Vector2(0.145, 0.024),
+		Vector2(0.15, 0.01), Vector2(0.152, 0.001)]), 16), "brass", mount, _stand(Vector3.ZERO))
+	for k in 3:
+		var a := TAU * k / 3.0
+		_put(HullMesh.pipe(PackedVector3Array([Vector3(cos(a) * 0.037, 0.02, sin(a) * 0.037),
+			Vector3(cos(a) * 0.037, 0.13, sin(a) * 0.037)]), 0.003, 4), "brass", mount)
+	# The feed hose down into the hull.
+	_put(HullMesh.pipe(PackedVector3Array([Vector3(-0.045, 0.03, 0.0), Vector3(-0.08, 0.03, 0.0),
+		Vector3(-0.09, -0.02, 0.0)]), 0.007, 6, 0.02), "rubber", mount)
+	_led(mount, Vector3(0.042, 0.03, 0.0), HULL, 0.008)
+	if level >= 2:
+		_crawler(mount * _at(Vector3(0.1, 0.0, 0.02), Vector3(0, -30, 0)))
+
+
+## A little repair crawler at [param t]: a domed body on four jointed legs,
+## a glowing eye and a welding arm.
+func _crawler(t: Transform3D) -> void:
+	var body := t * _at(Vector3(0, 0.032, 0))
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.026, 0.001), Vector2(-0.024, 0.012), Vector2(-0.012, 0.022),
+		Vector2(0.012, 0.022), Vector2(0.024, 0.012), Vector2(0.026, 0.001)]), 14), "steel", body,
+		Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3.ZERO))
+	_put(HullMesh.rounded_box(Vector3(0.05, 0.012, 0.04), 0.005), "safety", body, _at(Vector3(0, -0.002, 0)))
+	for sx: float in [-1.0, 1.0]:
+		for sz: float in [-1.0, 1.0]:
+			var hip := Vector3(sx * 0.015, -0.002, sz * 0.016)
+			var knee := Vector3(sx * 0.032, 0.012, sz * 0.034)
+			var foot := Vector3(sx * 0.04, -0.03, sz * 0.042)
+			_put(HullMesh.pipe(PackedVector3Array([hip, knee, foot]), 0.0028, 4), "metal", body)
+	_put(HullMesh.lathe(_ball(0.006, 6), 8, 0.0), HULL.to_html(), body, _at(Vector3(0.026, 0.002, 0)))
+	_put(HullMesh.pipe(PackedVector3Array([Vector3(0.02, 0.006, -0.012), Vector3(0.036, 0.014, -0.014),
+		Vector3(0.05, -0.008, -0.014)]), 0.0022, 4), "steel", body)
+	_put(HullMesh.lathe(_ball(0.003, 4), 6, 0.0), "arc", body, _at(Vector3(0.051, -0.011, -0.014)))
+
+
+# --- Power cards ---------------------------------------------------------------------
+
+## The Capacitor Bank: one battery pack at the frame's "power" mount, longer
+## with each card, a charge light lit for each; the Bio-Converter on the deck
+## (see _bioreactor); under the belly the Ink Sac's bladder and the
+## Scavenger Protocol's scoop.
 func _power() -> void:
-	for k in _n(&"capacitor"):
-		var mount: Variant = _take(&"belly")
-		if mount == null:
-			break
-		for z: float in [-0.045, 0.045]:
-			var at := _at(Vector3(0, 0.05, z))
-			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.12, 0.001), Vector2(-0.12, 0.035), Vector2(0.12, 0.035),
-				Vector2(0.12, 0.001)]), 14), "metal", mount, at)
-			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.03, 0.035), Vector2(-0.03, 0.037), Vector2(0.03, 0.037),
-				Vector2(0.03, 0.035)]), 14, 0.0), POWER.to_html(), mount, at)
-	if _n(&"bioconverter") > 0:
-		var mount: Variant = _take(&"belly")
-		if mount != null:
-			var at := _at(Vector3(0, 0.06, 0))
-			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.13, 0.001), Vector2(-0.12, 0.045), Vector2(0.12, 0.045),
-				Vector2(0.13, 0.001)]), 16), "glass", mount, at)
-			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.11, 0.001), Vector2(-0.1, 0.035), Vector2(0.1, 0.035),
-				Vector2(0.11, 0.001)]), 12, 0.0), "bio", mount, at)
-			for x: float in [-0.13, 0.13]:
-				_put(HullMesh.lathe(_torus(0.047, 0.008, 6), 14), "metal", mount, at * _at(Vector3(x, 0, 0)))
+	var cells := mini(_n(&"capacitor"), 4)
+	var mount: Variant = _mount(&"power")
+	if cells > 0 and mount == null:
+		mount = _take(&"belly")
+	if cells > 0 and mount != null:
+		_battery_pack(mount, cells)
+	_bioreactor()
 	if _n(&"ink") > 0:
-		var mount: Variant = _take(&"belly")
-		if mount != null:
+		var belly: Variant = _take(&"belly")
+		if belly != null:
 			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.12, 0.001), Vector2(-0.09, 0.05), Vector2(0.02, 0.065),
-				Vector2(0.1, 0.04), Vector2(0.14, 0.012), Vector2(0.16, 0.012), Vector2(0.16, 0.001)]), 16), "ink", mount,
+				Vector2(0.1, 0.04), Vector2(0.14, 0.012), Vector2(0.16, 0.012), Vector2(0.16, 0.001)]), 16), "ink", belly,
 				_at(Vector3(0, 0.065, 0)))
-			_led(mount, Vector3(0.0, 0.13, 0.0), UTIL, 0.008)
+			_led(belly, Vector3(0.0, 0.13, 0.0), UTIL, 0.008)
 	if _n(&"scavenger") > 0:
-		var mount: Variant = _take(&"belly")
-		if mount != null:
+		var belly: Variant = _take(&"belly")
+		if belly != null:
 			for z: float in [-0.07, 0.0, 0.07]:
 				_put(HullMesh.pipe(PackedVector3Array([Vector3(-0.08, 0.0, z), Vector3(-0.06, 0.09, z), Vector3(0.1, 0.11, z),
-					Vector3(0.14, 0.06, z)]), 0.006, 5, 0.03), "steel", mount)
+					Vector3(0.14, 0.06, z)]), 0.006, 5, 0.03), "steel", belly)
 			_put(HullMesh.pipe(PackedVector3Array([Vector3(0.14, 0.06, -0.08), Vector3(0.14, 0.06, 0.08)]), 0.008, 5),
-				"steel", mount)
-			_led(mount, Vector3(-0.07, 0.02, 0.0), UTIL, 0.009)
+				"steel", belly)
+			_led(belly, Vector3(-0.07, 0.02, 0.0), UTIL, 0.009)
 
 
-## Aft: glowing boosters for Overdrive, rubber baffles for Silent Screws;
-## foils along the flanks for a Hydrodynamic Hull.
+## The battery pack: an olive housing with a yellow band, finned on its face,
+## brass terminals and a fat cable at its back end, and a row of charge
+## lights, one for each of its [param cells] (Capacitor Bank cards).
+func _battery_pack(mount: Transform3D, cells: int) -> void:
+	var length := 0.13 + 0.065 * (cells - 1)
+	var y := 0.032
+	_put(HullMesh.rounded_box(Vector3(length, 0.06, 0.11), 0.012), "olive", mount, _at(Vector3(0, y, 0)))
+	_put(HullMesh.rounded_box(Vector3(0.03, 0.062, 0.112), 0.006, 1), "warhead", mount,
+		_at(Vector3(length * 0.5 - 0.03, y, 0)))
+	# Cooling fins across its face.
+	for k in cells * 3:
+		var x := -length * 0.5 + 0.02 + k * ((length - 0.075) / maxf(cells * 3 - 1, 1))
+		_put(HullMesh.rounded_box(Vector3(0.006, 0.01, 0.086), 0.002, 1), "metal", mount, _at(Vector3(x, y + 0.033, 0)))
+	# Straps round it to the mount.
+	for x: float in [-length * 0.5 + 0.012, length * 0.5 - 0.06]:
+		_put(HullMesh.rounded_box(Vector3(0.014, 0.068, 0.118), 0.004, 1), "metal", mount, _at(Vector3(x, y - 0.002, 0)))
+	# Terminals and the cable at the back.
+	for z: float in [-0.03, 0.03]:
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(0.0, 0.001), Vector2(0.0, 0.009), Vector2(0.014, 0.009),
+			Vector2(0.016, 0.006), Vector2(0.016, 0.001)]), 10), "brass", mount,
+			Transform3D(Basis(Vector3.UP, PI), Vector3(-length * 0.5, y + 0.01, z)))
+	_put(HullMesh.pipe(PackedVector3Array([Vector3(-length * 0.5 - 0.014, y + 0.01, 0.03),
+		Vector3(-length * 0.5 - 0.04, y + 0.01, 0.03), Vector3(-length * 0.5 - 0.05, -0.02, 0.03)]), 0.008, 6, 0.02),
+		"rubber", mount)
+	# Charge lights along the edge facing out, one per card.
+	for k in cells:
+		_led(mount, Vector3(-length * 0.5 + 0.03 + k * 0.03, y + 0.012, 0.057), POWER, 0.0065)
+
+
+## The Bio-Converter: a bioreactor on the deck, a vessel of glowing green
+## culture with bubbles in it between brass caps; with two cards a second,
+## smaller vessel joined to it and an intake funnel on top.
+func _bioreactor() -> void:
+	var level := mini(_n(&"bioconverter"), 2)
+	if level == 0:
+		return
+	var mount: Variant = _take(&"deck")
+	if mount == null:
+		return
+	for k in level:
+		var at := Vector3(0.0 if k == 0 else -0.075, 0.0, 0.0 if k == 0 else 0.02)
+		var h := 0.15 if k == 0 else 0.1
+		var r := 0.034 if k == 0 else 0.024
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.01, 0.001), Vector2(-0.01, r + 0.008), Vector2(0.02, r + 0.008),
+			Vector2(0.02, 0.001)]), 16), "metal", mount, _stand(at))
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(0.02, 0.001), Vector2(0.02, r), Vector2(0.03, r * 1.15),
+			Vector2(h - 0.01, r * 1.15), Vector2(h, r), Vector2(h, 0.001)]), 18), "glass", mount, _stand(at))
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(0.022, 0.001), Vector2(0.022, r * 0.95), Vector2(h - 0.025, r),
+			Vector2(h - 0.02, 0.001)]), 14, 0.0), "bio", mount, _stand(at))
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(h - 0.004, 0.001), Vector2(h - 0.004, r + 0.006),
+			Vector2(h + 0.012, r + 0.004), Vector2(h + 0.018, 0.001)]), 16), "brass", mount, _stand(at))
+		for j in 4:
+			var b := at + Vector3(cos(j * 2.1 + k) * r * 1.02, 0.045 + j * (h - 0.07) / 3.0, sin(j * 2.1 + k) * r * 1.02)
+			_put(HullMesh.lathe(_ball(0.006 - j * 0.0008, 6), 8, 0.0), "bubble", mount, _at(b))
+	if level >= 2:
+		_put(HullMesh.pipe(PackedVector3Array([Vector3(-0.075, 0.07, 0.02), Vector3(-0.04, 0.07, 0.01),
+			Vector3(-0.025, 0.07, 0.0)]), 0.006, 6), "brass", mount)
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(0.0, 0.008), Vector2(0.03, 0.008), Vector2(0.06, 0.03),
+			Vector2(0.064, 0.03), Vector2(0.064, 0.026), Vector2(0.034, 0.005)]), 16), "brass", mount,
+			_stand(Vector3(0, 0.168, 0)))
+	_led(mount, Vector3(0.044, 0.025, 0.0), POWER, 0.008)
+
+
+## Aft on the drive mounts: Overdrive's booster pods, their nozzles glowing
+## hotter while the sub boosts (a longer pod with cooling rings and an
+## afterburner ring at two), and Silent Screws' rubber baffles; foils along
+## the flanks for a Hydrodynamic Hull.
 func _drive() -> void:
 	var mounts: Variant = _mount(&"drive")
-	var boost := _n(&"overdrive")
+	var boost := mini(_n(&"overdrive"), 2)
 	var quiet := _n(&"silent_screws")
 	if mounts != null and (boost > 0 or quiet > 0):
+		if boost > 0:
+			# Lit, not flat: its emission is what the model turns up while boosting.
+			var glow := StandardMaterial3D.new()
+			glow.albedo_color = Color(0.3, 0.12, 0.05)
+			glow.emission_enabled = true
+			glow.emission = Color(1.0, 0.5, 0.18)
+			glow.emission_energy_multiplier = 0.8
+			mats["boost_glow"] = glow
+			m.set_boost_glow(glow)
 		for mount: Transform3D in mounts:
 			var y := 0.08
-			_put(HullMesh.rounded_box(Vector3(0.12, y, 0.03), 0.01), "metal", mount, _at(Vector3(0, y * 0.5, 0)))
 			if quiet > 0:
+				_put(HullMesh.rounded_box(Vector3(0.12, y, 0.03), 0.01), "metal", mount, _at(Vector3(0, y * 0.5, 0)))
 				_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.12, 0.001), Vector2(-0.08, 0.05), Vector2(0.08, 0.05),
 					Vector2(0.12, 0.001)]), 14), "rubber", mount, _at(Vector3(0, y, 0)))
+				_led(mount, Vector3(0.0, y + 0.06, 0.0), UTIL, 0.008)
 			if boost > 0:
-				var at := _at(Vector3(-0.1, y + (0.06 if quiet > 0 else 0.0), 0))
-				_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.05, 0.035), Vector2(-0.03, 0.04), Vector2(0.06, 0.035),
-					Vector2(0.06, 0.001)]), 14), "metal", mount, at)
-				_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.051, 0.028), Vector2(-0.051, 0.001)]), 14, 0.0),
-					"boost", mount, at)
-			_led(mount, Vector3(0.0, y + 0.06, 0.0), POWER if boost > 0 else UTIL, 0.008)
+				_booster(mount, boost, 0.1 if quiet > 0 else 0.0)
 	var foils: Variant = _mount(&"foil")
 	if foils != null and _n(&"hydrofoil") > 0:
 		var span := 0.16 + 0.06 * _n(&"hydrofoil")
@@ -518,9 +764,36 @@ func _drive() -> void:
 			_led(mount, Vector3(-0.06, span - 0.01, 0.0), UTIL, 0.008)
 
 
+## One Overdrive booster pod on a pylon, [param out] further off the hull.
+func _booster(mount: Transform3D, level: int, out: float) -> void:
+	var length := 0.2 if level == 1 else 0.27
+	var r := 0.032 if level == 1 else 0.038
+	var h := 0.072 + out
+	_put(HullMesh.rounded_box(Vector3(0.09, h - r * 0.5 + 0.02, 0.022), 0.008), "metal", mount,
+		_at(Vector3(0.0, (h - r * 0.5) * 0.5 - 0.01, 0)))
+	var pod := mount * _at(Vector3(0.02, h, 0))
+	var back := -length * 0.5
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(back + 0.04, 0.001), Vector2(back + 0.04, r),
+		Vector2(length * 0.5 - 0.025, r), Vector2(length * 0.5, r * 0.82), Vector2(length * 0.5, 0.001)]), 20), "paint", pod)
+	# The intake at the front, dark behind a steel lip.
+	_put(HullMesh.lathe(_torus(r * 0.72, 0.005, 6), 18), "steel", pod, _at(Vector3(length * 0.5 + 0.002, 0, 0)))
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(length * 0.5 + 0.001, 0.001), Vector2(length * 0.5 + 0.001, r * 0.7)]),
+		16, 0.0), "rubber", pod)
+	# The nozzle, its throat glowing.
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(back + 0.045, r * 0.96), Vector2(back + 0.01, r * 0.9),
+		Vector2(back - 0.03, r * 1.18), Vector2(back - 0.03, r * 1.04), Vector2(back - 0.03, r * 1.04),
+		Vector2(back + 0.008, r * 0.62)]), 20), "steel", pod)
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(back + 0.01, 0.001), Vector2(back + 0.01, r * 0.66)]), 16, 0.0),
+		"boost_glow", pod)
+	if level >= 2:
+		for k in 5:
+			_put(HullMesh.lathe(_torus(r + 0.003, 0.0035, 5), 18), "steel", pod, _at(Vector3(back + 0.07 + k * 0.03, 0, 0)))
+		_put(HullMesh.lathe(_torus(r * 1.1, 0.004, 6), 20, 0.0), "boost_glow", pod, _at(Vector3(back - 0.03, 0, 0)))
+	_led(mount, Vector3(0.05, h - r * 0.5 - 0.004, 0.012), POWER, 0.007)
+
+
 ## On the deck: a magnet coil for a Magnet Coil, cargo crates for Deep
-## Pockets, the Pressure Compass, and along the flanks the Galvanic Hull's
-## live strips.
+## Pockets and the Pressure Compass.
 func _utilities() -> void:
 	var coil := 2 * _n(&"magnet_coil")
 	if coil > 0:
@@ -558,9 +831,4 @@ func _utilities() -> void:
 			_put(HullMesh.rounded_box(Vector3(0.07, 0.004, 0.008), 0.002, 1), SONAR.to_html(), mount,
 				_at(bowl, Vector3(0, 30, 0)))
 			_led(mount, bowl + Vector3(0.03, 0.0, 0.0), WEAPON, 0.006)
-	if _n(&"shock_hull") > 0:
-		for mount: Transform3D in m.mounts.get(&"flank", []):
-			_put(HullMesh.pipe(PackedVector3Array([Vector3(-0.2, 0.008, 0), Vector3(0.2, 0.008, 0)]), 0.006, 6), "arc",
-				mount)
-			for x: float in [-0.2, 0.2]:
-				_put(HullMesh.lathe(_cap(0.016, 5), 8), "ceramic", mount, _stand(Vector3(x, 0.0, 0)))
+

@@ -11,6 +11,9 @@ const SONAR := Color(0.3, 0.95, 1.0)
 const WEAPON := Color(1.0, 0.35, 0.35)
 const UTIL := Color(0.6, 1.0, 0.6)
 
+## Parts fitted to a frame's skin, kept by frame and key (see _fitted_once).
+static var _fitted := {}
+
 var m: SubmarineModel
 var root: Node3D
 ## The frame's own tools, before any card.
@@ -19,6 +22,8 @@ var modules: Array[StringName]
 var mats := {}
 ## Free mount points left in each row, taken front to back.
 var _free := {}
+var _collecting := false
+var _collected: Array = []
 
 
 func _materials() -> void:
@@ -49,6 +54,9 @@ func _materials() -> void:
 		"beacon": MeshKit.emissive_material(Color(1.0, 0.6, 0.1), 5.0),
 		"cockpit_sonar": MeshKit.emissive_material(Color(0.25, 0.9, 0.8), 2.2),
 		"decoy_glow": MeshKit.emissive_material(Color(0.35, 1.0, 0.72), 2.5),
+		"armor": m.metal_material(Color(0.34, 0.35, 0.36), 0.75, 0.4, true),
+		"nanite": MeshKit.emissive_material(Color(1.0, 0.5, 0.22), 2.0),
+		"bubble": MeshKit.emissive_material(Color(0.8, 1.0, 0.85), 2.2),
 	}
 	for c: Color in [HULL, POWER, LIGHT, SONAR, WEAPON, UTIL]:
 		mats[c.to_html()] = MeshKit.emissive_material(c, 3.0)
@@ -81,10 +89,29 @@ func _take_pair(row: StringName) -> Array:
 	return out
 
 
-## Adds [param mesh] at [param local] in [param mount]'s frame.
+## Adds [param mesh] at [param local] in [param mount]'s frame (or, while a
+## piece is being fitted once for keeps, notes it down; see _fitted_once).
 func _put(mesh: Mesh, mat: String, mount: Transform3D, local := Transform3D.IDENTITY,
 		parent: Node3D = null) -> MeshInstance3D:
+	if _collecting:
+		_collected.append([mesh, mat, mount * local])
+		return null
 	return m.place_xform(mesh, mats[mat], mount * local, parent if parent else root)
+
+
+## Places the parts [param build] puts, building them only the first time for
+## this frame and [param key]: pieces fitted to the hull's skin are slow to
+## fit and come out the same every time.
+func _fitted_once(key: String, build: Callable) -> void:
+	var full := "%s/%s" % [m.frame(), key]
+	if not _fitted.has(full):
+		_collecting = true
+		_collected = []
+		build.call()
+		_collecting = false
+		_fitted[full] = _collected
+	for p: Array in _fitted[full]:
+		m.place_xform(p[0], mats[p[1]], p[2], root)
 
 
 ## A small light in a card's colour.
