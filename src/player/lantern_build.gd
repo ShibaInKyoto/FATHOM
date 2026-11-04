@@ -85,12 +85,11 @@ static func mounts() -> Dictionary:
 	var f := fairing()
 	var up := Vector3.UP
 	var out := {}
-	out[&"lamp"] = SubEquipment.frame_at(Vector3(1.2, BOW_Y + 0.692, 0.0), up)
 	out[&"sonar"] = SubEquipment.frame_at(Vector3(0.62, f.deck_y(0.62, 0.0) - 0.01, 0.0), up)
 	out[&"harpoon"] = SubEquipment.frame_at(Vector3(0.86, -0.36, 0.52), Vector3(0.0, -0.2, 1.0))
 	out[&"flare"] = SubEquipment.frame_at(Vector3(-0.74, f.deck_y(-0.74, 0.0) - 0.01, 0.0), up)
 	out[&"decoy"] = f.mount(-1.28, 0.38)
-	out[&"shock"] = SubEquipment.frame_at(Vector3(1.52, -0.59, 0.0), up)
+	out[&"shock"] = SubEquipment.frame_at(Vector3(1.5, -0.65, 0.0), up)
 	var torpedo := SubEquipment.frame_at(Vector3(-0.25, -0.36, 0.53), Vector3(0.0, -0.3, 1.0))
 	out[&"torpedo"] = [torpedo, SubEquipment.mirror(torpedo)]
 	out[&"drive"] = [f.mount(-1.62, 0.12), f.mount(-1.62, 0.88)]
@@ -200,23 +199,61 @@ static func _bow(m: SubmarineModel, mats: Dictionary) -> void:
 
 ## A lamp bar over the dome and the searchlight on its yoke on the deck.
 static func _lamps(m: SubmarineModel, mats: Dictionary) -> void:
-	# A ring of lamps arched over the dome on a tube frame.
+	# A ring of work lamps arched over the collar on a tube frame.
 	var ring_r := 0.67
+	var ax := 1.02
 	var arc := PackedVector3Array()
 	for k in 13:
 		var a := deg_to_rad(lerpf(-62.0, 62.0, k / 12.0))
-		arc.append(Vector3(1.2, BOW_Y + cos(a) * ring_r, sin(a) * ring_r))
+		arc.append(Vector3(ax, BOW_Y + cos(a) * ring_r, sin(a) * ring_r))
 	m.place(HullMesh.pipe(arc, 0.022, 10), mats.frame)
 	for a_deg: float in [-62.0, 0.0, 62.0]:
 		var a := deg_to_rad(a_deg)
 		var out := Vector3(0.0, cos(a), sin(a))
-		m.place(HullMesh.pipe(PackedVector3Array([Vector3(1.12, BOW_Y, 0.0) + out * 0.575,
-			Vector3(1.2, BOW_Y, 0.0) + out * ring_r]), 0.016, 8), mats.frame)
+		m.place(HullMesh.pipe(PackedVector3Array([Vector3(ax - 0.02, BOW_Y, 0.0) + out * 0.57,
+			Vector3(ax, BOW_Y, 0.0) + out * ring_r]), 0.016, 8), mats.frame)
 	for a_deg: float in [-44.0, -22.0, 0.0, 22.0, 44.0]:
 		var a := deg_to_rad(a_deg)
-		var at := Vector3(1.22, BOW_Y + cos(a) * (ring_r + 0.005), sin(a) * (ring_r + 0.005))
+		var at := Vector3(ax + 0.02, BOW_Y + cos(a) * (ring_r + 0.005), sin(a) * (ring_r + 0.005))
 		_lamp_head(m, mats, at, 0.042, Vector3(-a_deg * 0.3, 0, -10))
+	_lamp_track(m, mats)
 
+
+## The main lamp's track: a twin rail hooped round the front of the dome
+## from above the collar to below it, and a carriage that rides it round to
+## wherever the pilot aims. The lamp head fits on the carriage.
+static func _lamp_track(m: SubmarineModel, mats: Dictionary) -> void:
+	var center := Vector3(1.3, BOW_Y, 0.0)
+	var rail_r := 0.63
+	var ends := 97.0
+	for z: float in [-0.032, 0.032]:
+		var rail := PackedVector3Array()
+		for k in 33:
+			var a := deg_to_rad(lerpf(-ends, ends, k / 32.0))
+			rail.append(center + Vector3(cos(a) * rail_r, sin(a) * rail_r, z))
+		m.place(HullMesh.pipe(rail, 0.013, 8), mats.steel)
+	for k in 13:
+		var a := deg_to_rad(lerpf(-ends, ends, k / 12.0))
+		var at := center + Vector3(cos(a), sin(a), 0.0) * (rail_r - 0.004)
+		m.place(HullMesh.rounded_box(Vector3(0.018, 0.022, 0.085), 0.006, 1), mats.frame, at,
+			Vector3(0, 0, rad_to_deg(a)))
+	# Each end bolted down to the collar through a bracket.
+	for sgn: float in [1.0, -1.0]:
+		var a := deg_to_rad(ends) * sgn
+		var tip := center + Vector3(cos(a), sin(a), 0.0) * rail_r
+		var foot := Vector3(1.18, BOW_Y + sgn * 0.575, 0.0)
+		m.place(HullMesh.rounded_box(Vector3(0.09, 0.03, 0.11), 0.01), mats.frame, foot, Vector3(0, 0, 0))
+		m.place(HullMesh.pipe(PackedVector3Array([foot, tip]), 0.02, 8), mats.frame)
+	# The carriage: a shoe gripping both rails on rollers.
+	m.add_lamp_track(center, PackedFloat32Array([rail_r + 0.045]), -ends, ends)
+	var shoe := m.lamp_socket
+	m.place(HullMesh.rounded_box(Vector3(0.05, 0.11, 0.12), 0.015), mats.frame, Vector3(-0.027, 0, 0), Vector3.ZERO,
+		shoe)
+	for y: float in [-0.035, 0.035]:
+		for z: float in [-0.032, 0.032]:
+			m.place(HullMesh.lathe(PackedVector2Array([Vector2(-0.012, 0.001), Vector2(-0.012, 0.016),
+				Vector2(0.012, 0.016), Vector2(0.012, 0.001)]), 10), mats.steel, Vector3(-0.067, y, z),
+				Vector3(0, 90, 0), shoe)
 
 ## A lamp housing facing +X (before [param rot_deg]); a big one gets cooling fins.
 static func _lamp_head(m: SubmarineModel, mats: Dictionary, at: Vector3, r: float, rot_deg: Vector3,
@@ -333,8 +370,8 @@ static func _underside(m: SubmarineModel, mats: Dictionary) -> void:
 	for x: float in [-1.3, 0.7]:
 		m.place(HullMesh.rounded_box(Vector3(0.05, 0.05, 1.0), 0.012), mats.frame, Vector3(x, -0.92, 0.0))
 	# Sample basket: a frame of bars over a mesh floor, out front on the skids.
-	var b0 := Vector3(0.98, -0.8, -0.4)
-	var b1 := Vector3(1.6, -0.6, 0.4)
+	var b0 := Vector3(0.98, -0.84, -0.4)
+	var b1 := Vector3(1.6, -0.66, 0.4)
 	var bar := 0.011
 	for y: float in [b0.y, b1.y]:
 		for z: float in [b0.z, b1.z]:
@@ -356,8 +393,8 @@ static func _underside(m: SubmarineModel, mats: Dictionary) -> void:
 	# A sample jar and a rock in the basket.
 	m.place(HullMesh.lathe(PackedVector2Array([Vector2(0.0, 0.001), Vector2(0.0, 0.045), Vector2(0.11, 0.045),
 		Vector2(0.11, 0.045), Vector2(0.11, 0.03), Vector2(0.13, 0.03), Vector2(0.13, 0.001)]), 14), mats.safety,
-		Vector3(1.32, -0.79, 0.15), Vector3(0, 0, 90))
-	m.place(HullMesh.lathe(_ball(0.06, 8), 9), mats.frame, Vector3(1.45, -0.76, -0.18), Vector3(20, 30, 0))
+		Vector3(1.32, -0.83, 0.15), Vector3(0, 0, 90))
+	m.place(HullMesh.lathe(_ball(0.06, 8), 9), mats.frame, Vector3(1.45, -0.8, -0.18), Vector3(20, 30, 0))
 
 
 ## The manipulator, folded over the basket on the near side.

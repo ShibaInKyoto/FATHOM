@@ -13,6 +13,9 @@ const NORMAL_MAP := "res://assets/subs/bathysphere_normal.png"
 ## The sphere's radius.
 const R := 1.0
 const WARM := Color(1.0, 0.68, 0.36)
+## How far round the lamp rail runs, up over the top and down under the sphere.
+const RAIL_HIGH := 70.0
+const RAIL_LOW := -45.0
 ## Which way the upper port on the near side looks (the far one mirrors it).
 const UPPER_PORT := Vector3(0.6198, 0.5499, 0.5599)
 
@@ -29,7 +32,6 @@ static func mounts() -> Dictionary:
 		var t: Transform3D = on.call(d)
 		return [t, SubEquipment.mirror(t)]
 	var out := {}
-	out[&"lamp"] = on.call(Vector3(0.78, 0.62, 0.0))
 	out[&"sonar"] = on.call(Vector3(-0.8, 0.55, 0.0))
 	out[&"harpoon"] = on.call(Vector3(0.5, 0.15, 0.85))
 	out[&"flare"] = on.call(Vector3(-0.45, 0.4, 0.8))
@@ -107,6 +109,7 @@ static func build(m: SubmarineModel) -> void:
 	if not m.restore(mats):
 		_sphere(m, mats)
 		_ports(m, mats)
+		_lamp_rail(m, mats)
 		_top(m, mats)
 		_lamps(m, mats)
 		_cradle(m, mats)
@@ -200,17 +203,62 @@ static func _top(m: SubmarineModel, mats: Dictionary) -> void:
 		m.place(HullMesh.pipe(PackedVector3Array([Vector3(-cos(a) * 0.12, 1.2, -sin(a) * 0.12),
 			Vector3(cos(a) * 0.12, 1.2, sin(a) * 0.12)]), 0.007, 6), mats.brass)
 	m.place(HullMesh.pipe(PackedVector3Array([Vector3(0.0, 1.16, 0.0), Vector3(0.0, 1.2, 0.0)]), 0.02, 8), mats.brass)
-	# The bail: a heavy arch along the sphere, a shackle at its crown.
-	m.place(HullMesh.pipe(PackedVector3Array([Vector3(-0.56, 0.82, 0.0), Vector3(-0.44, 1.32, 0.0),
-		Vector3(0.44, 1.32, 0.0), Vector3(0.56, 0.82, 0.0)]), 0.036, 12, 0.16), mats.iron)
-	for x: float in [-0.56, 0.56]:
-		var mi := m.place(HullMesh.rounded_box(Vector3(0.16, 0.06, 0.16), 0.02), mats.iron, Vector3(x, 0.83, 0.0))
-		mi.rotation.z = -signf(x) * 0.6
+	# The bail: a heavy arch across the sphere, a shackle at its crown.
+	m.place(HullMesh.pipe(PackedVector3Array([Vector3(0.0, 0.82, -0.56), Vector3(0.0, 1.32, -0.44),
+		Vector3(0.0, 1.32, 0.44), Vector3(0.0, 0.82, 0.56)]), 0.036, 12, 0.16), mats.iron)
+	for z: float in [-0.56, 0.56]:
+		var mi := m.place(HullMesh.rounded_box(Vector3(0.16, 0.06, 0.16), 0.02), mats.iron, Vector3(0.0, 0.83, z))
+		mi.rotation.x = signf(z) * 0.6
 	m.place(HullMesh.lathe(_torus(0.07, 0.016, 10), 20), mats.iron, Vector3(0.0, 1.43, 0.0), Vector3(0, 90, 0))
-	m.strobe = m.place(HullMesh.lathe(_ball(0.025, 8), 12, 0.0), mats.strobe, Vector3(-0.3, 1.39, 0.0))
-	m.place(HullMesh.pipe(PackedVector3Array([Vector3(-0.3, 1.34, 0.0), Vector3(-0.3, 1.37, 0.0)]), 0.012, 6),
+	m.strobe = m.place(HullMesh.lathe(_ball(0.025, 8), 12, 0.0), mats.strobe, Vector3(0.0, 1.39, -0.3))
+	m.place(HullMesh.pipe(PackedVector3Array([Vector3(0.0, 1.34, -0.3), Vector3(0.0, 1.37, -0.3)]), 0.012, 6),
 		mats.iron)
-	m.place(HullMesh.pipe(PackedVector3Array([Vector3(0.25, 1.35, 0.0), Vector3(0.12, 1.8, 0.0)]), 0.005, 5), mats.iron)
+	m.place(HullMesh.pipe(PackedVector3Array([Vector3(0.0, 1.35, 0.25), Vector3(-0.1, 1.8, 0.2)]), 0.005, 5), mats.iron)
+
+
+## The main lamp's rail: a toothed iron arc hugging the sphere from high over
+## the top to well under it, stepping out round the main port, on standoffs
+## from the sphere; an iron carriage with a brass pinion walks the lamp along
+## it to wherever the observer aims.
+static func _lamp_rail(m: SubmarineModel, mats: Dictionary) -> void:
+	var lo := RAIL_LOW
+	var hi := RAIL_HIGH
+	var steps := 48
+	var reach := PackedFloat32Array()
+	for k in steps + 1:
+		reach.append(_rail_radius(lerpf(lo, hi, float(k) / steps)) + 0.06)
+	for z: float in [-0.03, 0.03]:
+		var rail := PackedVector3Array()
+		for k in steps + 1:
+			var a := deg_to_rad(lerpf(lo - 4.0, hi + 4.0, float(k) / steps))
+			rail.append(Vector3(cos(a), sin(a), 0.0) * _rail_radius(rad_to_deg(a)) + Vector3(0, 0, z))
+		m.place(HullMesh.pipe(rail, 0.012, 8), mats.iron)
+	# Teeth round the outside of the rail, for the carriage's pinion.
+	for k in 61:
+		var deg := lerpf(lo, hi, k / 60.0)
+		var a := deg_to_rad(deg)
+		m.place(HullMesh.rounded_box(Vector3(0.016, 0.014, 0.05), 0.004, 1), mats.brass,
+			Vector3(cos(a), sin(a), 0.0) * (_rail_radius(deg) + 0.014), Vector3(0, 0, deg))
+	# Standoffs from the sphere to the rail, a foot bolted down under each.
+	for deg: float in [hi + 3.0, 42.0, lo - 3.0]:
+		var a := deg_to_rad(deg)
+		var out := Vector3(cos(a), sin(a), 0.0)
+		m.place(HullMesh.pipe(PackedVector3Array([out * (R - 0.02), out * (_rail_radius(deg) - 0.008)]), 0.02, 8),
+			mats.iron)
+		m.place(HullMesh.rounded_box(Vector3(0.1, 0.03, 0.1), 0.01), mats.iron, out * (R + 0.005),
+			Vector3(0, 0, deg - 90.0))
+	m.add_lamp_track(Vector3.ZERO, reach, lo, hi, 1.5)
+	var shoe := m.lamp_socket
+	m.place(HullMesh.rounded_box(Vector3(0.06, 0.12, 0.11), 0.015), mats.iron, Vector3(-0.04, 0, 0), Vector3.ZERO, shoe)
+	m.place(HullMesh.lathe(PackedVector2Array([Vector2(-0.015, 0.001), Vector2(-0.015, 0.03), Vector2(0.015, 0.03),
+		Vector2(0.015, 0.001)]), 12), mats.brass, Vector3(-0.044, 0.0, 0.068), Vector3(0, 90, 0), shoe)
+
+
+## The rail's distance from the sphere's centre at [param deg] round from
+## straight ahead: just off the sphere, stepping out to pass in front of
+## the main port.
+static func _rail_radius(deg: float) -> float:
+	return R * 1.1 + 0.17 * smoothstep(32.0, 18.0, absf(deg))
 
 
 ## Floodlights on arms either side of the port, with the running lights.

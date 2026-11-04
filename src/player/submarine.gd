@@ -83,7 +83,7 @@ func setup(p_level: Level, p_run: RunState, start: Vector2) -> void:
 	model = SubmarineModel.new()
 	add_child(model)
 	model.build(run.frame_id, skin if skin else Game.livery(run.frame_id))
-	model.fit_equipment(run.stats.tools, Game.meta.upgrades, run.modules)
+	model.fit_equipment(run.modules)
 
 	lamp = SpotLight3D.new()
 	lamp.light_color = Color(1.0, 0.95, 0.82)
@@ -162,6 +162,8 @@ func refresh_stats() -> void:
 
 
 func _apply_lamp_stats() -> void:
+	# A Cold-Light Lamp shines a cooler white.
+	lamp.light_color = Color(0.86, 0.94, 1.0) if run.modules.has(&"cold_lamp") else Color(1.0, 0.95, 0.82)
 	lamp.spot_range = stats.lamp_range
 	lamp.spot_angle = stats.lamp_angle
 	lamp.light_energy = stats.lamp_energy
@@ -449,12 +451,14 @@ func _update_visuals(delta: float, move: Vector2) -> void:
 	engine_audio.pitch_scale = 0.75 + speed_frac * 0.6
 
 	lamp.visible = lamp_on
-	# The lamp head swings on its gimbal to the aim, even mid-turn, and the
-	# light comes out of its lens. The light is a child of the (unrotated)
-	# submarine root, so local == world orientation.
-	var aim3 := Vector3(aim.x, aim.y, 0.0)
-	model.aim_lamp(aim3, delta)
-	lamp.transform = Transform3D(Basis.looking_at(aim3, Vector3.BACK), to_local(model.lamp_origin()))
+	# The lamp swings round its track at the bow to the aim, even mid-turn,
+	# and the light shines out of its lens the way the head points, so the
+	# beam always starts outside the hull. The light is a child of the
+	# (unrotated) submarine root, so local == world orientation.
+	model.aim_lamp(Vector3(aim.x, aim.y, 0.0), delta)
+	var beam_dir := model.lamp_direction()
+	var up := Vector3.BACK if absf(beam_dir.z) < 0.9 else Vector3.UP
+	lamp.transform = Transform3D(Basis.looking_at(beam_dir, up), to_local(model.lamp_origin()))
 	model.set_cockpit_glow(0.9 if run.battery > 0.0 else 0.15)
 	position = Vector3(pos.x, pos.y, 0)
 

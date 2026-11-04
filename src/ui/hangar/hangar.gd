@@ -249,7 +249,6 @@ func _build_upgrades() -> void:
 			var id := up.id
 			b = UiUtil.button("Upgrade  %d" % cost, func() -> void:
 				if Game.meta.buy_upgrade(id):
-					_backdrop.refresh_sub()
 					Audio.play_ui(&"purchase")
 					Game.save_game()
 				else:

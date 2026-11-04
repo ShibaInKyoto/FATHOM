@@ -1,10 +1,11 @@
 class_name SubEquipment
 extends RefCounted
 ## The kit hung on a submarine, the way gear piles onto a character in a
-## roguelite: the lamp on its gimbal, the harpoon launcher, a launcher for
-## each tool it carries, and a piece for every hangar upgrade and module
-## card taken, each with a small light in its card's colour. Stacking a card
-## adds more of its piece or makes it bigger. Pieces go onto the mount points
+## roguelite: the lamp head on its track, the harpoon launcher, the frame's
+## own tool, and a piece for every module card taken in the run, each with a
+## small light in its card's colour. Stacking a card changes its piece again.
+## Only module cards change the kit, never hangar upgrades, so it grows over
+## a run and looks the same at every start. Pieces go onto the mount points
 ## the frame provides (SubmarineModel.mounts); each is built in its mount's
 ## frame, Y out of the hull and X towards the bow.
 
@@ -17,24 +18,21 @@ const UTIL := Color(0.6, 1.0, 0.6)
 
 var m: SubmarineModel
 var root: Node3D
+## The frame's own tools, before any card.
 var tools: Array[StringName]
-var upgrades: Dictionary
 var modules: Array[StringName]
 var mats := {}
 ## Free mount points left in each row, taken front to back.
 var _free := {}
 
 
-## Fits [param model] with the kit for its [param tool_ids], hangar
-## [param levels] (upgrade id to level) and [param cards] (module ids, one
-## per card taken, so stacks repeat).
-static func fit(model: SubmarineModel, tool_ids: Array[StringName], levels: Dictionary,
-		cards: Array[StringName]) -> void:
+## Fits [param model] with its frame's kit and a piece for each of
+## [param cards] (module ids, one per card taken, so stacks repeat).
+static func fit(model: SubmarineModel, cards: Array[StringName]) -> void:
 	var kit := SubEquipment.new()
 	kit.m = model
 	kit.root = model.equipment_root()
-	kit.tools = tool_ids
-	kit.upgrades = levels
+	kit.tools = SubStats.build(model.frame(), {}, []).tools
 	kit.modules = cards
 	kit._build()
 	model.finish_equipment()
@@ -52,7 +50,6 @@ static func frame_at(at: Vector3, normal: Vector3) -> Transform3D:
 static func default_mounts(length: float, radius: float) -> Dictionary:
 	var h := length * 0.5
 	var out := {}
-	out[&"lamp"] = frame_at(Vector3(h * 0.7, radius * 0.9, 0.0), Vector3.UP)
 	out[&"harpoon"] = frame_at(Vector3(h * 0.55, -radius * 0.6, radius * 0.75), Vector3(0, -0.4, 1))
 	out[&"flare"] = frame_at(Vector3(-h * 0.3, radius * 0.95, 0.0), Vector3.UP)
 	out[&"decoy"] = frame_at(Vector3(-h * 0.6, radius * 0.8, 0.0), Vector3.UP)
@@ -93,11 +90,11 @@ func _build() -> void:
 	_lamp()
 	_harpoon()
 	_sonar()
-	if tools.has(&"flare"):
+	if tools.has(&"flare") or _n(&"flare_kit") > 0:
 		_flares()
-	if tools.has(&"torpedo"):
+	if tools.has(&"torpedo") or _n(&"torpedo_kit") > 0:
 		_torpedoes()
-	if tools.has(&"decoy"):
+	if tools.has(&"decoy") or _n(&"decoy_kit") > 0:
 		_decoys()
 	if tools.has(&"shock"):
 		_shock()
@@ -140,10 +137,6 @@ func _materials() -> void:
 
 func _n(id: StringName) -> int:
 	return modules.count(id)
-
-
-func _lv(id: StringName) -> int:
-	return int(upgrades.get(id, 0))
 
 
 func _mount(id: StringName) -> Variant:
@@ -189,77 +182,124 @@ static func _stand(pos: Vector3) -> Transform3D:
 
 # --- The lamp ------------------------------------------------------------------------
 
-## The lamp on a pan-and-tilt gimbal that follows the aim. Lamp Optics makes
-## it bigger, finned and flanked by side lamps; a Halogen Core lengthens it
-## round a hot core, a Wide-Angle Lens flares a hood round it, a Cold-Light
-## Lamp turns it blue-white over a heat sink.
+## The lamp head, fitted into the socket at the end of the frame's lamp
+## track: a fork holding the head on a swivel, its lens facing out along the
+## track. Its three cards each change it, and again at their second stack:
+## a Halogen Core runs a long focusing barrel out to the lens with a
+## white-hot core in it (and a focusing collar at two); a Wide-Angle Lens
+## flares a reflector hood round the lens (opening into four barn doors at
+## two); a Cold-Light Lamp turns the lens blue-white and rings the body with
+## heat-sink fins (and winds a copper coolant coil round it at two).
 func _lamp() -> void:
-	var mount: Variant = _mount(&"lamp")
-	if mount == null:
+	var socket := m.lamp_tilt
+	if socket == null:
 		return
-	var level := _lv(&"lamp")
-	var longer := _n(&"long_lamp")
-	var wide := _n(&"wide_lens")
-	var cold := _n(&"cold_lamp") > 0
-	var r := 0.078 + 0.014 * level
-	var base := Node3D.new()
-	base.transform = mount
-	root.add_child(base)
+	var halogen := mini(_n(&"long_lamp"), 2)
+	var wide := mini(_n(&"wide_lens"), 2)
+	var cold := mini(_n(&"cold_lamp"), 2)
+	var r := 0.075
+	var body := r * 1.5
+	var head := Node3D.new()
+	head.name = "LampHead"
+	socket.add_child(head)
 	var here := Transform3D.IDENTITY
-	_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.01, 0.09), Vector2(0.03, 0.09), Vector2(0.045, 0.075),
-		Vector2(0.05, 0.05), Vector2(0.05, 0.001)]), 24), "metal", here, _stand(Vector3.ZERO), base)
-	var yaw := Node3D.new()
-	yaw.position = Vector3(0, 0.05, 0)
-	base.add_child(yaw)
-	var reach := r + 0.035
-	var pivot := r + 0.06
-	_put(HullMesh.rounded_box(Vector3(0.09, 0.02, reach * 2.0 + 0.03), 0.008), "metal", here, _at(Vector3(0, 0.01, 0)),
-		yaw)
+	# The fork: a block on the carriage and two arms out to the swivel's pins.
+	var pin := 0.03 + body * 0.55
+	var span := r + 0.03
+	_put(HullMesh.rounded_box(Vector3(0.05, span * 2.0 + 0.03, 0.06), 0.012), "metal", here,
+		_at(Vector3(0.02, 0, 0)), head)
 	for sgn: float in [-1.0, 1.0]:
-		_put(HullMesh.rounded_box(Vector3(0.06, pivot + 0.02, 0.022), 0.008), "metal", here,
-			_at(Vector3(0, (pivot + 0.02) * 0.5, sgn * reach)), yaw)
-	var pitch := Node3D.new()
-	pitch.position = Vector3(0, pivot, 0)
-	yaw.add_child(pitch)
-	_put(HullMesh.pipe(PackedVector3Array([Vector3(0, 0, -reach - 0.02), Vector3(0, 0, reach + 0.02)]), 0.014, 8),
-		"steel", here, Transform3D.IDENTITY, pitch)
-	var back := -r * (1.8 + 0.7 * longer)
+		_put(HullMesh.rounded_box(Vector3(pin, 0.022, 0.05), 0.008), "metal", here,
+			_at(Vector3(0.02 + pin * 0.5, sgn * span, 0)), head)
+	var swivel := Node3D.new()
+	swivel.position = Vector3(0.03 + pin, 0, 0)
+	head.add_child(swivel)
+	_put(HullMesh.pipe(PackedVector3Array([Vector3(0, -span - 0.015, 0), Vector3(0, span + 0.015, 0)]), 0.012, 8),
+		"steel", here, Transform3D.IDENTITY, swivel)
+	var back := -body * 0.55
+	var front := body * 0.45
+	# The housing: a finned can, open at the front.
 	_put(HullMesh.lathe(PackedVector2Array([Vector2(back, 0.001), Vector2(back, r * 0.6), Vector2(back + r * 0.2,
-		r * 0.9), Vector2(back + r * 0.5, r), Vector2(r * 0.25, r), Vector2(r * 0.35, r * 1.08), Vector2(r * 0.42, r * 1.08),
-		Vector2(r * 0.45, r * 0.98), Vector2(r * 0.45, r * 0.85), Vector2(r * 0.45, r * 0.85),
-		Vector2(r * 0.3, r * 0.85)]), 24), "metal", here, Transform3D.IDENTITY, pitch)
-	_put(HullMesh.lathe(PackedVector2Array([Vector2(r * 0.28, r * 0.86), Vector2(r * 0.36, r * 0.6),
-		Vector2(r * 0.38, 0.001)]), 24, 0.0), "lens_cold" if cold else "lens", here, Transform3D.IDENTITY, pitch)
-	for k in 2 + level:
-		var x := back + r * (0.45 + 0.3 * k)
-		if x > -r * 0.2:
-			break
+		r * 0.9), Vector2(back + r * 0.5, r), Vector2(front - r * 0.2, r), Vector2(front - r * 0.1, r * 1.08),
+		Vector2(front - r * 0.03, r * 1.08), Vector2(front, r * 0.98), Vector2(front, r * 0.85), Vector2(front, r * 0.85),
+		Vector2(front - r * 0.15, r * 0.85)]), 24), "metal", here, Transform3D.IDENTITY, swivel)
+	for k in 2:
+		var x := back + r * (0.45 + 0.28 * k)
 		_put(HullMesh.lathe(PackedVector2Array([Vector2(x - 0.005, r * 0.98), Vector2(x - 0.005, r * 1.2),
-			Vector2(x + 0.005, r * 1.2), Vector2(x + 0.005, r * 0.98)]), 24), "metal", here, Transform3D.IDENTITY, pitch)
-	if longer > 0:
-		# The halogen core: a hot bead ahead of the lens.
-		_put(HullMesh.lathe(_ball(r * 0.22, 8), 12, 0.0), LIGHT.to_html(), here, _at(Vector3(r * 0.42, 0, 0)), pitch)
+			Vector2(x + 0.005, r * 1.2), Vector2(x + 0.005, r * 0.98)]), 24), "metal", here, Transform3D.IDENTITY, swivel)
+	var lens_at := front
+	var lens_r := r * 0.86
+	if halogen > 0:
+		# A focusing barrel out to the lens, longer at two stacks, the core glowing white down it.
+		var reach := r * (0.75 + 0.55 * (halogen - 1))
+		var br := r * 0.78
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(front - r * 0.15, br), Vector2(front + reach, br),
+			Vector2(front + reach + r * 0.06, br * 1.1), Vector2(front + reach + r * 0.12, br * 1.1),
+			Vector2(front + reach + r * 0.12, br * 0.86), Vector2(front + reach + r * 0.12, br * 0.86),
+			Vector2(front + reach, br * 0.86)]), 24), "steel", here, Transform3D.IDENTITY, swivel)
+		_put(HullMesh.lathe(_ball(r * (0.24 + 0.08 * halogen), 8), 12, 0.0), LIGHT.to_html(), here,
+			_at(Vector3(front - r * 0.05, 0, 0)), swivel)
+		if halogen >= 2:
+			_put(HullMesh.lathe(PackedVector2Array([Vector2(front + reach * 0.4, br * 1.02), Vector2(front + reach * 0.4,
+				br * 1.12), Vector2(front + reach * 0.5, br * 1.12), Vector2(front + reach * 0.5, br * 1.02)]), 24), "brass",
+				here, Transform3D.IDENTITY, swivel)
+		lens_at = front + reach + r * 0.1
+		lens_r = br * 0.88
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(lens_at - r * 0.17, lens_r), Vector2(lens_at - r * 0.09,
+		lens_r * 0.7), Vector2(lens_at - r * 0.07, 0.001)]), 24, 0.0), "lens_cold" if cold > 0 else "lens", here,
+		Transform3D.IDENTITY, swivel)
 	if wide > 0:
-		var flare := r * (1.35 + 0.25 * wide)
-		_put(HullMesh.lathe(PackedVector2Array([Vector2(r * 0.4, r * 1.02), Vector2(r * 0.95, flare),
-			Vector2(r * 0.97, flare - 0.008), Vector2(r * 0.42, r * 0.97)]), 24), "metal", here, Transform3D.IDENTITY,
-			pitch)
-	if cold:
-		for k in 3:
-			_put(HullMesh.rounded_box(Vector3(r * 1.4, r * 0.55, 0.006), 0.002, 1), "steel", here,
-				_at(Vector3(back * 0.5, r * 1.15, (k - 1) * r * 0.45)), pitch)
-	if level >= 2:
-		for sgn: float in [-1.0, 1.0]:
-			var side := Transform3D(Basis(), Vector3(0.0, -0.01, sgn * (reach + 0.05)))
-			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.05, 0.001), Vector2(-0.05, 0.026), Vector2(0.01, 0.03),
-				Vector2(0.02, 0.026), Vector2(0.02, 0.001)]), 14), "metal", here, side, pitch)
-			_put(HullMesh.lathe(PackedVector2Array([Vector2(0.021, 0.02), Vector2(0.024, 0.001)]), 14, 0.0),
-				"lens_cold" if cold else "lens", here, side, pitch)
-	_led(here, Vector3(back + 0.01, r * 0.75, 0.0), LIGHT, 0.008, pitch)
+		# A reflector hood flaring out round the lens; at two stacks, four barn doors on it.
+		var mouth := lens_r * (1.7 + 0.3 * wide)
+		var deep := r * (0.5 + 0.15 * wide)
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(lens_at - r * 0.12, lens_r * 1.14), Vector2(lens_at + deep,
+			mouth), Vector2(lens_at + deep + 0.006, mouth - 0.01), Vector2(lens_at - r * 0.1, lens_r * 1.04)]), 24),
+			"steel", here, Transform3D.IDENTITY, swivel)
+		if wide >= 2:
+			for k in 4:
+				var a := TAU * k / 4.0 + PI * 0.25
+				var dir := Vector3(0.0, cos(a), sin(a))
+				var hinge := Vector3(lens_at + deep, 0, 0) + dir * mouth
+				var door := Basis(dir.cross(Vector3.RIGHT).normalized(), deg_to_rad(-35.0))
+				var mi := _put(HullMesh.rounded_box(Vector3(r * 0.55, 0.005, mouth * 0.7), 0.002, 1), "steel", here,
+					Transform3D.IDENTITY, swivel)
+				var flat := Basis(Vector3.RIGHT, a)
+				mi.transform = Transform3D(door * flat, hinge + door * flat * Vector3(r * 0.27, 0, 0))
+	if cold > 0:
+		# Heat-sink fins round the body; at two stacks, a copper coolant coil wound over them.
+		for k in 8:
+			var a := TAU * k / 8.0
+			var out := Vector3(0.0, cos(a), sin(a))
+			var mi := _put(HullMesh.rounded_box(Vector3(body * 0.75, r * 0.32, 0.006), 0.002, 1), "steel", here,
+				Transform3D.IDENTITY, swivel)
+			mi.transform = Transform3D(Basis(Vector3.RIGHT, a), Vector3(back * 0.15, 0, 0) + out * r * 1.12)
+		if cold >= 2:
+			var coil := PackedVector3Array()
+			for k in 49:
+				var a := TAU * 3.0 * k / 48.0
+				coil.append(Vector3(lerpf(back + r * 0.3, front - r * 0.3, k / 48.0), cos(a) * r * 1.34, sin(a) * r * 1.34))
+			_put(HullMesh.pipe(coil, 0.007, 6), "copper", here, Transform3D.IDENTITY, swivel)
+	_led(here, Vector3(back + 0.012, 0, r * 0.75), SONAR if cold > 0 else LIGHT, 0.008, swivel)
 	var lens := Node3D.new()
-	lens.position = Vector3(r * 0.5, 0, 0)
-	pitch.add_child(lens)
-	m.set_lamp_gimbal(yaw, pitch, lens)
+	lens.position = Vector3(lens_at, 0, 0)
+	swivel.add_child(lens)
+	m.merge_under(swivel)
+	m.merge_under(head)
+	m.set_lamp_head(head, swivel, lens)
+
+
+## A plain lamp arm for a frame built without its own track: a hub at the
+## nose of a hull [param length] long and [param radius] round, and an arm
+## swinging out from it.
+static func default_track(model: SubmarineModel, length: float, radius: float) -> void:
+	var mat := model.metal_material(Color(0.085, 0.09, 0.095), 0.6, 0.45, true)
+	var center := Vector3(length * 0.5 + 0.05, 0.0, 0.0)
+	model.place(HullMesh.lathe(PackedVector2Array([Vector2(-0.05, 0.001), Vector2(-0.05, 0.07), Vector2(0.05, 0.07),
+		Vector2(0.05, 0.001)]), 16), mat, center + Vector3(0, 0, radius * 0.5), Vector3(0, 90, 0))
+	var reach := radius * 0.8 + 0.1
+	var track := model.add_lamp_track(center, PackedFloat32Array([reach]))
+	model.place(HullMesh.pipe(PackedVector3Array([Vector3(0, 0, radius * 0.5), Vector3(reach * 0.6, 0, radius * 0.3),
+		Vector3(reach, 0, 0.0)]), 0.025, 8, 0.08), mat, Vector3.ZERO, Vector3.ZERO, track)
 
 
 # --- The harpoon ---------------------------------------------------------------------
@@ -273,13 +313,12 @@ func _harpoon() -> void:
 	var mount: Variant = _mount(&"harpoon")
 	if mount == null:
 		return
-	var level := _lv(&"harpoon")
 	var h := 0.085
-	var length := 0.24 + 0.06 * level
+	var length := 0.26
 	_put(HullMesh.rounded_box(Vector3(0.2, 0.07, 0.09), 0.02), "metal", mount, _at(Vector3(-0.02, 0.03, 0)))
 	_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.14, 0.001), Vector2(-0.14, 0.036), Vector2(-0.12, 0.04),
 		Vector2(length - 0.03, 0.034), Vector2(length - 0.02, 0.042), Vector2(length, 0.042), Vector2(length, 0.024),
-		Vector2(length, 0.024), Vector2(length - 0.05, 0.024)]), 16), "steel" if level >= 2 else "metal", mount,
+		Vector2(length, 0.024), Vector2(length - 0.05, 0.024)]), 16), "metal", mount,
 		_at(Vector3(0, h, 0)))
 	var leech := _n(&"leech") > 0
 	var tip := length + 0.11
@@ -304,15 +343,6 @@ func _harpoon() -> void:
 	if _n(&"glass_cannon") > 0:
 		for x: float in [0.05, length - 0.08]:
 			_put(HullMesh.lathe(_torus(0.038, 0.006, 8), 16, 0.0), WEAPON.to_html(), mount, _at(Vector3(x, h, 0)))
-	if level >= 1:
-		_put(HullMesh.pipe(PackedVector3Array([Vector3(0.0, h + 0.045, 0), Vector3(0.07, h + 0.045, 0)]), 0.012, 8),
-			"metal", mount)
-	if level >= 2:
-		_put(HullMesh.lathe(PackedVector2Array([Vector2(length - 0.06, 0.043), Vector2(length - 0.055, 0.05),
-			Vector2(length - 0.005, 0.05), Vector2(length, 0.043)]), 8), "metal", mount, _at(Vector3(0, h, 0)))
-	if level >= 3:
-		_put(HullMesh.pipe(PackedVector3Array([Vector3(0.06, 0.06, 0), Vector3(length * 0.6, h - 0.03, 0)]), 0.01, 6),
-			"metal", mount)
 	_led(mount, Vector3(-0.1, h + 0.04, 0.0), WEAPON)
 	m.add_muzzle(&"harpoon", mount * Vector3(length, h, 0))
 
@@ -326,11 +356,8 @@ func _flares() -> void:
 	var mount: Variant = _mount(&"flare")
 	if mount == null:
 		return
-	var tubes := clampi(2 + _lv(&"flares") + _n(&"flare_pouch"), 2, 7)
-	var kit_only := _n(&"flare_kit") > 0 and _lv(&"flares") == 0 and m.frame() != &"lantern" \
-		and m.frame() != &"bathysphere"
-	if kit_only:
-		tubes = 1
+	var kit_only := not tools.has(&"flare")
+	var tubes := clampi((1 if kit_only else 2) + _n(&"flare_pouch"), 1, 5)
 	var cols := mini(tubes, 4)
 	var rows := ceili(tubes / 4.0)
 	var w := 0.05 * cols + 0.03
@@ -358,8 +385,8 @@ func _torpedoes() -> void:
 	var mounts: Variant = _mount(&"torpedo")
 	if mounts == null:
 		return
-	var tubes := clampi(1 + int((_lv(&"torpedoes") + _n(&"torpedo_rack") + 1) / 2.0), 1, 3)
-	var kit_only := _n(&"torpedo_kit") > 0 and _lv(&"torpedoes") == 0 and m.frame() != &"mako"
+	var tubes := clampi(1 + _n(&"torpedo_rack"), 1, 3)
+	var kit_only := not tools.has(&"torpedo")
 	var warhead := _n(&"warhead") > 0
 	var first := true
 	for mount: Transform3D in mounts:
@@ -402,9 +429,8 @@ func _decoys() -> void:
 	var mount: Variant = _mount(&"decoy")
 	if mount == null:
 		return
-	var count := clampi(2 + _lv(&"decoys") + _n(&"decoy_rack"), 2, 6)
-	if _n(&"decoy_kit") > 0 and _lv(&"decoys") == 0 and m.frame() != &"whisper":
-		count = 1
+	var kit_only := not tools.has(&"decoy")
+	var count := clampi((1 if kit_only else 2) + _n(&"decoy_rack"), 1, 5)
 	var w := 0.06 * count + 0.02
 	_put(HullMesh.rounded_box(Vector3(0.1, 0.03, w), 0.01), "metal", mount, _at(Vector3(0, 0.015, 0)))
 	var tilt := Basis.from_euler(Vector3(0, 0, deg_to_rad(75.0)))
@@ -426,7 +452,7 @@ func _shock() -> void:
 	var mount: Variant = _mount(&"shock")
 	if mount == null:
 		return
-	var discs := 3 + _lv(&"shock")
+	var discs := 4
 	var coils := _n(&"capacitor_coil")
 	_put(HullMesh.rounded_box(Vector3(0.12, 0.03, 0.7), 0.012), "metal", mount, _at(Vector3(0, 0.015, 0)))
 	var tilt := Basis.from_euler(Vector3(0, 0, deg_to_rad(55.0)))
@@ -458,13 +484,10 @@ func _sonar() -> void:
 	var mount: Variant = _mount(&"sonar")
 	if mount == null:
 		return
-	var level := _lv(&"sonar")
-	var r := 0.07 + 0.018 * level
+	var r := 0.08
 	_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.01, r * 0.9), Vector2(0.03, r * 0.9), Vector2(0.035, r * 0.85),
 		Vector2(0.035, 0.001)]), 24), "metal", mount, _stand(Vector3.ZERO))
 	_put(HullMesh.lathe(_cap(r, 10), 24), "rubber", mount, _stand(Vector3(0, 0.035, 0)))
-	if level >= 2:
-		_put(HullMesh.lathe(_torus(r * 1.02, 0.008, 8), 24), "metal", mount, _stand(Vector3(0, 0.04, 0)))
 	for k in _n(&"amplifier") * 2:
 		var a := TAU * (k + 0.5) / maxf(_n(&"amplifier") * 2.0, 1.0)
 		var foot := Vector3(cos(a) * (r + 0.03), 0.03, sin(a) * (r + 0.03))
@@ -490,12 +513,12 @@ func _sonar() -> void:
 		_led(mount, Vector3(r + 0.075, 0.084, 0), WEAPON, 0.01)
 
 
-# --- Hangar upgrades and module cards ------------------------------------------------
+# --- Module cards --------------------------------------------------------------------
 
-## Bolted armour plates along the flanks, a pair for each Hull Plating level
-## and Reinforced Plating card; Repair Nanites dock little pods on the deck.
+## Bolted armour plates along the flanks, a pair for each Reinforced Plating
+## card; Repair Nanites dock little pods on the deck.
 func _armour() -> void:
-	for k in _lv(&"hull") + _n(&"plating"):
+	for k in _n(&"plating"):
 		for mount: Transform3D in _take_pair(&"flank"):
 			_put(HullMesh.rounded_box(Vector3(0.32, 0.02, 0.22), 0.008), "metal", mount, _at(Vector3(0, 0.008, 0)))
 			_put(HullMesh.rounded_box(Vector3(0.3, 0.022, 0.2), 0.01), "paint", mount, _at(Vector3(0, 0.016, 0)))
@@ -512,18 +535,9 @@ func _armour() -> void:
 		_put(HullMesh.lathe(_ball(0.025, 8), 12, 0.0), HULL.to_html(), mount, _at(Vector3(0, 0.045, 0)))
 
 
-## Under the belly: a cell for each Battery Cells level, a capacitor for each
-## Capacitor Bank, a glowing tank for the Bio-Converter, an ink bladder for
+## Under the belly: a capacitor for each Capacitor Bank, a glowing tank for the Bio-Converter, an ink bladder for
 ## the Ink Sac, a scoop for the Scavenger Protocol.
 func _power() -> void:
-	for k in _lv(&"battery"):
-		var mount: Variant = _take(&"belly")
-		if mount == null:
-			break
-		_put(HullMesh.rounded_box(Vector3(0.28, 0.1, 0.14), 0.02), "olive", mount, _at(Vector3(0, 0.05, 0)))
-		for x: float in [-0.08, 0.08]:
-			_put(HullMesh.rounded_box(Vector3(0.025, 0.105, 0.145), 0.006), "metal", mount, _at(Vector3(x, 0.05, 0)))
-		_led(mount, Vector3(0.141, 0.06, 0.0), POWER, 0.009)
 	for k in _n(&"capacitor"):
 		var mount: Variant = _take(&"belly")
 		if mount == null:
@@ -562,42 +576,26 @@ func _power() -> void:
 			_led(mount, Vector3(-0.07, 0.02, 0.0), UTIL, 0.009)
 
 
-## Aft: auxiliary thrusters for the Thrusters upgrade, foils for a
-## Hydrodynamic Hull, glowing boosters for Overdrive, rubber baffles for
-## Silent Screws.
+## Aft: glowing boosters for Overdrive, rubber baffles for Silent Screws;
+## foils along the flanks for a Hydrodynamic Hull.
 func _drive() -> void:
 	var mounts: Variant = _mount(&"drive")
-	var level := _lv(&"thrusters")
 	var boost := _n(&"overdrive")
 	var quiet := _n(&"silent_screws")
-	if mounts != null:
+	if mounts != null and (boost > 0 or quiet > 0):
 		for mount: Transform3D in mounts:
-			var r := 0.06 + 0.015 * level
-			var y := 0.05 + r
-			if level > 0 or boost > 0 or quiet > 0:
-				_put(HullMesh.rounded_box(Vector3(0.12, y, 0.03), 0.01), "metal", mount, _at(Vector3(0, y * 0.5, 0)))
-			if level > 0:
-				_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.09, r * 0.8), Vector2(-0.05, r), Vector2(0.06, r),
-					Vector2(0.09, r * 0.85), Vector2(0.06, r * 0.75), Vector2(-0.06, r * 0.75), Vector2(-0.09, r * 0.8)]), 24,
-					0.6), "metal", mount, _at(Vector3(0, y, 0)))
-				_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.06, 0.001), Vector2(-0.04, 0.02), Vector2(0.06, 0.02),
-					Vector2(0.07, 0.001)]), 10), "metal", mount, _at(Vector3(0, y, 0)))
-				var prop := m.add_equipment_prop(root, mount * Vector3(-0.04, y, 0), mount.basis)
-				m.place(HullMesh.blades(4, 0.02, r * 0.72, r * 0.5, 0.4), mats.steel, Vector3.ZERO, Vector3.ZERO, prop)
-				if quiet > 0:
-					for x: float in [-0.07, 0.0, 0.07]:
-						_put(HullMesh.lathe(_torus(r + 0.004, 0.008, 6), 24), "rubber", mount, _at(Vector3(x, y, 0),
-							Vector3(0, 0, 90)))
-			elif quiet > 0:
+			var y := 0.08
+			_put(HullMesh.rounded_box(Vector3(0.12, y, 0.03), 0.01), "metal", mount, _at(Vector3(0, y * 0.5, 0)))
+			if quiet > 0:
 				_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.12, 0.001), Vector2(-0.08, 0.05), Vector2(0.08, 0.05),
 					Vector2(0.12, 0.001)]), 14), "rubber", mount, _at(Vector3(0, y, 0)))
 			if boost > 0:
-				var at := _at(Vector3(-0.12, y + r + 0.03 if level > 0 else y, 0))
+				var at := _at(Vector3(-0.1, y + (0.06 if quiet > 0 else 0.0), 0))
 				_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.05, 0.035), Vector2(-0.03, 0.04), Vector2(0.06, 0.035),
 					Vector2(0.06, 0.001)]), 14), "metal", mount, at)
 				_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.051, 0.028), Vector2(-0.051, 0.001)]), 14, 0.0),
 					"boost", mount, at)
-			_led(mount, Vector3(0.0, y + r + 0.005, 0.0), UTIL if level > 0 else POWER, 0.008)
+			_led(mount, Vector3(0.0, y + 0.06, 0.0), POWER if boost > 0 else UTIL, 0.008)
 	var foils: Variant = _mount(&"foil")
 	if foils != null and _n(&"hydrofoil") > 0:
 		var span := 0.16 + 0.06 * _n(&"hydrofoil")
@@ -606,11 +604,11 @@ func _drive() -> void:
 			_led(mount, Vector3(-0.06, span - 0.01, 0.0), UTIL, 0.008)
 
 
-## On the deck: a magnet coil for the Salvage Magnet and Magnet Coil, cargo
-## crates for Deep Pockets, an insurance black box, the Pressure Compass, and
-## along the flanks the Galvanic Hull's live strips.
+## On the deck: a magnet coil for a Magnet Coil, cargo crates for Deep
+## Pockets, the Pressure Compass, and along the flanks the Galvanic Hull's
+## live strips.
 func _utilities() -> void:
-	var coil := _lv(&"magnet") + 2 * _n(&"magnet_coil")
+	var coil := 2 * _n(&"magnet_coil")
 	if coil > 0:
 		var mount: Variant = _take(&"deck")
 		if mount != null:
@@ -630,11 +628,6 @@ func _utilities() -> void:
 		for x: float in [-0.06, 0.06]:
 			_put(HullMesh.rounded_box(Vector3(0.018, 0.104, 0.144), 0.004, 1), "rubber", mount, _at(Vector3(x, 0.05, 0)))
 		_led(mount, Vector3(0.101, 0.07, 0.0), UTIL, 0.008)
-	if _lv(&"insurance") > 0:
-		var mount: Variant = _take(&"deck")
-		if mount != null:
-			_put(HullMesh.rounded_box(Vector3(0.12, 0.08, 0.09), 0.015), "safety", mount, _at(Vector3(0, 0.04, 0)))
-			_put(HullMesh.lathe(_cap(0.022, 6), 10, 0.0), "beacon", mount, _stand(Vector3(0, 0.08, 0)))
 	if _n(&"compass") > 0:
 		var mount: Variant = _take(&"deck")
 		if mount != null:

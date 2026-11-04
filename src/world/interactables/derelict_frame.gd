@@ -69,7 +69,7 @@ func setup() -> void:
 	_model = SubmarineModel.new()
 	add_child(_model)
 	_model.build(frame_id)
-	_model.fit_equipment(SubStats.build(frame_id, {}, []).tools, {}, [])
+	_model.fit_equipment([])
 	_model.darken_hull(0.55)
 	_model.set_cockpit_glow(0.0)
 	# Settled where it came to rest, nose down a little.

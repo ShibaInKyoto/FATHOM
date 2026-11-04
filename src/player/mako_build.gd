@@ -65,6 +65,7 @@ static func build(m: SubmarineModel) -> void:
 		_nose(m, mats)
 		_canopy(m, mats)
 		_fins(m, mats)
+		_lamp_arm(m, mats)
 		_jet(m, mats)
 		m.remember(mats)
 
@@ -75,7 +76,6 @@ static func mounts() -> Dictionary:
 	var up := Vector3.UP
 	var down := Vector3.DOWN
 	var out := {}
-	out[&"lamp"] = SubEquipment.frame_at(Vector3(1.3, f.keel_y(1.3, 0.0) + 0.01, 0.0), down)
 	out[&"harpoon"] = SubEquipment.frame_at(Vector3(1.75, f.keel_y(1.75, 0.0) + 0.005, 0.0), down)
 	out[&"sonar"] = SubEquipment.frame_at(Vector3(-0.35, f.keel_y(-0.35, 0.0) + 0.01, 0.0), down)
 	out[&"shock"] = SubEquipment.frame_at(Vector3(0.85, f.keel_y(0.85, 0.0) + 0.01, 0.0), down)
@@ -215,6 +215,32 @@ static func _fins(m: SubmarineModel, mats: Dictionary) -> void:
 	for k in 4:
 		var basis := Basis(Vector3.RIGHT, PI * 0.25 + PI * 0.5 * k)
 		m.place_xform(tail, mats.trim, Transform3D(basis, Vector3(0.0, JET.y, 0.0) + basis.y * 0.07))
+
+
+## The main lamp's swing arm: hubs on both flanks of the snout and a yoke,
+## painted like the hull, whose two arms reach round the nose and meet at
+## the socket the lamp head fits in. It swings the lamp over, ahead of or
+## under the nose, wherever the pilot aims.
+static func _lamp_arm(m: SubmarineModel, mats: Dictionary) -> void:
+	var f := fairing()
+	var center := Vector3(1.95, -0.04, 0.0)
+	var hub := f.side_z(center.x, center.y) + 0.018
+	for sgn: float in [1.0, -1.0]:
+		m.place(HullMesh.lathe(PackedVector2Array([Vector2(-0.03, 0.001), Vector2(-0.03, 0.06), Vector2(-0.02, 0.07),
+			Vector2(0.01, 0.07), Vector2(0.02, 0.06), Vector2(0.02, 0.001)]), 20), mats.carbon,
+			center + Vector3(0, 0, sgn * (hub - 0.012)), Vector3(0, -90 * sgn, 0))
+	var reach := 0.43
+	var track := m.add_lamp_track(center, PackedFloat32Array([reach]), -110.0, 110.0)
+	for sgn: float in [1.0, -1.0]:
+		var a := Vector3(0.0, 0.0, sgn * (hub + 0.012))
+		var b := Vector3(reach - 0.045, 0.0, sgn * 0.05)
+		var d := b - a
+		m.place(HullMesh.rounded_box(Vector3(d.length() + 0.04, 0.045, 0.02), 0.009), mats.trim, (a + b) * 0.5,
+			Vector3(0, rad_to_deg(atan2(-d.z, d.x)), 0), track)
+		m.place(HullMesh.lathe(PackedVector2Array([Vector2(-0.012, 0.001), Vector2(-0.012, 0.04), Vector2(0.012, 0.04),
+			Vector2(0.012, 0.001)]), 16), mats.ti, a, Vector3(0, 90, 0), track)
+	m.place(HullMesh.rounded_box(Vector3(0.04, 0.05, 0.13), 0.012), mats.carbon, Vector3(reach - 0.03, 0, 0),
+		Vector3.ZERO, track)
 
 
 ## The pump-jet: a shroud with a glowing nozzle lip round a hub, stator

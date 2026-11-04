@@ -20,9 +20,14 @@ var hull_material: ShaderMaterial
 ## Where equipment goes on this frame (see SubEquipment): a Transform3D or an
 ## Array of them for each mount or row of mounts.
 var mounts: Dictionary = {}
-## The lamp's gimbal: its pan and tilt nodes and the point on its lens.
-var lamp_yaw: Node3D
-var lamp_pitch: Node3D
+## The lamp's track, built into the frame: a pivot at the bow that swings
+## round to the aim, and the socket on it that the lamp head (equipment) fits
+## into. Past the ends of the track the head tilts on in its socket; its
+## swivel turns it out of the swing's plane mid-turn.
+var lamp_track: Node3D
+var lamp_socket: Node3D
+var lamp_tilt: Node3D
+var lamp_swivel: Node3D
 var lamp_lens: Node3D
 
 var _dark: StandardMaterial3D
@@ -38,6 +43,14 @@ var _cockpit_light: OmniLight3D
 var _equipment: Node3D
 var _equip_props: Array[Node3D] = []
 var _muzzles: Dictionary[StringName, Node3D] = {}
+var _lamp_head: Node3D
+var _track_min := -PI * 0.5
+var _track_max := PI * 0.5
+## How far out the socket sits along the track, sampled evenly from its
+## lower end to its upper one (one value if it never changes).
+var _track_reach := PackedFloat32Array()
+## Which end of its track the lamp waits at while the aim is behind the sub.
+var _track_up := true
 ## How many painted materials belong to the frame itself (the rest are the equipment's).
 var _frame_paints := 0
 var _prop_speed := 0.0
@@ -61,6 +74,7 @@ func build(frame_id: StringName, skin: SubSkins.Livery = null) -> void:
 			BathysphereBuild.build(self)
 		&"whisper":
 			_build_whisper()
+			SubEquipment.default_track(self, 3.8, 0.45)
 		_:
 			LanternBuild.build(self)
 	_merge_static()
@@ -76,33 +90,55 @@ func build(frame_id: StringName, skin: SubSkins.Livery = null) -> void:
 	_frame_paints = _paints.size()
 
 
-## Hangs the equipment for [param tools], hangar [param upgrades] and module
+## Hangs the frame's kit and a piece for each of the module cards in
 ## [param modules] on the frame (replacing what was there).
-func fit_equipment(tools: Array[StringName], upgrades: Dictionary, modules: Array[StringName]) -> void:
-	SubEquipment.fit(self, tools, upgrades, modules)
+func fit_equipment(modules: Array[StringName]) -> void:
+	SubEquipment.fit(self, modules)
 
 
 func frame() -> StringName:
 	return _frame
 
 
-## Points the lamp down [param dir] (world space) as far as its gimbal
-## swings, easing there.
+## Swings the lamp round its track towards [param dir] (world space),
+## easing there. Aimed behind the sub (while it turns about), the lamp waits
+## at the top or bottom of its track, so its beam never crosses the hull.
 func aim_lamp(dir: Vector3, delta: float) -> void:
-	if lamp_yaw == null:
+	if lamp_track == null:
 		return
-	var base := lamp_yaw.get_parent() as Node3D
-	var local := base.global_basis.orthonormalized().inverse() * dir
-	var flat := Vector2(local.x, local.z).length()
-	var ease := 1.0 - exp(-16.0 * delta)
-	if flat > 0.05:
-		lamp_yaw.rotation.y = lerp_angle(lamp_yaw.rotation.y, atan2(-local.z, local.x), ease)
-	lamp_pitch.rotation.z = lerp_angle(lamp_pitch.rotation.z, clampf(atan2(local.y, flat), -1.45, 1.45), ease)
+	var d := global_basis.orthonormalized().inverse() * dir
+	var ease := 1.0 - exp(-20.0 * delta)
+	var angle := atan2(d.y, d.x)
+	if absf(angle) > 2.7:
+		# Straight back: stay on the side of the track the lamp is already on.
+		angle = absf(angle) * (1.0 if _track_up else -1.0)
+	else:
+		_track_up = angle >= 0.0
+	var along := clampf(angle, _track_min, _track_max)
+	var tilt := clampf(angle - along, -1.25, 1.25)
+	lamp_track.rotation.z = lerp_angle(lamp_track.rotation.z, along, ease)
+	lamp_tilt.rotation.z = lerp_angle(lamp_tilt.rotation.z, tilt, ease)
+	if _track_reach.size() > 1:
+		var f := clampf((lamp_track.rotation.z - _track_min) / (_track_max - _track_min), 0.0, 1.0) \
+			* (_track_reach.size() - 1)
+		var k := mini(int(f), _track_reach.size() - 2)
+		lamp_socket.position.x = lerpf(_track_reach[k], _track_reach[k + 1], f - k)
+	if lamp_swivel:
+		var flat := Vector2(d.x, d.y).length()
+		lamp_swivel.rotation.y = lerp_angle(lamp_swivel.rotation.y, clampf(atan2(-d.z, flat), -0.6, 0.6), ease)
 
 
 ## Where the lamp's light comes from, in world space.
 func lamp_origin() -> Vector3:
-	return lamp_lens.global_position if lamp_lens else global_position
+	if lamp_lens:
+		return lamp_lens.global_position
+	return lamp_socket.global_position if lamp_socket else global_position
+
+
+## Which way the lamp head points, in world space.
+func lamp_direction() -> Vector3:
+	var node := lamp_lens if lamp_lens else lamp_socket
+	return node.global_basis.x.normalized() if node else global_basis.x.normalized()
 
 
 ## The muzzle of the launcher for [param id] in world space, or null if it has none.
@@ -157,8 +193,11 @@ func equipment_root() -> Node3D:
 	_paints.resize(_frame_paints)
 	_equip_props.clear()
 	_muzzles.clear()
-	lamp_yaw = null
-	lamp_pitch = null
+	if _lamp_head:
+		_lamp_head.get_parent().remove_child(_lamp_head)
+		_lamp_head.queue_free()
+	_lamp_head = null
+	lamp_swivel = null
 	lamp_lens = null
 	_equipment = Node3D.new()
 	_equipment.name = "Equipment"
@@ -171,10 +210,17 @@ func finish_equipment() -> void:
 	_merge_children(_equipment)
 
 
-func set_lamp_gimbal(yaw: Node3D, pitch: Node3D, lens: Node3D) -> void:
-	lamp_yaw = yaw
-	lamp_pitch = pitch
+## Fits the lamp head ([param head], its [param swivel] and the point on its
+## [param lens]) into the track's socket.
+func set_lamp_head(head: Node3D, swivel: Node3D, lens: Node3D) -> void:
+	_lamp_head = head
+	lamp_swivel = swivel
 	lamp_lens = lens
+
+
+## Bakes the parts under [param node] that share a material into one mesh each.
+func merge_under(node: Node3D) -> void:
+	_merge_children(node)
 
 
 ## Marks where shots of [param id] leave its launcher ([param at] in the model's space).
@@ -303,6 +349,13 @@ func restore(mats: Dictionary) -> bool:
 			place_xform(part[1], mats[part[0]], part[2], pivot)
 	if kept.light != null:
 		add_cockpit_light(kept.light, kept.light_color)
+	if kept.track:
+		var track := add_lamp_track(kept.track.center, kept.track.reach, rad_to_deg(kept.track.min),
+			rad_to_deg(kept.track.max), kept.track.scale)
+		for part: Array in kept.track.parts:
+			place_xform(part[1], mats[part[0]], part[2], track)
+		for part: Array in kept.track.carriage:
+			place_xform(part[1], mats[part[0]], part[2], lamp_socket)
 	return true
 
 
@@ -327,7 +380,20 @@ func remember(mats: Dictionary) -> void:
 			var mi := c as MeshInstance3D
 			blades.append([slot_of[mi.material_override], mi.mesh, mi.transform])
 		props.append([pivot.transform, blades, pivot == propeller])
-	_kept[_frame] = {"parts": parts, "props": props,
+	var track := {}
+	if lamp_track:
+		var kept_parts := func(node: Node3D) -> Array:
+			_merge_children(node)
+			var out: Array = []
+			for c in node.get_children():
+				var mi := c as MeshInstance3D
+				if mi:
+					out.append([slot_of[mi.material_override], mi.mesh, mi.transform])
+			return out
+		track = {"center": lamp_track.position, "reach": _track_reach, "min": _track_min, "max": _track_max,
+			"scale": lamp_tilt.scale.x,
+			"parts": kept_parts.call(lamp_track), "carriage": kept_parts.call(lamp_socket)}
+	_kept[_frame] = {"parts": parts, "props": props, "track": track,
 		"light": _cockpit_light.position if _cockpit_light else null,
 		"light_color": _cockpit_light.light_color if _cockpit_light else Color.WHITE}
 
@@ -341,6 +407,32 @@ func add_prop(at: Vector3, rot_deg: Vector3) -> Node3D:
 	add_child(pivot)
 	_props.append(pivot)
 	return pivot
+
+
+## The lamp's track: a pivot at [param center] that swings about the
+## model's Z axis from [param min_deg] (down) to [param max_deg] (up) of
+## straight ahead, with the socket for the lamp head [param reach] out along
+## it. A [param reach] of several values runs the socket in and out along
+## the track (sampled evenly from its lower end to its upper one). Put parts
+## that swing rigidly with the track (an arm) under the pivot, and parts
+## that ride with the socket (a carriage) under [member lamp_socket]. The
+## lamp head fitted to it is drawn [param head_scale] times its usual size.
+func add_lamp_track(center: Vector3, reach: PackedFloat32Array, min_deg := -90.0, max_deg := 90.0,
+		head_scale := 1.0) -> Node3D:
+	lamp_track = Node3D.new()
+	lamp_track.name = "LampTrack"
+	lamp_track.position = center
+	add_child(lamp_track)
+	lamp_socket = Node3D.new()
+	lamp_socket.position = Vector3(reach[reach.size() / 2], 0.0, 0.0)
+	lamp_track.add_child(lamp_socket)
+	lamp_tilt = Node3D.new()
+	lamp_tilt.scale = Vector3.ONE * head_scale
+	lamp_socket.add_child(lamp_tilt)
+	_track_min = deg_to_rad(min_deg)
+	_track_max = deg_to_rad(max_deg)
+	_track_reach = reach
+	return lamp_track
 
 
 ## A soft light inside the cockpit that follows its glow.
