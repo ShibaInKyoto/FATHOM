@@ -89,7 +89,9 @@ static func mounts() -> Dictionary:
 	out[&"harpoon"] = SubEquipment.frame_at(Vector3(0.86, -0.36, 0.52), Vector3(0.0, -0.2, 1.0))
 	out[&"flare"] = SubEquipment.frame_at(Vector3(-0.7, f.deck_y(-0.7, 0.0) - 0.01, 0.0), up)
 	out[&"decoy"] = f.mount(-1.28, 0.38)
-	out[&"shock"] = SubEquipment.frame_at(Vector3(1.5, -0.65, 0.0), up)
+	# The shock emitter hangs under the keel, between the battery pods' noses
+	# and the sample basket (on the basket it stood up into the dome).
+	out[&"shock"] = SubEquipment.frame_at(Vector3(0.875, f.keel_y(0.875, 0.0) + 0.01, 0.0), Vector3.DOWN)
 	var torpedo: Transform3D = f.mount(-0.75, 0.215)
 	out[&"torpedo"] = [torpedo, SubEquipment.mirror(torpedo)]
 	out[&"drive"] = [f.mount(-1.62, 0.12), f.mount(-1.62, 0.88)]
