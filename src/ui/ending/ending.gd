@@ -106,6 +106,7 @@ func _sequence() -> void:
 		p.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		p.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		await _reveal(p, 1.0)
+	await _reveal(UiUtil.studio_logo(110.0), 0.4)
 	var credits := UiUtil.label("FATHOM  -  a Krypt Keepers game.\n" +
 		"Godot Engine 4.5  -  Rock and sand textures: Poly Haven (CC0)  -  Fonts: " +
 			"Oxanium, Chakra Petch, Share Tech Mono (SIL OFL)\n" +

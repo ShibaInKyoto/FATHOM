@@ -83,6 +83,28 @@ def lamp_toggle():
     return normalize(mix(click, thunk * 0.6), 0.6)
 
 
+def lantern_flame():
+    # A small flame breathing in still air: soft, fluttering, a tick or two.
+    d = 2.6
+    breath = lowpass(noise(d, "pink"), 900) * (0.55 + 0.45 * np.abs(np.sin(t_axis(d) * 7.3) * np.sin(t_axis(d) * 2.1)))
+    flutter = bandpass(noise(d), 380, 1.5) * 0.25
+    ticks = np.zeros(seconds(d))
+    for at in (0.7, 1.55, 2.2):
+        tick = highpass(noise(0.02), 3000) * env_exp(0.02, 0.004)
+        i = seconds(at)
+        ticks[i:i + len(tick)] += tick * 0.35
+    return normalize(fade(mix(breath, flutter, ticks), 0.6, 0.4), 0.32)
+
+
+def lantern_douse():
+    # The flame is snuffed: a quick breathy puff that falls away, a faint tick of metal.
+    d = 1.4
+    puff = lowpass(noise(d, "pink"), 1400) * lerp_env([(0, 0), (0.03, 1), (0.25, 0.35), (1.4, 0)], d)
+    hiss = highpass(noise(d), 2500) * lerp_env([(0, 0), (0.02, 0.5), (0.18, 0.12), (0.9, 0)], d)
+    tick = _clang(2200, 0.5, 0.05) * 0.08
+    return normalize(wet_dry(mix(puff, hiss * 0.5, tick), SMALL_ROOM, 0.3), 0.55)
+
+
 def denied():
     d = 0.32
     out = np.zeros(seconds(d))

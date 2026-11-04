@@ -1,6 +1,7 @@
 extends Node
 ## Scene transitions with a fade to black.
 
+const SPLASH := "res://src/ui/splash/studio_splash.tscn"
 const TITLE := "res://src/ui/title/title_screen.tscn"
 const HANGAR := "res://src/ui/hangar/hangar.tscn"
 const DIVE := "res://src/dive/dive.tscn"

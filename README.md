@@ -339,6 +339,8 @@ release.
 
 ## Credits
 
+<img src="assets/branding/krypt_keepers_logo.png" alt="Krypt Keepers" width="320">
+
 FATHOM is made by Krypt Keepers.
 
 * Engine: [Godot Engine](https://godotengine.org) 4.5 (MIT). Its license and

@@ -72,3 +72,14 @@ static func format_time(seconds: float) -> String:
 	var s := int(seconds)
 	@warning_ignore("integer_division")
 	return "%d:%02d" % [s / 60, s % 60]
+
+
+## The Krypt Keepers logo, [param height] pixels tall and centred.
+static func studio_logo(height: float) -> TextureRect:
+	var logo := TextureRect.new()
+	logo.texture = load("res://assets/branding/krypt_keepers_logo.png")
+	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	logo.custom_minimum_size = Vector2(0.0, height)
+	logo.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return logo
