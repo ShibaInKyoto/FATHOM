@@ -2,12 +2,12 @@ extends Node3D
 ## Debug helper: one submarine frame close up under studio light, from a
 ## three-quarter angle, side on and from above, with its equipment fitted.
 ## Usage: xvfb-run godot --path . res://tools/debug/preview_sub.tscn -- <out.png> <frame> [skin id|-]
-## [modules,...|-|full] [view|-] [aim degrees]
+## [modules,...|-|full] [view|-] [aim degrees|-] [flash]
 ## Views: close, side, far, rear, top, bow, dome, port, upper (one view, filling the frame), or
 ## at:<muzzle>[:<pitch>,<yaw>[:<x>,<y>,<z>]] for a close look at one piece of equipment, the camera
 ## that far from its muzzle (at:flare, at:torpedo:0,-90:-0.3,0,1.2).
 ## "full" fits every module card once (two of each card that stacks). The aim turns the lamp
-## that many degrees round from the screen's right.
+## that many degrees round from the screen's right; "flash" shows the shock emitter firing.
 
 var _frames := 0
 var _aims: Array = []
@@ -71,7 +71,10 @@ func _ready() -> void:
 		m.position = Vector3((i - (views.size() - 1) * 0.5) * 6.2, 0.0, 0.0)
 		m.rotation_degrees = views[i]
 		last = m
-		if args.size() > 5:
+		if args.size() > 6 and args[6] == "flash":
+			m.flash_shock()
+			m.animate(0.0, 0.0)
+		if args.size() > 5 and args[5] != "-":
 			var a := deg_to_rad(float(args[5]))
 			_aims.append([m, Vector3(cos(a), sin(a), 0.0)])
 	var cam := Camera3D.new()

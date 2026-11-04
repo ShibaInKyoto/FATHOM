@@ -331,31 +331,92 @@ func _decoys() -> void:
 	m.add_muzzle(&"decoy", mount * Vector3(0.0, 0.14, 0))
 
 
-## The shock emitter: copper balls on stacks of ceramic insulators, a disc
-## more for each level, copper coils round them with each Arc Coil.
+## The shock emitter: a tower on an insulated housing, a glowing orb held in
+## a copper ring at its top that flares as the pulse fires. Arc Coil winds
+## the tower into a copper coil and swells the ring; at two, electrodes on
+## outriggers either side arc to the orb, and a row of capacitor jars stands
+## on the plinth behind.
 func _shock() -> void:
 	var mount: Variant = _mount(&"shock")
 	if mount == null:
 		return
-	var discs := 4
-	var coils := _n(&"capacitor_coil")
-	_put(HullMesh.rounded_box(Vector3(0.12, 0.03, 0.7), 0.012), "metal", mount, _at(Vector3(0, 0.015, 0)))
-	var tilt := Basis.from_euler(Vector3(0, 0, deg_to_rad(55.0)))
-	for z: float in [-0.28, 0.28]:
-		var at := Transform3D(tilt, Vector3(0, 0.03, z))
-		var profile := PackedVector2Array([Vector2(0.0, 0.001), Vector2(0.0, 0.035)])
-		for k in discs:
-			var x := 0.035 + k * 0.045
-			profile.append_array(PackedVector2Array([Vector2(x - 0.008, 0.035), Vector2(x, 0.065),
-				Vector2(x + 0.012, 0.065), Vector2(x + 0.02, 0.035)]))
-		var top := 0.035 + discs * 0.045
-		profile.append_array(PackedVector2Array([Vector2(top, 0.035), Vector2(top + 0.01, 0.001)]))
-		_put(HullMesh.lathe(profile, 18), "ceramic", mount, at)
-		_put(HullMesh.pipe(PackedVector3Array([Vector3(top, 0, 0), Vector3(top + 0.1, 0, 0)]), 0.012, 8), "copper",
-			mount, at)
-		_put(HullMesh.lathe(_ball(0.05, 10), 14), "copper", mount, at * _at(Vector3(top + 0.14, 0, 0)))
-		for k in mini(coils, 2) * 3:
-			_put(HullMesh.lathe(_torus(0.075, 0.008, 8), 18), "copper", mount, at * _at(Vector3(0.06 + k * 0.03, 0, 0)))
-		if coils > 0:
-			_put(HullMesh.lathe(_ball(0.022, 8), 10, 0.0), "arc", mount, at * _at(Vector3(top + 0.14, 0, 0)))
-	_led(mount, Vector3(0.03, 0.035, 0.0), WEAPON)
+	mount = (mount as Transform3D).scaled_local(Vector3.ONE * 1.45)
+	var coil := mini(_n(&"capacitor_coil"), 2)
+	# Lit, not flat: its emission is what flash_shock() drives.
+	var glow := StandardMaterial3D.new()
+	glow.albedo_color = Color(0.12, 0.3, 0.42)
+	glow.roughness = 0.15
+	glow.emission_enabled = true
+	glow.emission = Color(0.45, 0.85, 1.0)
+	glow.emission_energy_multiplier = 1.6
+	mats["shock_glow"] = glow
+	m.set_shock_glow(glow)
+	# The plinth clamped to the frame, bolted at its corners, and the housing on it.
+	var plinth := Vector3(0.16, 0.03, 0.18) + (Vector3(0.1, 0, 0.08) if coil >= 2 else Vector3.ZERO)
+	_put(HullMesh.rounded_box(plinth, 0.008), "metal", mount, _at(Vector3(-0.02 if coil >= 2 else 0.0, 0.012, 0)))
+	for sx: float in [-1.0, 1.0]:
+		for sz: float in [-1.0, 1.0]:
+			var x := (-0.02 if coil >= 2 else 0.0) + sx * (plinth.x * 0.5 - 0.016)
+			_put(HullMesh.bolt_head(0.007), "steel", mount, _at(Vector3(x, 0.027, sz * (plinth.z * 0.5 - 0.016)),
+				Vector3(0, 0, 90)))
+	_put(HullMesh.rounded_box(Vector3(0.11, 0.07, 0.11), 0.014), "paint", mount, _at(Vector3(0, 0.06, 0)))
+	_put(HullMesh.rounded_box(Vector3(0.116, 0.012, 0.116), 0.004), "metal", mount, _at(Vector3(0, 0.098, 0)))
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.003, 0.014), Vector2(0.004, 0.014), Vector2(0.004, 0.001)]), 14),
+		"brass", mount, _at(Vector3(0.054, 0.06, -0.022)))
+	_led(mount, Vector3(0.058, 0.062, 0.026), WEAPON, 0.009)
+	# The tower: a ceramic insulator, or with an Arc Coil a former wound in copper.
+	if coil == 0:
+		var profile := PackedVector2Array([Vector2(0.1, 0.001), Vector2(0.1, 0.024)])
+		for k in 4:
+			var h := 0.128 + k * 0.036
+			profile.append_array(PackedVector2Array([Vector2(h - 0.01, 0.024), Vector2(h - 0.004, 0.046),
+				Vector2(h + 0.004, 0.046), Vector2(h + 0.009, 0.024)]))
+		profile.append_array(PackedVector2Array([Vector2(0.266, 0.022), Vector2(0.272, 0.001)]))
+		_put(HullMesh.lathe(profile, 20), "ceramic", mount, _stand(Vector3.ZERO))
+	else:
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(0.1, 0.001), Vector2(0.1, 0.03), Vector2(0.108, 0.05),
+			Vector2(0.117, 0.05), Vector2(0.125, 0.027), Vector2(0.245, 0.027), Vector2(0.253, 0.05), Vector2(0.262, 0.05),
+			Vector2(0.27, 0.03), Vector2(0.274, 0.001)]), 20), "ceramic", mount, _stand(Vector3.ZERO))
+		var helix := PackedVector3Array()
+		for k in 121:
+			var t := k / 120.0
+			var a := t * TAU * 11.0
+			helix.append(Vector3(cos(a) * 0.03, 0.132 + t * 0.108, sin(a) * 0.03))
+		_put(HullMesh.pipe(helix, 0.0034, 5), "copper", mount)
+	# The orb in its ring on a copper neck.
+	var top := 0.31 if coil == 0 else 0.325
+	var ring_r := 0.055 if coil == 0 else 0.07
+	var tube := 0.017 if coil == 0 else 0.021
+	var orb := ring_r - tube + 0.009
+	_put(HullMesh.pipe(PackedVector3Array([Vector3(0, 0.26, 0), Vector3(0, top, 0)]), 0.009, 8), "copper", mount)
+	_put(HullMesh.lathe(_torus(ring_r, tube, 10), 28), "copper", mount, _stand(Vector3(0, top, 0)))
+	_put(HullMesh.lathe(_ball(orb, 12), 18, 0.0), "shock_glow", mount, _at(Vector3(0, top, 0)))
+	if coil >= 2:
+		for sgn: float in [-1.0, 1.0]:
+			var tip := Vector3(0.0, 0.235, sgn * 0.16)
+			_put(HullMesh.pipe(PackedVector3Array([Vector3(0.0, 0.025, sgn * 0.105), Vector3(0.0, 0.12, sgn * 0.16), tip]),
+				0.006, 6, 0.03), "steel", mount)
+			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.016, 0.001), Vector2(-0.016, 0.01), Vector2(-0.01, 0.022),
+				Vector2(-0.004, 0.022), Vector2(0.0, 0.01), Vector2(0.006, 0.022), Vector2(0.012, 0.022), Vector2(0.016, 0.01),
+				Vector2(0.016, 0.001)]), 14), "ceramic", mount, _stand(Vector3(0.0, 0.17, sgn * 0.16)))
+			_put(HullMesh.lathe(_ball(0.022, 10), 14), "copper", mount, _at(tip + Vector3(0, 0.014, 0)))
+			# A forked arc from the electrode to the orb.
+			var from := tip + Vector3(0, 0.02, -sgn * 0.02)
+			var to := Vector3(0, top, sgn * orb * 0.9)
+			var jag := [0.0, 0.014, -0.011, 0.016, -0.009, 0.007, 0.0]
+			var arc := PackedVector3Array()
+			for k in jag.size():
+				var t := float(k) / (jag.size() - 1)
+				arc.append(from.lerp(to, t) + Vector3(jag[k], jag[(k + 2) % jag.size()] * 0.6, 0))
+			_put(HullMesh.pipe(arc, 0.0028, 4), "shock_glow", mount)
+		# Capacitor jars behind: glass, copper-lined, brass knobs.
+		for z: float in [-0.06, 0.0, 0.06]:
+			var at := Vector3(-0.1, 0.027, z)
+			_put(HullMesh.lathe(PackedVector2Array([Vector2(0.0, 0.001), Vector2(0.0, 0.018), Vector2(0.056, 0.018),
+				Vector2(0.062, 0.012), Vector2(0.062, 0.001)]), 14), "glass", mount, _stand(at))
+			_put(HullMesh.lathe(PackedVector2Array([Vector2(0.0, 0.0185), Vector2(0.032, 0.0185), Vector2(0.032, 0.001)]),
+				14, 0.0), "copper", mount, _stand(at))
+			_put(HullMesh.pipe(PackedVector3Array([at + Vector3(0, 0.05, 0), at + Vector3(0, 0.085, 0)]), 0.003, 5), "brass",
+				mount)
+			_put(HullMesh.lathe(_ball(0.008, 8), 10), "brass", mount, _at(at + Vector3(0, 0.088, 0)))
+	m.add_muzzle(&"shock", mount * Vector3(0, top, 0))

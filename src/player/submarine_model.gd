@@ -60,6 +60,10 @@ var _prop_angle := 0.0
 var _strobe_t := 0.0
 ## Glowing seams that breathe (a "pulse" finish), or false.
 var _pulse := false
+## The shock emitter's glow, its resting energy, and how much of a flash is left.
+var _shock_glow: StandardMaterial3D
+var _shock_base := 0.0
+var _shock_flash := 0.0
 
 
 ## Builds the frame's model in [param skin] (its factory paint if null).
@@ -159,6 +163,10 @@ func animate(delta: float, thrust: float) -> void:
 	_strobe_t += delta
 	if strobe:
 		strobe.visible = fmod(_strobe_t, 1.6) < 0.08
+	if _shock_glow:
+		_shock_flash = maxf(_shock_flash - delta * 2.2, 0.0)
+		var flicker := 0.8 + 0.2 * sin(_strobe_t * 23.0) * sin(_strobe_t * 7.3)
+		_shock_glow.emission_energy_multiplier = _shock_base * flicker + 16.0 * _shock_flash * _shock_flash
 	if _pulse:
 		var energy := 0.4 + 1.8 * pow(0.5 + 0.5 * sin(_strobe_t * 1.8), 2.0)
 		for mat in _paints:
@@ -183,6 +191,7 @@ func darken_hull(amount: float) -> void:
 		if mat and mat.emission_enabled and mat != cockpit_material and not dimmed.has(mat):
 			dimmed[mat] = true
 			mat.emission_energy_multiplier *= 1.0 - amount
+	_shock_base *= 1.0 - amount
 
 
 # --- Equipment (used by SubEquipment) --------------------------------------------
@@ -200,6 +209,7 @@ func equipment_root() -> Node3D:
 		_lamp_head.queue_free()
 	_lamp_head = null
 	_harpoon_spear = null
+	_shock_glow = null
 	lamp_swivel = null
 	lamp_lens = null
 	_equipment = Node3D.new()
@@ -219,6 +229,17 @@ func set_lamp_head(head: Node3D, swivel: Node3D, lens: Node3D) -> void:
 	_lamp_head = head
 	lamp_swivel = swivel
 	lamp_lens = lens
+
+
+## The shock emitter's glowing parts, flared by flash_shock().
+func set_shock_glow(mat: StandardMaterial3D) -> void:
+	_shock_glow = mat
+	_shock_base = mat.emission_energy_multiplier
+
+
+## Flares the shock emitter (as its pulse goes off).
+func flash_shock() -> void:
+	_shock_flash = 1.0
 
 
 func set_harpoon_spear(spear: Node3D) -> void:

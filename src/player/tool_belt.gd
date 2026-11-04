@@ -121,6 +121,8 @@ func _shock() -> bool:
 	_sub.run.battery -= cost
 	var r := _sub.stats.shock_radius
 	Fx.shockwave(_sub.level, _sub.pos, r, Color(0.4, 0.8, 1.0))
+	if _sub.model:
+		_sub.model.flash_shock()
 	Fx.flash(_sub.level, _sub.pos, Color(0.5, 0.85, 1.0), r * 2.0, 0.35)
 	Audio.play(&"shock", 0.0)
 	Events.shake_requested.emit(0.4)
