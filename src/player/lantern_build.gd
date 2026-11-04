@@ -104,15 +104,16 @@ static func mounts() -> Dictionary:
 		flank.append_array([f.mount(x, 0.32), f.mount(x, 0.68)])
 	out[&"flank"] = flank
 	# Under the hull the battery pods hide everything, so the belly's gear goes
-	# outboard on the frame's near side, then on top of the near skid aft.
-	out[&"belly"] = [SubEquipment.frame_at(Vector3(0.2, -0.66, 0.535), Vector3.BACK),
+	# outboard on the frame's near side, its back against a diagonal brace (on
+	# the frame's plane, z 0.5), then on top of the near skid aft.
+	out[&"belly"] = [SubEquipment.frame_at(Vector3(0.2, -0.66, 0.5), Vector3.BACK),
 		SubEquipment.frame_at(Vector3(-1.48, -0.92, 0.5), Vector3.UP),
 		SubEquipment.frame_at(Vector3(-0.3, f.keel_y(-0.3, 0.0) + 0.01, 0.0), Vector3.DOWN)]
 	# The main thruster's duct, for Silent Screws: centre, half-height and
 	# half-width, squareness, half-length, narrowing at the exit, skirt.
 	out[&"screw"] = [STERN, Vector2(0.36, 0.36), 2.0, 0.21, 0.97, true]
 	# The battery pack strapped outboard on the frame's near side, between its posts.
-	out[&"power"] = SubEquipment.frame_at(Vector3(-0.8, -0.66, 0.535), Vector3.BACK)
+	out[&"power"] = SubEquipment.frame_at(Vector3(-0.8, -0.66, 0.5), Vector3.BACK)
 	# The Galvanic Hull's electrode studs: from x, to x, how far round.
 	out[&"galvanic"] = Vector3(-1.3, 0.75, 0.19)
 	return out

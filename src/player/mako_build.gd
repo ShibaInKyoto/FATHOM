@@ -86,8 +86,10 @@ static func mounts() -> Dictionary:
 	out[&"torpedo"] = [torpedo, SubEquipment.mirror(torpedo)]
 	out[&"drive"] = [f.mount(-1.55, 0.17), f.mount(-1.55, 0.83)]
 	out[&"foil"] = [f.mount(0.0, 0.1), f.mount(0.0, 0.9)]
+	# Deck slots behind the canopy (it tapers out at x 0.05), either side of the
+	# dorsal fin's root.
 	var deck: Array = []
-	for x: float in [0.35, -0.35, -0.85]:
+	for x: float in [0.0, -0.4, -0.85]:
 		deck.append_array([f.mount(x, 0.41), f.mount(x, 0.59)])
 	out[&"deck"] = deck
 	var flank: Array = []
