@@ -76,7 +76,7 @@ func _fire_flare(aim: Vector2) -> bool:
 		return false
 	_sub.run.flares -= 1
 	var flare := Flare.new()
-	flare.pos = _sub.pos + aim * 1.4
+	flare.pos = _sub.launch_point(&"flare", 1.4)
 	flare.vel = aim * 17.0 + _sub.vel * 0.5
 	_sub.level.add_entity(flare)
 	Audio.play_at(&"flare_launch", _sub.pos, -2.0)
@@ -89,7 +89,7 @@ func _launch_decoy(aim: Vector2) -> bool:
 		return false
 	_sub.run.decoys -= 1
 	var decoy := Decoy.new()
-	decoy.pos = _sub.pos + aim * 1.4
+	decoy.pos = _sub.launch_point(&"decoy", 1.4)
 	decoy.vel = aim * 13.0 + _sub.vel * 0.5
 	_sub.level.add_entity(decoy)
 	Audio.play_at(&"flare_launch", _sub.pos, -4.0, 0.05, 0.7)
@@ -102,7 +102,7 @@ func _fire_torpedo(aim: Vector2) -> bool:
 		return false
 	_sub.run.torpedoes -= 1
 	var torpedo := Torpedo.new()
-	torpedo.pos = _sub.pos + aim * 1.8
+	torpedo.pos = _sub.launch_point(&"torpedo", 1.8)
 	# Straight down the aim, carrying only the sub's speed along it.
 	torpedo.vel = aim * (8.0 + maxf(_sub.vel.dot(aim), 0.0))
 	torpedo.damage = _sub.stats.torpedo_damage

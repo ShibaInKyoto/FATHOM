@@ -77,7 +77,7 @@ func setup(sub: Submarine) -> void:
 
 
 func _origin() -> Vector2:
-	return _sub.pos + _sub.aim * 1.2
+	return _sub.launch_point(&"harpoon", 1.2)
 
 
 func fire(aim: Vector2) -> void:

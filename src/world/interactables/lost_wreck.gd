@@ -23,6 +23,7 @@ func setup() -> void:
 	add_child(model)
 	var crushed := kind != "power"
 	model.build(frame_id, Game.livery(frame_id))
+	model.fit_equipment(SubStats.build(frame_id, {}, []).tools, {}, [])
 	model.darken_hull(0.6 if crushed else 0.35)
 	model.set_cockpit_glow(0.0)
 	if crushed:

@@ -2,19 +2,54 @@ class_name BathysphereBuild
 extends RefCounted
 ## The old Bathysphere: a cast pressure sphere grown into a working sub. Its
 ## halves are bolted at a heavy flange; an observer in a leather cap looks
-## out through a thick quartz port, under two smaller ones and a sonar
-## transducer on its forehead. A dogged hatch and a lifting bail on top,
-## floodlights on arms, shock electrodes on ceramic insulators at the front,
-## two big battery boxes and a drop-ballast hopper in a cradle on skids, and
-## a caged propeller on an outrigger behind. The port faces +X.
+## out through a thick quartz port under two smaller ones. A dogged hatch and
+## a lifting bail on top, floodlights on arms, two big battery boxes and a
+## drop-ballast hopper in a cradle on skids, and a caged propeller on an
+## outrigger behind. Its shock emitter and sonar hang on as equipment. The
+## port faces +X.
 
 const PAINT_MAP := "res://assets/subs/bathysphere_paint.png"
 const NORMAL_MAP := "res://assets/subs/bathysphere_normal.png"
 ## The sphere's radius.
 const R := 1.0
 const WARM := Color(1.0, 0.68, 0.36)
+## Which way the upper port on the near side looks (the far one mirrors it).
+const UPPER_PORT := Vector3(0.6198, 0.5499, 0.5599)
 
 static var _hull: HullFairing
+
+
+## Where equipment goes on the Bathysphere (see SubEquipment): on the sphere,
+## each mount facing straight out of it.
+static func mounts() -> Dictionary:
+	var on := func(d: Vector3) -> Transform3D:
+		var n := d.normalized()
+		return SubEquipment.frame_at(n * R, n)
+	var pair := func(d: Vector3) -> Array:
+		var t: Transform3D = on.call(d)
+		return [t, SubEquipment.mirror(t)]
+	var out := {}
+	out[&"lamp"] = on.call(Vector3(0.78, 0.62, 0.0))
+	out[&"sonar"] = on.call(Vector3(-0.8, 0.55, 0.0))
+	out[&"harpoon"] = on.call(Vector3(0.5, 0.15, 0.85))
+	out[&"flare"] = on.call(Vector3(-0.45, 0.4, 0.8))
+	out[&"decoy"] = on.call(Vector3(-0.45, 0.4, -0.8))
+	out[&"shock"] = SubEquipment.frame_at(Vector3(1.02, -1.14, 0.0), Vector3.UP)
+	out[&"torpedo"] = pair.call(Vector3(0.3, -0.45, 0.84))
+	out[&"drive"] = pair.call(Vector3(-0.6, -0.1, 0.79))
+	out[&"foil"] = pair.call(Vector3(0.15, -0.72, 0.68))
+	var deck: Array = []
+	for d: Vector3 in [Vector3(0.3, 0.84, 0.45), Vector3(-0.3, 0.84, 0.45), Vector3(0.0, 0.72, 0.69)]:
+		deck.append_array(pair.call(d))
+	out[&"deck"] = deck
+	var flank: Array = []
+	for d: Vector3 in [Vector3(-0.42, -0.32, 0.85), Vector3(-0.72, -0.2, 0.66), Vector3(-0.15, -0.62, 0.77),
+			Vector3(-0.3, 0.42, 0.86)]:
+		flank.append_array(pair.call(d))
+	out[&"flank"] = flank
+	out[&"belly"] = [on.call(Vector3(-0.5, -0.87, 0.0)), on.call(Vector3(0.42, -0.9, 0.0)),
+		on.call(Vector3(-0.78, -0.62, 0.0))]
+	return out
 
 
 ## The sphere, lofted end to end along X (its poles hide under the main
@@ -36,6 +71,13 @@ static func build(m: SubmarineModel) -> void:
 		hull.set_shader_parameter(&"paint_map", load(PAINT_MAP))
 		hull.set_shader_parameter(&"normal_tex", load(NORMAL_MAP))
 	hull.set_shader_parameter(&"coat", 0.25)
+	# Holes in the skin under the two upper ports, so they look into the cabin too.
+	var holes: Array[Vector4] = []
+	for sgn: float in [1.0, -1.0]:
+		var d := UPPER_PORT * Vector3(1.0, 1.0, sgn)
+		holes.append(Vector4(d.x * R, d.y * R, d.z * R, 0.122))
+	hull.set_shader_parameter(&"holes", holes)
+	hull.set_shader_parameter(&"hole_count", holes.size())
 	hull.set_shader_parameter(&"roughness", 0.5)
 	var quartz := m.glass_material()
 	quartz.albedo_color = Color(0.7, 0.88, 0.8, 0.12)
@@ -101,7 +143,7 @@ static func _ports(m: SubmarineModel, mats: Dictionary) -> void:
 		Vector2(1.127, 0.001)]), 40, 0.0), mats.quartz)
 	m.place(HullMesh.bolt_ring(12, 0.362, 0.013), mats.brass, Vector3(1.13, 0.0, 0.0))
 	for sgn: float in [1.0, -1.0]:
-		var d := Vector3(0.62, 0.55, sgn * 0.56).normalized()
+		var d := UPPER_PORT * Vector3(1.0, 1.0, sgn)
 		var basis := Basis(Quaternion(Vector3.RIGHT, d))
 		m.place_xform(HullMesh.lathe(PackedVector2Array([Vector2(0.9, 0.21), Vector2(1.0, 0.195), Vector2(1.07, 0.185),
 			Vector2(1.085, 0.165), Vector2(1.085, 0.165), Vector2(1.085, 0.125), Vector2(1.085, 0.125),
@@ -169,14 +211,6 @@ static func _top(m: SubmarineModel, mats: Dictionary) -> void:
 	m.place(HullMesh.pipe(PackedVector3Array([Vector3(-0.3, 1.34, 0.0), Vector3(-0.3, 1.37, 0.0)]), 0.012, 6),
 		mats.iron)
 	m.place(HullMesh.pipe(PackedVector3Array([Vector3(0.25, 1.35, 0.0), Vector3(0.12, 1.8, 0.0)]), 0.005, 5), mats.iron)
-	# The sonar: a transducer drum on a stub mast, its faces in rubber.
-	var d := Vector3(0.78, 0.62, 0.0).normalized()
-	var head := d * (R + 0.16)
-	m.place(HullMesh.pipe(PackedVector3Array([d * (R - 0.02), head]), 0.04, 10), mats.iron)
-	m.place(HullMesh.lathe(PackedVector2Array([Vector2(-0.14, 0.001), Vector2(-0.14, 0.085), Vector2(-0.13, 0.1),
-		Vector2(0.13, 0.1), Vector2(0.14, 0.085), Vector2(0.14, 0.001)]), 28), mats.rubber, head, Vector3(0, 90, 0))
-	m.place(HullMesh.lathe(PackedVector2Array([Vector2(-0.1, 0.101), Vector2(-0.1, 0.108), Vector2(0.1, 0.108),
-		Vector2(0.1, 0.101)]), 28), mats.iron, head, Vector3(0, 90, 0))
 
 
 ## Floodlights on arms either side of the port, with the running lights.
@@ -222,24 +256,11 @@ static func _cradle(m: SubmarineModel, mats: Dictionary) -> void:
 	for x: float in [-0.72, 0.6]:
 		m.place(HullMesh.pipe(PackedVector3Array([Vector3(x, skid_y + 0.02, -0.72), Vector3(x, skid_y + 0.02, 0.72)]),
 			0.03, 8), mats.frame)
-	# Shock electrodes: copper balls on stacks of ceramic insulators.
+	# A crossbar at the front, for the shock emitter if one is fitted.
 	var bar_x := 1.02
 	var bar_y := skid_y + 0.13
 	m.place(HullMesh.pipe(PackedVector3Array([Vector3(bar_x, bar_y, -0.72), Vector3(bar_x, bar_y, 0.72)]), 0.03, 8),
 		mats.frame)
-	var tilt := Vector3(0, 0, 35)
-	for z: float in [-0.32, 0.32]:
-		var at := Vector3(bar_x, bar_y, z)
-		var discs := PackedVector2Array([Vector2(0.0, 0.001), Vector2(0.0, 0.04)])
-		for k in 4:
-			var x := 0.04 + k * 0.05
-			discs.append_array(PackedVector2Array([Vector2(x - 0.01, 0.04), Vector2(x, 0.075), Vector2(x + 0.015, 0.075),
-				Vector2(x + 0.025, 0.04)]))
-		discs.append_array(PackedVector2Array([Vector2(0.25, 0.04), Vector2(0.26, 0.001)]))
-		m.place(HullMesh.lathe(discs, 20), mats.ceramic, at, tilt)
-		var dir := Basis.from_euler(Vector3(0, 0, deg_to_rad(35.0))).x
-		m.place(HullMesh.pipe(PackedVector3Array([at + dir * 0.25, at + dir * 0.36]), 0.014, 8), mats.copper)
-		m.place(HullMesh.lathe(_ball(0.055, 10), 16), mats.copper, at + dir * 0.4)
 
 
 ## The batteries in their boxes, the drop-ballast hopper and the cables.

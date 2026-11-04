@@ -80,6 +80,36 @@ static func _build_parts(m: SubmarineModel, mats: Dictionary) -> void:
 	_stern(m, mats)
 
 
+## Where equipment goes on the Lantern (see SubEquipment).
+static func mounts() -> Dictionary:
+	var f := fairing()
+	var up := Vector3.UP
+	var out := {}
+	out[&"lamp"] = SubEquipment.frame_at(Vector3(1.2, BOW_Y + 0.692, 0.0), up)
+	out[&"sonar"] = SubEquipment.frame_at(Vector3(0.62, f.deck_y(0.62, 0.0) - 0.01, 0.0), up)
+	out[&"harpoon"] = SubEquipment.frame_at(Vector3(0.86, -0.36, 0.52), Vector3(0.0, -0.2, 1.0))
+	out[&"flare"] = SubEquipment.frame_at(Vector3(-0.74, f.deck_y(-0.74, 0.0) - 0.01, 0.0), up)
+	out[&"decoy"] = f.mount(-1.28, 0.38)
+	out[&"shock"] = SubEquipment.frame_at(Vector3(1.52, -0.59, 0.0), up)
+	var torpedo := SubEquipment.frame_at(Vector3(-0.25, -0.36, 0.53), Vector3(0.0, -0.3, 1.0))
+	out[&"torpedo"] = [torpedo, SubEquipment.mirror(torpedo)]
+	out[&"drive"] = [f.mount(-1.62, 0.12), f.mount(-1.62, 0.88)]
+	out[&"foil"] = [f.mount(0.55, 0.08), f.mount(0.55, 0.92)]
+	var deck: Array = []
+	for p: Vector2 in [Vector2(0.85, 0.43), Vector2(-0.3, 0.41), Vector2(-0.95, 0.36)]:
+		deck.append_array([f.mount(p.x, p.y), f.mount(p.x, 1.0 - p.y)])
+	out[&"deck"] = deck
+	var flank: Array = []
+	for x: float in [-1.2, -0.6, 0.0, 0.6]:
+		flank.append_array([f.mount(x, 0.12), f.mount(x, 0.88)])
+	out[&"flank"] = flank
+	var belly: Array = []
+	for x: float in [-0.85, -0.3, 0.25]:
+		belly.append(SubEquipment.frame_at(Vector3(x, -0.6, 0.0), Vector3.DOWN))
+	out[&"belly"] = belly
+	return out
+
+
 # --- Parts ---------------------------------------------------------------------------
 
 static func _fairing(m: SubmarineModel, mats: Dictionary) -> void:
@@ -186,18 +216,6 @@ static func _lamps(m: SubmarineModel, mats: Dictionary) -> void:
 		var a := deg_to_rad(a_deg)
 		var at := Vector3(1.22, BOW_Y + cos(a) * (ring_r + 0.005), sin(a) * (ring_r + 0.005))
 		_lamp_head(m, mats, at, 0.042, Vector3(-a_deg * 0.3, 0, -10))
-	# The searchlight: a finned housing on a pan-and-tilt yoke.
-	var base := Vector3(0.62, fairing().deck_y(0.62, 0.0) - 0.01, 0.0)
-	m.place(HullMesh.lathe(PackedVector2Array([Vector2(-0.02, 0.1), Vector2(0.03, 0.1), Vector2(0.05, 0.085),
-		Vector2(0.07, 0.06), Vector2(0.075, 0.001)]), 24), mats.frame, base, Vector3(0, 0, 90))
-	var pivot := base + Vector3(0.0, 0.17, 0.0)
-	m.place(HullMesh.pipe(PackedVector3Array([base + Vector3(0, 0.06, 0.13), pivot + Vector3(0, 0, 0.13)]), 0.018),
-		mats.frame)
-	m.place(HullMesh.pipe(PackedVector3Array([base + Vector3(0, 0.06, -0.13), pivot + Vector3(0, 0, -0.13)]), 0.018),
-		mats.frame)
-	m.place(HullMesh.pipe(PackedVector3Array([pivot + Vector3(0, 0, -0.14), pivot + Vector3(0, 0, 0.14)]), 0.022),
-		mats.steel)
-	_lamp_head(m, mats, pivot, 0.1, Vector3(0, 0, -8), true)
 
 
 ## A lamp housing facing +X (before [param rot_deg]); a big one gets cooling fins.
@@ -344,7 +362,9 @@ static func _underside(m: SubmarineModel, mats: Dictionary) -> void:
 
 ## The manipulator, folded over the basket on the near side.
 static func _arm(m: SubmarineModel, mats: Dictionary) -> void:
-	var z := 0.43
+	# On the far side: the harpoon has the near one.
+	var s := -1.0
+	var z := 0.43 * s
 	var base := Vector3(0.9, -0.36, z)
 	var shoulder := Vector3(0.98, -0.45, z)
 	var elbow := Vector3(1.5, -0.33, z)
@@ -358,15 +378,15 @@ static func _arm(m: SubmarineModel, mats: Dictionary) -> void:
 	_link(m, mats.safety, shoulder, elbow, 0.075, 0.06)
 	_link(m, mats.safety, elbow, wrist, 0.06, 0.05)
 	# Hydraulic ram along the upper arm: a cylinder and a polished rod.
-	var ram0 := shoulder + Vector3(0.05, 0.08, 0.04)
-	var ram1 := shoulder.lerp(elbow, 0.75) + Vector3(0.0, 0.06, 0.04)
+	var ram0 := shoulder + Vector3(0.05, 0.08, 0.04 * s)
+	var ram1 := shoulder.lerp(elbow, 0.75) + Vector3(0.0, 0.06, 0.04 * s)
 	var mid := ram0.lerp(ram1, 0.55)
 	m.place(HullMesh.pipe(PackedVector3Array([ram0, mid]), 0.022, 10), mats.frame)
 	m.place(HullMesh.pipe(PackedVector3Array([mid, ram1]), 0.011, 8), mats.steel)
 	# A hose looping from the base along the arm.
-	m.place(HullMesh.pipe(PackedVector3Array([base + Vector3(-0.05, 0.02, 0.06), shoulder + Vector3(-0.08, 0.1, 0.07),
-		shoulder.lerp(elbow, 0.5) + Vector3(0, 0.08, 0.06), elbow + Vector3(0.05, 0.06, 0.05)]), 0.01, 6, 0.08),
-		mats.rubber)
+	m.place(HullMesh.pipe(PackedVector3Array([base + Vector3(-0.05, 0.02, 0.06 * s),
+		shoulder + Vector3(-0.08, 0.1, 0.07 * s), shoulder.lerp(elbow, 0.5) + Vector3(0, 0.08, 0.06 * s),
+		elbow + Vector3(0.05, 0.06, 0.05 * s)]), 0.01, 6, 0.08), mats.rubber)
 	# The claw: a wrist block and two curled jaws pointing down into the basket.
 	var hand := wrist + Vector3(0.02, -0.08, 0.0)
 	m.place(HullMesh.rounded_box(Vector3(0.07, 0.08, 0.08), 0.02), mats.ti, hand)

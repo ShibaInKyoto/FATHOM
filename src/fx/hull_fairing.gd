@@ -124,6 +124,12 @@ func on_skin(x: float, v: float, lift: float) -> Vector3:
 	return Vector3(x, a.y, a.z) + out * lift
 
 
+## A mounting frame on the skin at [param x], [param v] of the way round,
+## [param lift] off it: Y out of the skin, X towards the bow.
+func mount(x: float, v: float, lift := 0.0) -> Transform3D:
+	return SubEquipment.frame_at(on_skin(x, v, lift), normal_at(x, v))
+
+
 ## The outward normal of the skin at [param x], [param v] of the way round.
 func normal_at(x: float, v: float) -> Vector3:
 	return (on_skin(x, v, 0.05) - on_skin(x, v, 0.0)).normalized()

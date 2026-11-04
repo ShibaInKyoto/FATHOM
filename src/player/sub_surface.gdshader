@@ -33,6 +33,10 @@ uniform vec3 bare : source_color = vec3(0.6, 0.61, 0.62);
 uniform float mottle = 0.12;
 // Wrecks and derelicts: everything darker and the glow dimmed.
 uniform float darken = 0.0;
+// Round holes cut through the skin (centre and radius, in the model's own
+// space), where a port looks in through it.
+uniform vec4 holes[4];
+uniform int hole_count = 0;
 
 varying vec3 obj_pos;
 varying vec3 obj_nrm;
@@ -64,6 +68,11 @@ vec3 triplanar(sampler2D tex, vec3 p, vec3 n) {
 }
 
 void fragment() {
+	for (int i = 0; i < hole_count; i++) {
+		if (distance(obj_pos, holes[i].xyz) < holes[i].w) {
+			discard;
+		}
+	}
 	vec3 col = paint;
 	if (use_pattern) {
 		col *= triplanar(pattern_tex, obj_pos, obj_nrm);

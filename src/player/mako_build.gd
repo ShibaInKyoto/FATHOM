@@ -1,10 +1,9 @@
 class_name MakoBuild
 extends RefCounted
-## The Mako, a racing prototype with a torpedo bay: a long, flattened hull
-## with a fighter canopy over a reclined pilot, a tall swept dorsal fin,
-## swept dive planes, torpedo tubes in blisters either side of the nose, an
-## open ventral bay with two torpedoes in it, lamps set like eyes, gill
-## intakes on the flanks and an X-tail round a shrouded pump-jet. Nose +X.
+## The Mako, a racing prototype: a long, flattened hull with a fighter canopy
+## over a reclined pilot, a tall swept dorsal fin, swept dive planes, lamps
+## set like eyes, gill intakes on the flanks and an X-tail round a shrouded
+## pump-jet. Its torpedo pods hang on as equipment. Nose +X.
 
 const PAINT_MAP := "res://assets/subs/mako_paint.png"
 const NORMAL_MAP := "res://assets/subs/mako_normal.png"
@@ -49,8 +48,6 @@ static func build(m: SubmarineModel) -> void:
 		"ti": m.metal_material(Color(0.5, 0.51, 0.53), 0.85, 0.3, false),
 		"steel": m.metal_material(Color(0.78, 0.79, 0.8), 0.95, 0.2, false),
 		"rubber": m.metal_material(Color(0.03, 0.03, 0.033), 0.0, 0.85, false),
-		"warhead": m.metal_material(Color(0.95, 0.72, 0.08), 0.2, 0.4, true),
-		"torpedo": m.metal_material(Color(0.2, 0.22, 0.24), 0.6, 0.35, true),
 		"interior": m.metal_material(Color(0.09, 0.095, 0.1), 0.2, 0.7, false),
 		"suit": m.metal_material(Color(0.07, 0.07, 0.08), 0.0, 0.7, false),
 		"helmet": m.metal_material(Color(0.92, 0.92, 0.9), 0.1, 0.25, false),
@@ -68,9 +65,40 @@ static func build(m: SubmarineModel) -> void:
 		_nose(m, mats)
 		_canopy(m, mats)
 		_fins(m, mats)
-		_torpedoes(m, mats)
 		_jet(m, mats)
 		m.remember(mats)
+
+
+## Where equipment goes on the Mako (see SubEquipment).
+static func mounts() -> Dictionary:
+	var f := fairing()
+	var up := Vector3.UP
+	var down := Vector3.DOWN
+	var out := {}
+	out[&"lamp"] = SubEquipment.frame_at(Vector3(1.3, f.keel_y(1.3, 0.0) + 0.01, 0.0), down)
+	out[&"harpoon"] = SubEquipment.frame_at(Vector3(1.75, f.keel_y(1.75, 0.0) + 0.005, 0.0), down)
+	out[&"sonar"] = SubEquipment.frame_at(Vector3(-0.35, f.keel_y(-0.35, 0.0) + 0.01, 0.0), down)
+	out[&"shock"] = SubEquipment.frame_at(Vector3(0.85, f.keel_y(0.85, 0.0) + 0.01, 0.0), down)
+	out[&"flare"] = SubEquipment.frame_at(Vector3(-1.22, f.deck_y(-1.22, 0.0) - 0.005, 0.0), up)
+	out[&"decoy"] = SubEquipment.frame_at(Vector3(-1.52, f.deck_y(-1.52, 0.0) - 0.005, 0.0), up)
+	var y := -0.14
+	var torpedo := SubEquipment.frame_at(Vector3(1.25, y, f.side_z(1.25, y) - 0.02), Vector3(0.0, -0.25, 1.0))
+	out[&"torpedo"] = [torpedo, SubEquipment.mirror(torpedo)]
+	out[&"drive"] = [f.mount(-1.55, 0.17), f.mount(-1.55, 0.83)]
+	out[&"foil"] = [f.mount(0.0, 0.1), f.mount(0.0, 0.9)]
+	var deck: Array = []
+	for x: float in [0.35, -0.35, -0.85]:
+		deck.append_array([f.mount(x, 0.41), f.mount(x, 0.59)])
+	out[&"deck"] = deck
+	var flank: Array = []
+	for x: float in [-1.25, -0.65, 0.0, 0.6]:
+		flank.append_array([f.mount(x, 0.14), f.mount(x, 0.86)])
+	out[&"flank"] = flank
+	var belly: Array = []
+	for x: float in [0.35, -0.95, -1.35]:
+		belly.append(SubEquipment.frame_at(Vector3(x, f.keel_y(x, 0.0) + 0.01, 0.0), down))
+	out[&"belly"] = belly
+	return out
 
 
 # --- Parts ---------------------------------------------------------------------------
@@ -187,37 +215,6 @@ static func _fins(m: SubmarineModel, mats: Dictionary) -> void:
 	for k in 4:
 		var basis := Basis(Vector3.RIGHT, PI * 0.25 + PI * 0.5 * k)
 		m.place_xform(tail, mats.trim, Transform3D(basis, Vector3(0.0, JET.y, 0.0) + basis.y * 0.07))
-
-
-## Torpedo tubes in blisters either side of the nose, and the open ventral
-## bay with two torpedoes waiting in it.
-static func _torpedoes(m: SubmarineModel, mats: Dictionary) -> void:
-	var f := fairing()
-	var blister := PackedVector2Array([Vector2(0.9, 0.001), Vector2(1.05, 0.04), Vector2(1.3, 0.066), Vector2(1.6, 0.074),
-		Vector2(1.82, 0.07), Vector2(1.86, 0.064), Vector2(1.87, 0.056), Vector2(1.87, 0.056), Vector2(1.87, 0.045)])
-	var tube := PackedVector2Array([Vector2(1.87, 0.05), Vector2(1.88, 0.05), Vector2(1.885, 0.045),
-		Vector2(1.885, 0.038), Vector2(1.885, 0.038), Vector2(1.84, 0.038), Vector2(1.84, 0.038), Vector2(1.84, 0.001)])
-	for sgn: float in [1.0, -1.0]:
-		var y := -0.13
-		var at := Vector3(0.0, y, sgn * (f.side_z(1.45, y) - 0.04))
-		m.place(HullMesh.lathe(blister, 24), mats.trim, at)
-		m.place(HullMesh.lathe(tube, 20), mats.ti, at)
-	# The bay: a carbon pod under the hull, open at the front.
-	var bay_y := f.keel_y(0.0, 0.0) + 0.03
-	var bay := PackedVector2Array([Vector2(-0.8, 0.001), Vector2(-0.65, 0.07), Vector2(-0.3, 0.12), Vector2(0.3, 0.125),
-		Vector2(0.55, 0.12), Vector2(0.6, 0.11), Vector2(0.6, 0.11), Vector2(0.6, 0.001)])
-	m.place(_oval_lathe(bay, 0.62, 1.55, 32), mats.carbon, Vector3(0.0, bay_y, 0.0))
-	var mouth := PackedVector2Array([Vector2(0.598, 0.1), Vector2(0.598, 0.09), Vector2(0.52, 0.09),
-		Vector2(0.52, 0.001)])
-	m.place(_oval_lathe(mouth, 0.62, 1.55, 32), mats.interior, Vector3(0.0, bay_y, 0.0))
-	var torpedo := PackedVector2Array([Vector2(0.3, 0.045), Vector2(0.56, 0.045), Vector2(0.56, 0.045),
-		Vector2(0.62, 0.042)])
-	var warhead := PackedVector2Array([Vector2(0.62, 0.042), Vector2(0.66, 0.038), Vector2(0.69, 0.026),
-		Vector2(0.705, 0.01), Vector2(0.707, 0.001)])
-	for z: float in [-0.075, 0.075]:
-		var at := Vector3(0.0, bay_y - 0.005, z)
-		m.place(HullMesh.lathe(torpedo, 16), mats.torpedo, at)
-		m.place(HullMesh.lathe(warhead, 16), mats.warhead, at)
 
 
 ## The pump-jet: a shroud with a glowing nozzle lip round a hub, stator

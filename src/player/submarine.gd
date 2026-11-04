@@ -83,6 +83,7 @@ func setup(p_level: Level, p_run: RunState, start: Vector2) -> void:
 	model = SubmarineModel.new()
 	add_child(model)
 	model.build(run.frame_id, skin if skin else Game.livery(run.frame_id))
+	model.fit_equipment(run.stats.tools, Game.meta.upgrades, run.modules)
 
 	lamp = SpotLight3D.new()
 	lamp.light_color = Color(1.0, 0.95, 0.82)
@@ -169,6 +170,16 @@ func _apply_lamp_stats() -> void:
 	_beam_mesh.height = length
 	_beam_mesh.bottom_radius = tan(deg_to_rad(stats.lamp_angle * 0.8)) * length
 	beam.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0, -length * 0.5))
+
+
+## Where a shot of [param id] leaves the sub: its launcher's muzzle, or
+## [param reach] out along the aim if it has none.
+func launch_point(id: StringName, reach: float) -> Vector2:
+	var at: Variant = model.muzzle(id) if model else null
+	if at == null:
+		return pos + aim * reach
+	var v: Vector3 = at
+	return Vector2(v.x, v.y)
 
 
 func set_camera(cam: Camera3D) -> void:
@@ -438,9 +449,12 @@ func _update_visuals(delta: float, move: Vector2) -> void:
 	engine_audio.pitch_scale = 0.75 + speed_frac * 0.6
 
 	lamp.visible = lamp_on
-	# The lamp is a child of the (unrotated) submarine root, so local == world orientation.
-	var lamp_offset := Vector3(aim.x * 1.1, aim.y * 1.1 - 0.3, 0.0)
-	lamp.transform = Transform3D(Basis.looking_at(Vector3(aim.x, aim.y, 0.0), Vector3.BACK), lamp_offset)
+	# The lamp head swings on its gimbal to the aim, even mid-turn, and the
+	# light comes out of its lens. The light is a child of the (unrotated)
+	# submarine root, so local == world orientation.
+	var aim3 := Vector3(aim.x, aim.y, 0.0)
+	model.aim_lamp(aim3, delta)
+	lamp.transform = Transform3D(Basis.looking_at(aim3, Vector3.BACK), to_local(model.lamp_origin()))
 	model.set_cockpit_glow(0.9 if run.battery > 0.0 else 0.15)
 	position = Vector3(pos.x, pos.y, 0)
 

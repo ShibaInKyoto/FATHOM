@@ -17,6 +17,13 @@ var propeller: Node3D
 var strobe: MeshInstance3D
 var cockpit_material: StandardMaterial3D
 var hull_material: ShaderMaterial
+## Where equipment goes on this frame (see SubEquipment): a Transform3D or an
+## Array of them for each mount or row of mounts.
+var mounts: Dictionary = {}
+## The lamp's gimbal: its pan and tilt nodes and the point on its lens.
+var lamp_yaw: Node3D
+var lamp_pitch: Node3D
+var lamp_lens: Node3D
 
 var _dark: StandardMaterial3D
 var _steel: StandardMaterial3D
@@ -27,6 +34,12 @@ var _paints: Array[ShaderMaterial] = []
 ## Props besides the main one, each turning on its own axis.
 var _props: Array[Node3D] = []
 var _cockpit_light: OmniLight3D
+## The equipment hung on the frame, rebuilt whenever the loadout changes.
+var _equipment: Node3D
+var _equip_props: Array[Node3D] = []
+var _muzzles: Dictionary[StringName, Node3D] = {}
+## How many painted materials belong to the frame itself (the rest are the equipment's).
+var _frame_paints := 0
 var _prop_speed := 0.0
 var _prop_angle := 0.0
 var _strobe_t := 0.0
@@ -51,6 +64,51 @@ func build(frame_id: StringName, skin: SubSkins.Livery = null) -> void:
 		_:
 			LanternBuild.build(self)
 	_merge_static()
+	match frame_id:
+		&"mako":
+			mounts = MakoBuild.mounts()
+		&"bathysphere":
+			mounts = BathysphereBuild.mounts()
+		&"whisper":
+			mounts = SubEquipment.default_mounts(3.8, 0.45)
+		_:
+			mounts = LanternBuild.mounts()
+	_frame_paints = _paints.size()
+
+
+## Hangs the equipment for [param tools], hangar [param upgrades] and module
+## [param modules] on the frame (replacing what was there).
+func fit_equipment(tools: Array[StringName], upgrades: Dictionary, modules: Array[StringName]) -> void:
+	SubEquipment.fit(self, tools, upgrades, modules)
+
+
+func frame() -> StringName:
+	return _frame
+
+
+## Points the lamp down [param dir] (world space) as far as its gimbal
+## swings, easing there.
+func aim_lamp(dir: Vector3, delta: float) -> void:
+	if lamp_yaw == null:
+		return
+	var base := lamp_yaw.get_parent() as Node3D
+	var local := base.global_basis.orthonormalized().inverse() * dir
+	var flat := Vector2(local.x, local.z).length()
+	var ease := 1.0 - exp(-16.0 * delta)
+	if flat > 0.05:
+		lamp_yaw.rotation.y = lerp_angle(lamp_yaw.rotation.y, atan2(-local.z, local.x), ease)
+	lamp_pitch.rotation.z = lerp_angle(lamp_pitch.rotation.z, clampf(atan2(local.y, flat), -1.45, 1.45), ease)
+
+
+## Where the lamp's light comes from, in world space.
+func lamp_origin() -> Vector3:
+	return lamp_lens.global_position if lamp_lens else global_position
+
+
+## The muzzle of the launcher for [param id] in world space, or null if it has none.
+func muzzle(id: StringName) -> Variant:
+	var node: Node3D = _muzzles.get(id)
+	return node.global_position if node else null
 
 
 func animate(delta: float, thrust: float) -> void:
@@ -58,6 +116,8 @@ func animate(delta: float, thrust: float) -> void:
 	propeller.rotate_object_local(Vector3.RIGHT, _prop_speed * delta)
 	for p in _props:
 		p.rotate_object_local(Vector3.RIGHT, _prop_speed * 0.8 * delta)
+	for p in _equip_props:
+		p.rotate_object_local(Vector3.RIGHT, _prop_speed * 0.9 * delta)
 	_strobe_t += delta
 	if strobe:
 		strobe.visible = fmod(_strobe_t, 1.6) < 0.08
@@ -79,12 +139,59 @@ func darken_hull(amount: float) -> void:
 		mat.set_shader_parameter(&"darken", amount)
 	_pulse = false
 	var dimmed := {}
-	for child in get_children():
+	for child in find_children("*", "MeshInstance3D", true, false):
 		var mi := child as MeshInstance3D
 		var mat := mi.material_override as StandardMaterial3D if mi else null
 		if mat and mat.emission_enabled and mat != cockpit_material and not dimmed.has(mat):
 			dimmed[mat] = true
 			mat.emission_energy_multiplier *= 1.0 - amount
+
+
+# --- Equipment (used by SubEquipment) --------------------------------------------
+
+## A fresh, empty node for the equipment, the old kit cleared away.
+func equipment_root() -> Node3D:
+	if _equipment:
+		remove_child(_equipment)
+		_equipment.queue_free()
+	_paints.resize(_frame_paints)
+	_equip_props.clear()
+	_muzzles.clear()
+	lamp_yaw = null
+	lamp_pitch = null
+	lamp_lens = null
+	_equipment = Node3D.new()
+	_equipment.name = "Equipment"
+	add_child(_equipment)
+	return _equipment
+
+
+## Bakes the equipment's fixed parts that share a material into one mesh each.
+func finish_equipment() -> void:
+	_merge_children(_equipment)
+
+
+func set_lamp_gimbal(yaw: Node3D, pitch: Node3D, lens: Node3D) -> void:
+	lamp_yaw = yaw
+	lamp_pitch = pitch
+	lamp_lens = lens
+
+
+## Marks where shots of [param id] leave its launcher ([param at] in the model's space).
+func add_muzzle(id: StringName, at: Vector3) -> void:
+	var marker := Node3D.new()
+	marker.position = at
+	_equipment.add_child(marker)
+	_muzzles[id] = marker
+
+
+## A propeller hub for a piece of equipment, turning about its own X axis.
+func add_equipment_prop(parent: Node3D, at: Vector3, basis: Basis) -> Node3D:
+	var pivot := Node3D.new()
+	pivot.transform = Transform3D(basis, at)
+	parent.add_child(pivot)
+	_equip_props.append(pivot)
+	return pivot
 
 
 # --- Building blocks (used by the frame builders) ---------------------------------
@@ -337,8 +444,12 @@ func _build_whisper() -> void:
 ## built from dozens of primitives); the propeller and strobe stay separate
 ## because they animate.
 func _merge_static() -> void:
+	_merge_children(self)
+
+
+func _merge_children(parent: Node3D) -> void:
 	var groups: Dictionary[Material, Array] = {}
-	for child in get_children():
+	for child in parent.get_children():
 		var mi := child as MeshInstance3D
 		if mi == null or mi == strobe:
 			continue
@@ -354,13 +465,13 @@ func _merge_static() -> void:
 		for mi: MeshInstance3D in parts:
 			for surface in mi.mesh.get_surface_count():
 				st.append_from(mi.mesh, surface, mi.transform)
-			remove_child(mi)
+			parent.remove_child(mi)
 			mi.queue_free()
 		var merged := MeshInstance3D.new()
 		merged.mesh = st.commit()
 		merged.material_override = mat
 		merged.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(merged)
+		parent.add_child(merged)
 
 
 ## A cylinder strut from [param a] to [param b].
