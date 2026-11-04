@@ -13,6 +13,8 @@ var _pressure_label: Label
 var _contract_button: Button
 var _contract_desc: Label
 var _scroll: ScrollContainer
+## The bumper (or key) hints either side of the tabs.
+var _tab_hints: Array[Label] = []
 
 
 func _ready() -> void:
@@ -62,14 +64,17 @@ func _ready() -> void:
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override(&"separation", 8)
 	left.add_child(tabs)
+	_tab_hints.append(_tab_hint(tabs))
 	var tab_names := [[Tab.UPGRADES, "Upgrades"], [Tab.RESEARCH, "Research"], [Tab.FRAMES, "Submarines"],
 		[Tab.CODEX, "Codex"], [Tab.LOGS, "Archive"], [Tab.CHALLENGES, "Challenges"]]
 	for t: Array in tab_names:
 		var tab_id: Tab = t[0]
 		var b := UiUtil.button(t[1], func() -> void: _show_tab(tab_id), 166)
 		b.toggle_mode = true
+		b.set_meta(&"tab", tab_id)
 		tabs.add_child(b)
 		_tab_buttons.append(b)
+	_tab_hints.append(_tab_hint(tabs))
 
 	var scroll := ScrollContainer.new()
 	_scroll = scroll
@@ -99,7 +104,7 @@ func _ready() -> void:
 	var footer := HBoxContainer.new()
 	footer.add_theme_constant_override(&"separation", 14)
 	left.add_child(footer)
-	footer.add_child(UiUtil.button("Back", func() -> void: Router.go_to(Router.TITLE), 180))
+	footer.add_child(UiUtil.button("Back", _go_back, 180))
 	if Game.meta.pressure_unlocked > 0:
 		footer.add_child(UiUtil.button("-", func() -> void: _change_pressure(-1), 60))
 		_pressure_label = UiUtil.label("", &"MonoLabel")
@@ -124,6 +129,8 @@ func _ready() -> void:
 ## The right stick scrolls the list, for the codex and archive (which have
 ## nothing on them to focus).
 func _process(delta: float) -> void:
+	_tab_hints[0].text = "LB" if Settings.using_gamepad else "Q"
+	_tab_hints[1].text = "RB" if Settings.using_gamepad else "E"
 	var axis := 0.0
 	for pad in Input.get_connected_joypads():
 		var a := Input.get_joy_axis(pad, JOY_AXIS_RIGHT_Y)
@@ -131,6 +138,49 @@ func _process(delta: float) -> void:
 			axis = a
 	if absf(axis) > 0.2 and _scroll:
 		_scroll.scroll_vertical += int(axis * 900.0 * delta)
+
+
+## B (or Esc) leaves for the title screen; the bumpers (or Q and E) step
+## through the tabs.
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed(&"ui_cancel"):
+		_go_back()
+	elif event.is_action_pressed(&"ui_tab_prev"):
+		_step_tab(-1)
+	elif event.is_action_pressed(&"ui_tab_next"):
+		_step_tab(1)
+	else:
+		return
+	get_viewport().set_input_as_handled()
+
+
+func _tab_hint(row: HBoxContainer) -> Label:
+	var l := UiUtil.label("", &"MonoLabel", 18, UiTheme.TEXT_DIM)
+	l.custom_minimum_size = Vector2(34, 0)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(l)
+	return l
+
+
+func _go_back() -> void:
+	Audio.play_ui(&"ui_click")
+	Router.go_to(Router.TITLE)
+
+
+## Moves to the next or previous tab. Focus follows: onto the new tab's
+## button if it was on the tabs, else onto the new list's first button (or
+## the tab's own button when the list has nothing to press).
+func _step_tab(step: int) -> void:
+	var on_tabs := _tab_buttons.has(get_viewport().gui_get_focus_owner())
+	var next := posmod(_tab + step, Tab.size()) as Tab
+	Audio.play_ui(&"tool_cycle", -6.0)
+	_show_tab(next)
+	var items := FocusGuard.focusables(_content)
+	if on_tabs or items.is_empty():
+		_tab_buttons[next].grab_focus()
+	else:
+		items[0].grab_focus()
 
 
 static func _initial_tab() -> Tab:
@@ -176,7 +226,16 @@ func _change_pressure(delta: int) -> void:
 	_show_tab(_tab)
 
 
+## Shows [param tab], rebuilding its list. Pressing a button in the list
+## (buying, selecting, tracking) rebuilds it too; focus then stays on the
+## same button in the new list, so a gamepad keeps its place. Moving to
+## another tab from a button in the list puts focus on the new list's first
+## button (or the tab's own button if it has none).
 func _show_tab(tab: Tab) -> void:
+	var focus := get_viewport().gui_get_focus_owner()
+	var old_items := FocusGuard.focusables(_content)
+	var at := old_items.find(focus)
+	var same_tab := tab == _tab
 	_tab = tab
 	# Drop any frame or creature preview from browsing the other tabs.
 	_backdrop.preview_creature(&"")
@@ -198,6 +257,15 @@ func _show_tab(tab: Tab) -> void:
 		Tab.CHALLENGES:
 			_build_challenges()
 	_refresh_header()
+	if at < 0:
+		return
+	var items := FocusGuard.focusables(_content)
+	if items.is_empty():
+		_tab_buttons[tab].grab_focus()
+	elif same_tab:
+		items[mini(at, items.size() - 1)].grab_focus()
+	else:
+		items[0].grab_focus()
 
 
 func _row_panel() -> HBoxContainer:

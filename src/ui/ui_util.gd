@@ -27,11 +27,18 @@ static func button(text: String, on_pressed: Callable, min_width := 260) -> Butt
 	return b
 
 
-## Full-screen dimmer with a centered column; returns the column.
+## Full-screen dimmer with a centered column; returns the column. When it
+## closes, focus goes back to whatever had it when it opened (the button that
+## opened it), so a gamepad never comes back to a menu with nothing selected.
 static func modal(parent: Node, dim := 0.6, width := 720) -> VBoxContainer:
 	var root := Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.theme = UiTheme.get_theme()
+	var opener: Control = parent.get_viewport().gui_get_focus_owner() if parent.is_inside_tree() else null
+	if opener:
+		root.tree_exiting.connect(func() -> void:
+			if is_instance_valid(opener) and opener.is_inside_tree() and not opener.is_queued_for_deletion():
+				opener.call_deferred(&"grab_focus"))
 	parent.add_child(root)
 	var bg := ColorRect.new()
 	bg.color = Color(0.0, 0.02, 0.04, dim)

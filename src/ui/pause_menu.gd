@@ -29,18 +29,33 @@ func close() -> void:
 	if _root:
 		_root.queue_free()
 		_root = null
+	for panel in _panels():
+		panel.queue_free()
+	_settings = null
 	get_tree().paused = false
 	Input.mouse_mode = Input.MOUSE_MODE_CONFINED_HIDDEN
 
 
+## Start (or Esc) closes the panel on top, or the menu itself; B does the
+## same (the panels handle B themselves first).
 func _unhandled_input(event: InputEvent) -> void:
-	if visible and event.is_action_pressed(&"pause"):
-		if _settings and is_instance_valid(_settings):
-			_settings.queue_free()
-			_settings = null
-		else:
-			close()
-		get_viewport().set_input_as_handled()
+	if not visible or not (event.is_action_pressed(&"pause") or event.is_action_pressed(&"ui_cancel")):
+		return
+	var panels := _panels()
+	if panels.is_empty():
+		close()
+	else:
+		panels.back().queue_free()
+	get_viewport().set_input_as_handled()
+
+
+## The panels open over the menu (settings, how to dive, modules), oldest first.
+func _panels() -> Array[Node]:
+	var out: Array[Node] = []
+	for c in get_children():
+		if c is CanvasLayer and not c.is_queued_for_deletion():
+			out.append(c)
+	return out
 
 
 func _build() -> void:

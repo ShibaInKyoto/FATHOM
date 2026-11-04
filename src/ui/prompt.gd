@@ -22,6 +22,8 @@ const CONTROLS := [
 	["Sonar chart", &"map", "Back"],
 	["Pick a module at stops", "1 / 2 / 3", "D-pad + A"],
 	["Pause", "Esc", "Start"],
+	["Back out of a menu", "Esc", "B"],
+	["Switch hangar tabs", "Q / E", "LB / RB"],
 	["Fullscreen / screenshot", "F11 / F12", "-"],
 ]
 

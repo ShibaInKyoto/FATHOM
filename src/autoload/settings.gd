@@ -179,6 +179,9 @@ static func default_inputs() -> Dictionary[StringName, Array]:
 		&"pick_1": [_key(KEY_1)],
 		&"pick_2": [_key(KEY_2)],
 		&"pick_3": [_key(KEY_3)],
+		# Stepping through a menu's tabs (the hangar's): the bumpers, or Q and E.
+		&"ui_tab_prev": [_key(KEY_Q), _joy(JOY_BUTTON_LEFT_SHOULDER)],
+		&"ui_tab_next": [_key(KEY_E), _joy(JOY_BUTTON_RIGHT_SHOULDER)],
 	}
 
 

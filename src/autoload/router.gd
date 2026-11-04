@@ -28,6 +28,7 @@ func _ready() -> void:
 	_note.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	_note.position += Vector2(24.0, -40.0)
 	_layer.add_child(_note)
+	add_child(FocusGuard.new())
 	_setup_capture()
 
 

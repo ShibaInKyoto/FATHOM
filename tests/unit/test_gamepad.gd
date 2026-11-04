@@ -66,3 +66,43 @@ func test_the_lamp_swings_round_smoothly() -> void:
 		aim = Submarine.turn_towards(aim, Vector2(1.0, 0.0), Submarine.AIM_TURN_RATE * dt)
 		went_over_the_top = went_over_the_top or aim.y > 0.5
 	check(went_over_the_top, "both ways")
+
+
+func test_bumpers_step_through_tabs() -> void:
+	for device: int in [0, 2]:
+		var lb := InputEventJoypadButton.new()
+		lb.device = device
+		lb.button_index = JOY_BUTTON_LEFT_SHOULDER
+		lb.pressed = true
+		var rb := InputEventJoypadButton.new()
+		rb.device = device
+		rb.button_index = JOY_BUTTON_RIGHT_SHOULDER
+		rb.pressed = true
+		check(lb.is_action(&"ui_tab_prev"), "LB goes to the previous tab (pad %d)" % device)
+		check(rb.is_action(&"ui_tab_next"), "RB goes to the next tab (pad %d)" % device)
+
+
+func test_lost_focus_lands_on_the_frontmost_menu() -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	var host := Node.new()
+	tree.root.add_child(host)
+	var back := CanvasLayer.new()
+	back.layer = 5
+	host.add_child(back)
+	var behind := Button.new()
+	back.add_child(behind)
+	var front := CanvasLayer.new()
+	front.layer = 60
+	host.add_child(front)
+	var column := VBoxContainer.new()
+	front.add_child(column)
+	var off := Button.new()
+	off.disabled = true
+	column.add_child(off)
+	var on := Button.new()
+	column.add_child(on)
+	check(FocusGuard.frontmost(tree.root) == on, "the panel on top, its first enabled button")
+	front.visible = false
+	check(FocusGuard.frontmost(tree.root) == behind, "a hidden panel is passed over")
+	check_eq(FocusGuard.focusables(column).size(), 0, "nothing in a hidden panel is focusable")
+	host.free()

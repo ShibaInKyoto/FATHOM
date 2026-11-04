@@ -111,6 +111,13 @@ func show_result(run: RunState, outcome: RunState.Outcome) -> void:
 		get_tree().create_timer(1.0).timeout.connect(Router.quit)
 
 
+## B (or Esc) goes back to the hangar, like the default button.
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed(&"ui_cancel"):
+		get_viewport().set_input_as_handled()
+		Router.go_to(Router.HANGAR)
+
+
 ## The dive's score, counting up, with how it was earned and where it places.
 func _add_score(column: VBoxContainer, run: RunState) -> void:
 	var score := UiUtil.label("SCORE  0", &"MonoLabel", 44, UiTheme.ACCENT)
