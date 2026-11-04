@@ -2,7 +2,7 @@ extends Node
 ## Debug helper: plays the studio splash and saves frames at set moments.
 ## Usage: xvfb-run godot --path . res://tools/debug/preview_splash.tscn -- <out_dir>
 
-const TIMES: Array[float] = [1.0, 2.3, 3.5, 3.75, 4.1, 4.9, 5.6]
+const TIMES: Array[float] = [3.8, 3.9, 4.0, 4.15, 4.35, 4.6, 5.6, 7.0]
 
 var _t := 0.0
 var _shot := 0

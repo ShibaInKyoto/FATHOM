@@ -97,12 +97,23 @@ def lantern_flame():
 
 
 def lantern_douse():
-    # The flame is snuffed: a quick breathy puff that falls away, a faint tick of metal.
-    d = 1.4
-    puff = lowpass(noise(d, "pink"), 1400) * lerp_env([(0, 0), (0.03, 1), (0.25, 0.35), (1.4, 0)], d)
-    hiss = highpass(noise(d), 2500) * lerp_env([(0, 0), (0.02, 0.5), (0.18, 0.12), (0.9, 0)], d)
-    tick = _clang(2200, 0.5, 0.05) * 0.08
-    return normalize(wet_dry(mix(puff, hiss * 0.5, tick), SMALL_ROOM, 0.3), 0.55)
+    # Water closes over the flame: a sharp hiss of steam, a sizzle, a burst of bubbles.
+    d = 1.8
+    hiss = highpass(noise(d), 3000) * lerp_env([(0, 0), (0.02, 1), (0.3, 0.45), (1.4, 0)], d)
+    sizzle = bandpass(noise(d), 5500, 3.0) * lerp_env([(0, 0), (0.02, 0.6), (0.5, 0.1), (1.0, 0)], d)
+    bubbles = _bubbles(d, 26, 250, 900) * lerp_env([(0, 0.2), (0.1, 1), (1.6, 0)], d)
+    thump = _thud(70, 40, 0.5, 0.15)
+    return normalize(wet_dry(mix(hiss * 0.6, sizzle * 0.4, bubbles * 0.7, thump * 0.5), SMALL_ROOM, 0.25), 0.6)
+
+
+def water_rise():
+    # Dark water welling up: a low swell, a slow slosh, bubbles breaking loose.
+    d = 3.6
+    swell = lowpass(noise(d, "brown"), 400) * lerp_env([(0, 0), (1.5, 0.8), (3.0, 1.0), (3.6, 0)], d)
+    slosh = bandpass(noise(d, "pink"), 700, 1.2) * (0.5 + 0.5 * np.sin(t_axis(d) * 2.6)) * \
+        lerp_env([(0, 0), (1.0, 0.6), (3.6, 0)], d)
+    bubbles = _bubbles(d, 18, 200, 700) * 0.5
+    return normalize(mix(swell, slosh * 0.5, bubbles), 0.45)
 
 
 def denied():
