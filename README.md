@@ -49,8 +49,8 @@ Settings).
 
 You descend through **11 zones**: two each in the Sunlit Shelf, Twilight
 Reef, Midnight Caverns, Abyssal Vents and Hadal Trench, then the hadal floor
-itself. Every zone is a cave cross-section carved fresh for each dive, laid
-out as a winding descent, a great pillared hall, a braid where the way splits
+itself. Every zone is a procedurally generated cave cross-section, laid out
+as a winding descent, a great pillared hall, a braid where the way splits
 round the rock and joins again, or a shaft dropping almost straight down past
 ledges. Find the **descent** (the glowing fissure at the bottom) to go
 deeper. Meridian's lost **survey probes** blink in the side rooms: hook one
@@ -273,12 +273,12 @@ settings and key bindings are kept).
 FATHOM is built with **Godot 4.5** (Forward+ renderer) in statically typed
 GDScript. The design document and an architecture overview are in [docs/DESIGN.md](docs/DESIGN.md).
 
-* **Caves** (`src/world/level_generator.gd`). It carves tunnels,
+* **Caves** (`src/world/level_generator.gd`). The generator carves tunnels,
   chambers and shafts into a signed distance field with smooth-min SDF
   operations. Domain-warped noise then erodes the walls and opens organic
   caverns. A corridor wide enough to pass comfortably is then re-opened along
   the route, a flood fill marks the water the sub can reach, and pockets it
-  can't reach are sealed. A zone is built on a worker thread in under half a
+  can't reach are sealed. Generation runs on a worker thread in under half a
   second.
 * **One field for everything** (`src/world/terrain_field.gd`). The same SDF
   drives collision (circle vs field), creature steering, projectile ray
@@ -303,12 +303,12 @@ src/
   autoload/   settings, signal bus, audio mixer, save/progression, scene router
   core/       run state, meta progression, submarine stats
   data/       biomes, modules/upgrades/frames, codex, logs, zone events, pressure
-  world/      cave builder, terrain field + renderer, level, props, pickups, interactables
+  world/      generator, terrain field + renderer, level, props, pickups, interactables
   creatures/  creature base, twelve species, three lair guardians and the Choir
   player/     submarine, model, harpoon, tool belt, projectiles
   dive/       dive controller, camera, tutorial, test autopilot
   ui/         theme, HUD, sonar chart, menus, hangar, decompression stop, ending
-  fx/         shaders, particle factory, mesh kit
+  fx/         shaders, particle factory, procedural mesh kit
 tests/        headless unit and simulation tests (run in CI)
 tools/        audio tools, script checker, CI helpers, debug renderers
 ```
@@ -319,7 +319,7 @@ Requires Godot 4.5.1 with export templates installed.
 
 ```sh
 godot --headless --import                                       # first-time import
-godot --headless --path . -s res://tests/run_tests.gd           # 167 tests: cave layout, traversal, events, hazards, bosses, frames, saves, assets
+godot --headless --path . -s res://tests/run_tests.gd           # 167 tests: generation, traversal, events, hazards, bosses, frames, saves, assets
 godot --headless --path . res://tests/flow_test.tscn            # end-to-end menu and dive flow
 godot --headless --export-release "Windows Desktop" build/windows/FATHOM.exe
 python3 tools/audio/generate.py                                 # rebuild all audio (numpy + ffmpeg)
