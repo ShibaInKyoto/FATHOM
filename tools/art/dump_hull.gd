@@ -8,7 +8,12 @@ func _init() -> void:
 	var args := OS.get_cmdline_user_args()
 	var out := args[0] if args.size() > 0 else "user://hull.json"
 	var frame := args[1] if args.size() > 1 else "lantern"
-	var hull: HullFairing = MakoBuild.fairing() if frame == "mako" else LanternBuild.fairing()
+	var hull: HullFairing = LanternBuild.fairing()
+	match frame:
+		"mako":
+			hull = MakoBuild.fairing()
+		"bathysphere":
+			hull = BathysphereBuild.fairing()
 	var points: Array = []
 	for p in hull.grid():
 		points.append([snappedf(p.x, 0.0001), snappedf(p.y, 0.0001), snappedf(p.z, 0.0001)])

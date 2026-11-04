@@ -77,6 +77,11 @@ The Mako found derelict in the reef is marked MAKO, PROTOTYPE, with the
 designation XP-2 and a RESCUE arrow by its canopy: an experimental racer
 someone built and lost, its second prototype at least.
 
+The old Bathysphere in the caverns is stencilled B-3, TESTED 1 100 ATM, and
+DO NOT OPEN UNDER PRESSURE by its hatch: a cast sphere far older than
+Meridian, its paint flaking to rust, an observer's leather cap and goggles
+on the seat inside.
+
 ## The crew
 
 - **Commander R. Hale.** Station commander, practical and protective. Hale

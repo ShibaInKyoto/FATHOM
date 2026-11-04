@@ -5,6 +5,8 @@ extends Node3D
 ## Whisper stealth drone. The nose points along local +X.
 
 const SURFACE := preload("res://src/player/sub_surface.gdshader")
+## Frames rebuilt in full detail, with painted maps and wear.
+const DETAILED: Array[StringName] = [&"lantern", &"mako", &"bathysphere"]
 
 static var _plating: ImageTexture
 ## Finished models kept by frame after their first build: [slot, mesh,
@@ -43,7 +45,7 @@ func build(frame_id: StringName, skin: SubSkins.Livery = null) -> void:
 		&"mako":
 			MakoBuild.build(self)
 		&"bathysphere":
-			_build_bathysphere()
+			BathysphereBuild.build(self)
 		&"whisper":
 			_build_whisper()
 		_:
@@ -94,7 +96,7 @@ func paint_material(maps: bool) -> ShaderMaterial:
 	var mat := ShaderMaterial.new()
 	mat.shader = SURFACE
 	var plain := _skin.pattern == &"plates" and _skin.finish == &""
-	var detailed := _frame == &"lantern" or _frame == &"mako"
+	var detailed := DETAILED.has(_frame)
 	mat.set_shader_parameter(&"metallic", 0.12)
 	mat.set_shader_parameter(&"roughness", 0.4)
 	mat.set_shader_parameter(&"coat", 0.6)
@@ -193,7 +195,7 @@ func restore(mats: Dictionary) -> bool:
 		for part: Array in p[1]:
 			place_xform(part[1], mats[part[0]], part[2], pivot)
 	if kept.light != null:
-		add_cockpit_light(kept.light)
+		add_cockpit_light(kept.light, kept.light_color)
 	return true
 
 
@@ -219,7 +221,8 @@ func remember(mats: Dictionary) -> void:
 			blades.append([slot_of[mi.material_override], mi.mesh, mi.transform])
 		props.append([pivot.transform, blades, pivot == propeller])
 	_kept[_frame] = {"parts": parts, "props": props,
-		"light": _cockpit_light.position if _cockpit_light else null}
+		"light": _cockpit_light.position if _cockpit_light else null,
+		"light_color": _cockpit_light.light_color if _cockpit_light else Color.WHITE}
 
 
 ## A second propeller hub at [param at], turning about its own X axis (set by
@@ -234,10 +237,10 @@ func add_prop(at: Vector3, rot_deg: Vector3) -> Node3D:
 
 
 ## A soft light inside the cockpit that follows its glow.
-func add_cockpit_light(at: Vector3) -> void:
+func add_cockpit_light(at: Vector3, color := Color(0.55, 0.85, 1.0)) -> void:
 	_cockpit_light = OmniLight3D.new()
 	_cockpit_light.position = at
-	_cockpit_light.light_color = Color(0.55, 0.85, 1.0)
+	_cockpit_light.light_color = color
 	_cockpit_light.omni_range = 0.9
 	_cockpit_light.light_energy = 0.45 * cockpit_material.emission_energy_multiplier
 	_cockpit_light.shadow_enabled = false
@@ -247,7 +250,7 @@ func add_cockpit_light(at: Vector3) -> void:
 # --- Materials ---------------------------------------------------------------------
 
 func _make_materials() -> void:
-	if _frame != &"lantern" and _frame != &"mako":
+	if not DETAILED.has(_frame):
 		hull_material = paint_material(false)
 	_dark = StandardMaterial3D.new()
 	_dark.albedo_color = Color(0.12, 0.13, 0.15)
@@ -297,48 +300,6 @@ static func _plating_texture() -> ImageTexture:
 
 
 # --- Frames ------------------------------------------------------------------------
-
-func _build_bathysphere() -> void:
-	# A Beebe-style bathysphere: a thick cast sphere with quartz ports in heavy
-	# bezels, a bolted hatch and lifting eye, a reinforcing belt, a frame on
-	# skids, a ballast tank and a thruster on an aft outrigger.
-	_part(MeshKit.sphere(1.15, 28, 16), hull_material, Vector3.ZERO, Vector3.ZERO)
-	_ring(1.16, 0.07, _dark, Vector3.ZERO, Vector3.ZERO)
-	# Quartz ports: one big one forward, two smaller above it.
-	_part(_cylinder(0.3, 0.34, 0.22, 16), _dark, Vector3(1.05, 0.12, 0), Vector3(0, 0, -90))
-	_part(MeshKit.sphere(0.24, 14, 8), cockpit_material, Vector3(1.12, 0.12, 0), Vector3.ZERO)
-	for z: float in [0.58, -0.58]:
-		var at := Vector3(0.82, 0.52, z)
-		var out := at.normalized()
-		_seg(at - out * 0.05, at + out * 0.14, 0.17, _dark)
-		_part(MeshKit.sphere(0.13, 10, 6), cockpit_material, at + out * 0.12, Vector3.ZERO)
-	# Bolted hatch and lifting eye on top.
-	_part(_cylinder(0.42, 0.46, 0.14, 18), _dark, Vector3(0, 1.12, 0), Vector3.ZERO)
-	for i in 10:
-		var a := TAU * i / 10.0
-		_part(MeshKit.sphere(0.035, 6, 3), _steel, Vector3(cos(a) * 0.4, 1.2, sin(a) * 0.4), Vector3.ZERO)
-	_ring(0.16, 0.04, _steel, Vector3(0, 1.42, 0), Vector3(90, 0, 0))
-	# Frame: four posts down to a pair of skids.
-	for i in 4:
-		var a := TAU * i / 4.0 + PI * 0.25
-		var top := Vector3(cos(a) * 0.95, -0.55, sin(a) * 0.95)
-		var foot := Vector3(cos(a) * 1.05, -1.45, sin(a) * 0.75)
-		_seg(top, foot, 0.05, _steel)
-	for z: float in [0.75, -0.75]:
-		_seg(Vector3(-1.0, -1.45, z), Vector3(1.0, -1.45, z), 0.06, _steel)
-		_seg(Vector3(1.0, -1.45, z), Vector3(1.2, -1.28, z), 0.06, _steel)
-	_part(_capsule(0.3, 1.7), hull_material, Vector3(-0.1, -1.08, 0.0), Vector3(0, 0, -90))
-	# Aft outrigger with the thruster.
-	_seg(Vector3(-0.95, 0.0, 0), Vector3(-1.45, 0.0, 0), 0.07, _steel)
-	_part(_cylinder(0.26, 0.2, 0.42, 14), _dark, Vector3(-1.55, 0.0, 0.0), Vector3(0, 0, -90))
-	_ring(0.34, 0.05, _dark, Vector3(-1.72, 0.0, 0.0), Vector3(0, 0, 90))
-	_add_propeller(Vector3(-1.72, 0.0, 0.0), 3, 0.28)
-	_part(_cylinder(0.02, 0.03, 0.8, 6), _steel, Vector3(-0.35, 1.45, 0), Vector3(0, 0, 8))
-	strobe = _part(MeshKit.sphere(0.07), MeshKit.emissive_material(Color.WHITE, 6.0), Vector3(-0.41, 1.85, 0),
-		Vector3.ZERO)
-	_running_lights(Vector3(-0.3, 0.0, 1.24), Vector3(-0.3, 0.0, -1.24))
-	_part(_cylinder(0.15, 0.22, 0.3, 12), _dark, Vector3(1.05, -0.62, 0.0), Vector3(0, 0, -90))
-
 
 func _build_whisper() -> void:
 	# A flattened, faceted stealth drone: smoked glass and a glowing sensor

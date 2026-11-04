@@ -434,12 +434,83 @@ def paint_mako(hull):
     return np.clip(paint, 0, 1), height, pv
 
 
-PAINTERS = {"lantern": paint_lantern, "mako": paint_mako}
+def paint_bathysphere(hull):
+    """Old cast steel under worn paint: pitting, chips down to rust, rust
+    running from the flange, the hatch and the ports, and stencilled
+    markings."""
+    paint = np.ones((H, W, 3), dtype=np.float32) * 0.94
+    height = np.zeros((H, W), dtype=np.float32)
+    X, V = hull.X, hull.V
+    per = hull.perimeter[None, :]
+    rust = np.array([0.5, 0.29, 0.16])
+
+    # Cast texture: soft mottling and fine pits.
+    # Noise cells sized to the sphere: three times as far round as along.
+    mottle = smooth_noise((H, W), (21, 7), 21)
+    fine = smooth_noise((H, W), (240, 80), 22)
+    pits = smooth_noise((H, W), (520, 180), 23)
+    paint *= (0.94 + 0.08 * mottle)[..., None]
+    pit = np.clip((pits - 0.78) / 0.1, 0, 1)
+    height -= pit * 0.0008
+    paint *= (1 - 0.3 * pit)[..., None]
+    height += (fine - 0.5) * 0.0006
+
+    # Chips: patches of paint gone to rust, most of them low down.
+    low = np.clip((0.2 - hull.y) / 1.0, 0, 1)
+    chips_n = smooth_noise((H, W), (90, 30), 24) * 0.7 + smooth_noise((H, W), (270, 90), 25) * 0.3
+    damage = smooth_noise((H, W), (9, 3), 27)
+    chip = np.clip((chips_n - (0.86 - 0.12 * low - 0.12 * damage)) / 0.03, 0, 1)
+    # Bare metal shows through in the alpha; the paint's edge around a chip is darker.
+    rim = np.clip((chips_n - (0.83 - 0.12 * low - 0.12 * damage)) / 0.03, 0, 1) - chip
+    paint *= (1 - 0.3 * rim)[..., None]
+    height -= chip * 0.0004
+    bare = chip.copy()
+
+    # Rust running down from the flange (x = 0), round the ports and from scattered spots.
+    streak = smooth_noise((1, W), (1, 120), 26)[0]
+    near_flange = np.exp(-(X / 0.12) ** 2)
+    sources = [(0.0, 0.32), (0.0, 0.22), (0.62, 0.34), (-0.5, 0.36), (0.3, 0.4), (-0.75, 0.3), (0.75, 0.26)]
+    run = np.zeros((H, W), dtype=np.float32)
+    for x, v in sources:
+        for far in (False, True):
+            vs = 1 - v if far else v
+            below = (vs - V) * per if not far else (V - vs) * per
+            width = 0.035 + 0.03 * streak[None, :]
+            col = np.exp(-((X - x) / width) ** 2)
+            run = np.maximum(run, col * np.clip(below / 0.05, 0, 1) * np.exp(-np.clip(below, 0, None) / 0.45))
+    run += 0.5 * near_flange * low
+    run *= (0.6 + 0.4 * streak[None, :])
+    bare = np.maximum(bare, 0.8 * np.clip(run * 1.3, 0, 1))
+
+    # Stencils: hull number, test pressure and a warning by the hatch.
+    for far in (False, True):
+        text_on(hull, paint, height, "B-3", 0.3, -0.42, side_v(hull, -0.42, far, 0.02), far,
+                ink=(0.1, 0.09, 0.08), depth=0.0002)
+        text_on(hull, paint, height, "TESTED 1 100 ATM", 0.045, -0.42, side_v(hull, -0.42, far, -0.075), far,
+                ink=(0.1, 0.09, 0.08), depth=0.0001)
+        text_on(hull, paint, height, "DO NOT OPEN UNDER PRESSURE", 0.035, -0.46, 0.44 if not far else 0.56, far,
+                ink=(0.1, 0.09, 0.08), depth=0.0001)
+
+    # Heavy grime underneath.
+    grime = 0.3 * np.clip((-0.1 - hull.y) / 0.8, 0, 1) + 0.05 * mottle
+    paint *= (1 - np.clip(grime, 0, 0.6))[..., None]
+    # Decades in the water: the paint dulled and yellowed all over.
+    paint *= np.array([0.9, 0.86, 0.78])
+    pv = hull.px_v(X)
+    alpha = 1 - np.clip(bare, 0, 1)
+    return np.concatenate([np.clip(paint, 0, 1), alpha[..., None]], axis=-1), height, pv
+
+
+PAINTERS = {"lantern": paint_lantern, "mako": paint_mako, "bathysphere": paint_bathysphere}
+## Texture size (along, round) for hulls far from twice as long as they are round.
+SIZES = {"bathysphere": (1024, 2048)}
 
 
 def main():
     os.makedirs(OUT, exist_ok=True)
     for frame in sys.argv[1:] or list(PAINTERS):
+        global W, H
+        W, H = SIZES.get(frame, (2048, 1024))
         hull = Hull(*load_hull(frame))
         paint, height, pv = PAINTERS[frame](hull)
         Image.fromarray((paint * 255 + 0.5).astype(np.uint8)).save(os.path.join(OUT, "%s_paint.png" % frame))

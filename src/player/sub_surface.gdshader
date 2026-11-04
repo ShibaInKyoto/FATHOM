@@ -18,11 +18,13 @@ uniform sampler2D pattern_tex : source_color, filter_linear_mipmap, repeat_enabl
 uniform sampler2D glow_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform float glow_energy = 0.0;
 uniform float pattern_scale = 0.9;
-// Paint-shop maps: an RGB multiply and a normal map.
+// Paint-shop maps: an RGB multiply (its alpha the paint left: below 1 the
+// paint has flaked off to rust) and a normal map.
 uniform bool use_maps = false;
 uniform sampler2D paint_map : source_color, filter_linear_mipmap_anisotropic;
 uniform sampler2D normal_tex : hint_normal, filter_linear_mipmap_anisotropic;
 uniform float normal_depth = 1.0;
+uniform vec3 rust : source_color = vec3(0.42, 0.22, 0.11);
 // Wear read from the vertex color; off for meshes that don't carry it.
 uniform bool vertex_wear = false;
 uniform float wear = 0.6;
@@ -69,11 +71,13 @@ void fragment() {
 	float rough = roughness;
 	float metal = metallic;
 	float grime = 0.0;
+	float rusted = 0.0;
 	if (use_maps) {
-		vec3 m = texture(paint_map, UV).rgb;
-		col *= m;
+		vec4 m = texture(paint_map, UV);
+		col *= m.rgb;
 		// Grime and lettering are matte.
 		rough = mix(rough, 0.75, clamp(1.0 - m.g, 0.0, 1.0));
+		rusted = 1.0 - m.a;
 		NORMAL_MAP = texture(normal_tex, UV).rgb;
 		NORMAL_MAP_DEPTH = normal_depth;
 	}
@@ -87,13 +91,15 @@ void fragment() {
 		grime = (1.0 - COLOR.g) * (0.5 + 0.5 * n1);
 	}
 	col = mix(col, bare * (0.8 + 0.3 * n2), worn);
+	col = mix(col, rust * (0.65 + 0.7 * n2) * mix(vec3(1.0), vec3(0.85, 1.0, 1.15), n1), rusted);
 	col *= 1.0 - grime * 0.55;
 	metal = mix(metal, 0.9, worn);
 	rough = mix(rough, 0.38, worn) + (n1 - 0.5) * mottle;
 	ALBEDO = col * (1.0 - darken);
 	METALLIC = metal;
-	ROUGHNESS = clamp(rough + grime * 0.3, 0.04, 1.0);
-	CLEARCOAT = coat * (1.0 - worn);
+	metal = mix(metal, 0.25, rusted);
+	ROUGHNESS = clamp(mix(rough + grime * 0.3, 0.85, rusted), 0.04, 1.0);
+	CLEARCOAT = coat * (1.0 - worn) * (1.0 - rusted);
 	CLEARCOAT_ROUGHNESS = 0.18;
 	RIM = rim;
 	RIM_TINT = 0.6;

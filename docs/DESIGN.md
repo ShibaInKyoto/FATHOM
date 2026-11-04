@@ -156,8 +156,8 @@ has not noticed the sub can be **ambushed** (harpoon hits deal double), and
 * **Audio**: the sound effects and music are made with a Python script in
   `tools/audio/` and committed as OGG files.
 * **Art**: the meshes are built at runtime (`HullMesh` gives the submarines
-  true normals, UVs and tangents); the Lantern's and the Mako's hulls
-  (`HullFairing` lofts) wear paint and normal maps from
+  true normals, UVs and tangents); the Lantern's, the Mako's and the
+  Bathysphere's hulls (`HullFairing` lofts) wear paint and normal maps from
   `tools/art/hull_maps.py`, fitted to their shapes; rock textures are
   CC0 from Poly Haven.
 

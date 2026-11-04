@@ -40,7 +40,8 @@ func _ready() -> void:
 	# Three views in a row: three-quarter, side, top; or one of them close up.
 	var views := [Vector3(-12, -32, 0), Vector3(0, 0, 0), Vector3(80, 0, 0)]
 	var single := {"close": Vector3(-14, -35, 0), "side": Vector3.ZERO, "top": Vector3(80, 0, 0),
-		"rear": Vector3(-10, 140, 0), "far": Vector3(0, 180, 0), "bow": Vector3(-6, -62, 0), "dome": Vector3(-5, -55, 0)}
+		"rear": Vector3(-10, 140, 0), "far": Vector3(0, 180, 0), "bow": Vector3(-6, -62, 0), "dome": Vector3(-5, -55, 0),
+		"port": Vector3(-4, -80, 0)}
 	var one: String = args[4] if args.size() > 4 else ""
 	if single.has(one):
 		views = [single[one]]
@@ -56,6 +57,8 @@ func _ready() -> void:
 	cam.position = Vector3(0, 0.3, 11.5 if views.size() > 1 else 5.6)
 	if one == "dome":
 		cam.position = Vector3(0.9, 0.15, 3.0)
+	elif one == "port":
+		cam.position = Vector3(0.2, 0.1, 3.4)
 	cam.fov = 42
 	add_child(cam)
 
