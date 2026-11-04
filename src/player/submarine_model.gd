@@ -7,6 +7,10 @@ extends Node3D
 const SURFACE := preload("res://src/player/sub_surface.gdshader")
 
 static var _plating: ImageTexture
+## Finished models kept by frame after their first build: [slot, mesh,
+## transform, strobe?] for each part, [transform, parts, main?] for each
+## propeller and where the cockpit light sits. Later builds only repaint.
+static var _kept: Dictionary[StringName, Dictionary] = {}
 var propeller: Node3D
 var strobe: MeshInstance3D
 var cockpit_material: StandardMaterial3D
@@ -37,7 +41,7 @@ func build(frame_id: StringName, skin: SubSkins.Livery = null) -> void:
 	add_child(propeller)
 	match frame_id:
 		&"mako":
-			_build_mako()
+			MakoBuild.build(self)
 		&"bathysphere":
 			_build_bathysphere()
 		&"whisper":
@@ -90,7 +94,7 @@ func paint_material(maps: bool) -> ShaderMaterial:
 	var mat := ShaderMaterial.new()
 	mat.shader = SURFACE
 	var plain := _skin.pattern == &"plates" and _skin.finish == &""
-	var detailed := _frame == &"lantern"
+	var detailed := _frame == &"lantern" or _frame == &"mako"
 	mat.set_shader_parameter(&"metallic", 0.12)
 	mat.set_shader_parameter(&"roughness", 0.4)
 	mat.set_shader_parameter(&"coat", 0.6)
@@ -173,14 +177,49 @@ func place_xform(mesh: Mesh, mat: Material, xform: Transform3D, parent: Node3D =
 	return mi
 
 
-## The propellers besides the main one.
-func props() -> Array[Node3D]:
-	return _props
+## Rebuilds this frame from its kept parts in [param mats] (slot name to
+## material). False if none are kept yet.
+func restore(mats: Dictionary) -> bool:
+	if not _kept.has(_frame):
+		return false
+	var kept: Dictionary = _kept[_frame]
+	for p: Array in kept.parts:
+		var mi := place_xform(p[1], mats[p[0]], p[2])
+		if p[3]:
+			strobe = mi
+	for p: Array in kept.props:
+		var pivot: Node3D = propeller if p[2] else add_prop(Vector3.ZERO, Vector3.ZERO)
+		pivot.transform = p[0]
+		for part: Array in p[1]:
+			place_xform(part[1], mats[part[0]], part[2], pivot)
+	if kept.light != null:
+		add_cockpit_light(kept.light)
+	return true
 
 
-## Bakes the parts built so far that share a material into one mesh each.
-func merge_parts() -> void:
+## Merges the freshly built parts and keeps them, by the slot names in
+## [param mats], for the next build of this frame.
+func remember(mats: Dictionary) -> void:
 	_merge_static()
+	var slot_of := {}
+	for k: String in mats:
+		slot_of[mats[k]] = k
+	var parts: Array = []
+	for child in get_children():
+		var mi := child as MeshInstance3D
+		if mi:
+			parts.append([slot_of[mi.material_override], mi.mesh, mi.transform, mi == strobe])
+	var props: Array = []
+	var pivots: Array[Node3D] = [propeller]
+	pivots.append_array(_props)
+	for pivot in pivots:
+		var blades: Array = []
+		for c in pivot.get_children():
+			var mi := c as MeshInstance3D
+			blades.append([slot_of[mi.material_override], mi.mesh, mi.transform])
+		props.append([pivot.transform, blades, pivot == propeller])
+	_kept[_frame] = {"parts": parts, "props": props,
+		"light": _cockpit_light.position if _cockpit_light else null}
 
 
 ## A second propeller hub at [param at], turning about its own X axis (set by
@@ -208,7 +247,7 @@ func add_cockpit_light(at: Vector3) -> void:
 # --- Materials ---------------------------------------------------------------------
 
 func _make_materials() -> void:
-	if _frame != &"lantern":
+	if _frame != &"lantern" and _frame != &"mako":
 		hull_material = paint_material(false)
 	_dark = StandardMaterial3D.new()
 	_dark.albedo_color = Color(0.12, 0.13, 0.15)
@@ -258,46 +297,6 @@ static func _plating_texture() -> ImageTexture:
 
 
 # --- Frames ------------------------------------------------------------------------
-
-func _build_mako() -> void:
-	# A fast attack sub: a long torpedo hull, a low canopy faired into a hump,
-	# bow planes, an X-tail round a pump-jet, and torpedo ports in the bow.
-	var hull := MeshKit.lathe(PackedVector2Array([Vector2(0.0, 0.12), Vector2(0.05, 0.3), Vector2(0.15, 0.45),
-		Vector2(0.6, 0.5), Vector2(0.85, 0.44), Vector2(0.96, 0.28), Vector2(1.0, 0.06)]), 4.5, 22, 16, 0.82, 1.0)
-	_part(hull, hull_material, Vector3(-0.1, 0, 0), Vector3.ZERO)
-	var hump := MeshKit.lathe(PackedVector2Array([Vector2(0, 0.05), Vector2(0.3, 0.22), Vector2(1, 0.04)]), 1.8, 14,
-		8, 0.55, 1.0)
-	_part(hump, hull_material, Vector3(-0.25, 0.33, 0), Vector3.ZERO)
-	var canopy := MeshKit.lathe(PackedVector2Array([Vector2(0, 0.04), Vector2(0.35, 0.25), Vector2(1, 0.02)]), 1.3,
-		16, 8, 0.72, 0.72)
-	_part(canopy, cockpit_material, Vector3(0.75, 0.35, 0), Vector3.ZERO)
-	_part(_cylinder(0.46, 0.46, 0.08, 20), _dark, Vector3(-0.95, 0, 0), Vector3(0, 0, -90))
-	# Bow planes and an X-tail.
-	var plane := MeshKit.fin(PackedVector2Array([Vector2(0.2, 0), Vector2(-0.25, 0), Vector2(-0.45, 0.55),
-		Vector2(-0.1, 0.52)]), 0.04)
-	_part(plane, hull_material, Vector3(1.05, -0.02, 0.3), Vector3(90, 0, 0))
-	_part(plane, hull_material, Vector3(1.05, -0.02, -0.3), Vector3(-90, 0, 0))
-	var tail := MeshKit.fin(PackedVector2Array([Vector2(0.3, 0), Vector2(-0.45, 0), Vector2(-0.7, 0.95),
-		Vector2(-0.25, 0.9)]), 0.05)
-	for deg: float in [45.0, 135.0, 225.0, 315.0]:
-		_part(tail, hull_material if deg < 180.0 else _dark, Vector3(-1.75, 0, 0), Vector3(deg - 90.0, 0, 0))
-	# Pump-jet: a shroud round a many-bladed rotor.
-	_part(_cylinder(0.26, 0.14, 0.35, 16), _dark, Vector3(-2.35, 0, 0), Vector3(0, 0, -90))
-	_ring(0.3, 0.06, _dark, Vector3(-2.5, 0, 0), Vector3(0, 0, 90))
-	_add_propeller(Vector3(-2.5, 0, 0), 5, 0.24)
-	# Torpedo ports either side of the bow and tube fairings along the belly.
-	for z: float in [0.2, -0.2]:
-		_ring(0.075, 0.025, _dark, Vector3(1.72, -0.12, z), Vector3(0, 0, 90))
-		var fairing := _capsule(0.11, 1.6)
-		_part(fairing, hull_material, Vector3(0.35, -0.38, z * 1.3), Vector3(0, 0, -90))
-	# Intake slots on the flanks.
-	_part(_box(Vector3(0.5, 0.07, 0.04)), _dark, Vector3(0.1, 0.05, 0.49), Vector3.ZERO)
-	_part(_box(Vector3(0.5, 0.07, 0.04)), _dark, Vector3(0.1, 0.05, -0.49), Vector3.ZERO)
-	strobe = _part(MeshKit.sphere(0.05), MeshKit.emissive_material(Color.WHITE, 6.0), Vector3(-2.2, 0.48, 0.0),
-			Vector3.ZERO)
-	_running_lights(Vector3(-2.2, -0.42, 0.42), Vector3(-2.2, -0.42, -0.42))
-	_part(_cylinder(0.11, 0.16, 0.25, 10), _dark, Vector3(1.55, -0.32, 0.0), Vector3(0, 0, -90))
-
 
 func _build_bathysphere() -> void:
 	# A Beebe-style bathysphere: a thick cast sphere with quartz ports in heavy

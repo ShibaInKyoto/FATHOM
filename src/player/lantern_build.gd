@@ -9,9 +9,6 @@ extends RefCounted
 
 const PAINT_MAP := "res://assets/subs/lantern_paint.png"
 const NORMAL_MAP := "res://assets/subs/lantern_normal.png"
-## The fairing runs from X0 at the stern to X1 at the bow; so do its UVs.
-const X0 := -2.0
-const X1 := 1.1
 ## Fairing stations: x, centre height, height above and below the centre,
 ## half-width, and how square the upper and lower halves are (2 is round).
 const STATIONS: Array = [
@@ -28,21 +25,17 @@ const STATIONS: Array = [
 const BOW_Y := 0.06
 ## The main thruster's axis.
 const STERN := Vector3(-2.2, 0.1, 0.0)
-const NU := 72
-const NV := 80
 ## Status lights on the cockpit wall.
 const LEDS: Array[Color] = [Color(1.0, 0.25, 0.1), Color(0.2, 1.0, 0.4), Color(1.0, 0.7, 0.1), Color(0.2, 0.8, 1.0)]
 
-## The fairing's skin and the arc-length tables of its sections, worked out
-## once: every Lantern has the same shape.
-static var _grid := PackedVector3Array()
-static var _theta_cache: Dictionary[Vector2i, float] = {}
-## The finished model, kept after the first build: [slot, mesh, transform,
-## strobe?] for each part, and [transform, parts, main?] for each propeller.
-## Later builds only paint it.
-static var _parts: Array = []
-static var _props: Array = []
-static var _cabin_light := Vector3.ZERO
+static var _hull: HullFairing
+
+
+## Every Lantern has the same shape.
+static func fairing() -> HullFairing:
+	if _hull == null:
+		_hull = HullFairing.new(STATIONS)
+	return _hull
 
 
 static func build(m: SubmarineModel) -> void:
@@ -71,11 +64,9 @@ static func build(m: SubmarineModel) -> void:
 	}
 	for i in LEDS.size():
 		mats["led%d" % i] = MeshKit.emissive_material(LEDS[i], 3.0)
-	if _parts.is_empty():
+	if not m.restore(mats):
 		_build_parts(m, mats)
-		_remember(m, mats)
-	else:
-		_restore(m, mats)
+		m.remember(mats)
 
 
 static func _build_parts(m: SubmarineModel, mats: Dictionary) -> void:
@@ -89,137 +80,13 @@ static func _build_parts(m: SubmarineModel, mats: Dictionary) -> void:
 	_stern(m, mats)
 
 
-## Merges the freshly built parts and keeps them for the next Lantern.
-static func _remember(m: SubmarineModel, mats: Dictionary) -> void:
-	m.merge_parts()
-	var slot_of := {}
-	for k: String in mats:
-		slot_of[mats[k]] = k
-	for child in m.get_children():
-		var mi := child as MeshInstance3D
-		if mi:
-			_parts.append([slot_of[mi.material_override], mi.mesh, mi.transform, mi == m.strobe])
-	var pivots: Array[Node3D] = [m.propeller]
-	pivots.append_array(m.props())
-	for pivot in pivots:
-		var parts: Array = []
-		for c in pivot.get_children():
-			var mi := c as MeshInstance3D
-			parts.append([slot_of[mi.material_override], mi.mesh, mi.transform])
-		_props.append([pivot.transform, parts, pivot == m.propeller])
-
-
-## Rebuilds the model from the kept parts in this build's paint.
-static func _restore(m: SubmarineModel, mats: Dictionary) -> void:
-	for p: Array in _parts:
-		var mi := m.place_xform(p[1], mats[p[0]], p[2])
-		if p[3]:
-			m.strobe = mi
-	for p: Array in _props:
-		var pivot: Node3D = m.propeller if p[2] else m.add_prop(Vector3.ZERO, Vector3.ZERO)
-		pivot.transform = p[0]
-		for part: Array in p[1]:
-			m.place_xform(part[1], mats[part[0]], part[2], pivot)
-	m.add_cockpit_light(_cabin_light)
-
-
-## The fairing's centre, heights and width at [param x], eased between the stations.
-static func station(x: float) -> PackedFloat32Array:
-	var n := STATIONS.size()
-	x = clampf(x, STATIONS[0][0], STATIONS[n - 1][0])
-	var k := 0
-	while k < n - 2 and x > float(STATIONS[k + 1][0]):
-		k += 1
-	var x0: float = STATIONS[k][0]
-	var x1: float = STATIONS[k + 1][0]
-	var h := x1 - x0
-	var t := (x - x0) / h
-	var out := PackedFloat32Array([x])
-	for c in range(1, 7):
-		var v0: float = STATIONS[k][c]
-		var v1: float = STATIONS[k + 1][c]
-		var m0 := _slope(k, c) * h
-		var m1 := _slope(k + 1, c) * h
-		var t2 := t * t
-		var t3 := t2 * t
-		out.append((2 * t3 - 3 * t2 + 1) * v0 + (t3 - 2 * t2 + t) * m0 + (-2 * t3 + 3 * t2) * v1 + (t3 - t2) * m1)
-	return out
-
-
-## Height of the top of the fairing at [param x], [param z] from the centreline.
-static func deck_y(x: float, z: float) -> float:
-	var s := station(x)
-	var f := clampf(absf(z) / s[4], 0.0, 1.0)
-	return s[1] + s[2] * pow(1.0 - pow(f, s[5]), 1.0 / s[5])
-
-
-## Half-width of the fairing at [param x] and height [param y].
-static func side_z(x: float, y: float) -> float:
-	var s := station(x)
-	var above := y >= s[1]
-	var f := clampf(absf(y - s[1]) / (s[2] if above else s[3]), 0.0, 1.0)
-	var n := s[5] if above else s[6]
-	return s[4] * pow(1.0 - pow(f, n), 1.0 / n)
-
-
-## The fairing's skin on a grid of [param nu] by [param nv]: rows from stern
-## to bow, each running round its section from the keel, up the near (+Z)
-## side, over the deck and down the far side, spaced evenly by distance so
-## lettering painted on it keeps its shape.
-static func fairing_grid(nu: int, nv: int) -> PackedVector3Array:
-	var out := PackedVector3Array()
-	var fine := 160
-	for i in nu + 1:
-		var x := lerpf(X0, X1, float(i) / nu)
-		var s := station(x)
-		var ring := PackedVector3Array()
-		var lengths := PackedFloat32Array()
-		for k in fine + 1:
-			var p := _section_point(s, -PI * 0.5 + TAU * k / fine)
-			lengths.append(0.0 if k == 0 else lengths[k - 1] + p.distance_to(ring[k - 1]))
-			ring.append(p)
-		var total := lengths[fine]
-		var k := 0
-		for j in nv + 1:
-			var target := total * j / nv
-			while k < fine - 1 and lengths[k + 1] < target:
-				k += 1
-			var f := clampf((target - lengths[k]) / maxf(lengths[k + 1] - lengths[k], 1e-9), 0.0, 1.0)
-			var p := ring[k].lerp(ring[k + 1], f)
-			out.append(Vector3(x, p.y, p.z))
-	return out
-
-
-static func _section_point(s: PackedFloat32Array, theta: float) -> Vector3:
-	var sn := sin(theta)
-	var cs := cos(theta)
-	var n := s[5] if sn >= 0.0 else s[6]
-	var y := s[1] + (s[2] if sn >= 0.0 else s[3]) * signf(sn) * pow(absf(sn), 2.0 / n)
-	var z := s[4] * signf(cs) * pow(absf(cs), 2.0 / n)
-	return Vector3(0.0, y, z)
-
-
-static func _slope(k: int, c: int) -> float:
-	var n := STATIONS.size()
-	var a := maxi(k - 1, 0)
-	var b := mini(k + 1, n - 1)
-	var rise: float = STATIONS[b][c] - STATIONS[a][c]
-	var run: float = STATIONS[b][0] - STATIONS[a][0]
-	return rise / run
-
-
 # --- Parts ---------------------------------------------------------------------------
 
 static func _fairing(m: SubmarineModel, mats: Dictionary) -> void:
-	if _grid.is_empty():
-		_grid = fairing_grid(NU, NV)
-	var grid := _grid
-	var fn := func(u: float, v: float) -> Vector3:
-		return grid[roundi(u * NU) * (NV + 1) + roundi(v * NV)]
 	# A little grime where the fairing meets the duct and the collar.
 	var wear := func(u: float, _v: float) -> Color:
 		return Color(1.0, 1.0 - 0.6 * (smoothstep(0.04, 0.0, u) + smoothstep(0.96, 1.0, u)), 1.0)
-	m.place(HullMesh.surface(fn, NU, NV, false, Callable(), wear), mats.hull)
+	m.place(fairing().mesh(wear), mats.hull)
 
 
 ## Cable runs along both sides of the fairing, clamped down every so often.
@@ -228,48 +95,17 @@ static func _conduits(m: SubmarineModel, mats: Dictionary) -> void:
 		var pts := PackedVector3Array()
 		var x := -1.45
 		while x <= 0.86:
-			pts.append(_on_skin(x, v, 0.018))
+			pts.append(fairing().on_skin(x, v, 0.018))
 			x += 0.1
 		m.place(HullMesh.pipe(pts, 0.012, 8), mats.rubber)
 		m.place(HullMesh.pipe(_offset(pts, Vector3(0, 0.03, 0)), 0.008, 6), mats.steel)
 		x = -1.4
 		while x <= 0.85:
-			var at := _on_skin(x, v, 0.016)
-			var nrm := (_on_skin(x, v, 0.05) - at).normalized()
+			var at := fairing().on_skin(x, v, 0.016)
+			var nrm := (fairing().on_skin(x, v, 0.05) - at).normalized()
 			var mi := m.place(HullMesh.rounded_box(Vector3(0.03, 0.075, 0.03), 0.01), mats.frame, at + Vector3(0, 0.012, 0))
 			mi.basis = Basis.looking_at(nrm, Vector3.UP)
 			x += 0.35
-
-
-## A point [param lift] off the fairing's skin at [param x], [param v] of the
-## way round its section.
-static func _on_skin(x: float, v: float, lift: float) -> Vector3:
-	var s := station(x)
-	var key := Vector2i(roundi(x * 1000.0), roundi(v * 1000.0))
-	if not _theta_cache.has(key):
-		_theta_cache[key] = _theta_for(s, v)
-	var theta: float = _theta_cache[key]
-	var a := _section_point(s, -PI * 0.5 + TAU * theta)
-	var b := _section_point(s, -PI * 0.5 + TAU * theta + 0.01)
-	var tangent := (b - a).normalized()
-	var out := Vector3(0.0, -tangent.z, tangent.y)
-	return Vector3(x, a.y, a.z) + out * lift
-
-
-## The angle (as a share of a turn from the keel) [param v] of the way round a section by distance.
-static func _theta_for(s: PackedFloat32Array, v: float) -> float:
-	var fine := 160
-	var prev := _section_point(s, -PI * 0.5)
-	var lengths := PackedFloat32Array([0.0])
-	for k in range(1, fine + 1):
-		var p := _section_point(s, -PI * 0.5 + TAU * k / fine)
-		lengths.append(lengths[k - 1] + p.distance_to(prev))
-		prev = p
-	var target := lengths[fine] * v
-	for k in fine:
-		if lengths[k + 1] >= target:
-			return (k + (target - lengths[k]) / maxf(lengths[k + 1] - lengths[k], 1e-9)) / fine
-	return 1.0
 
 
 static func _offset(pts: PackedVector3Array, by: Vector3) -> PackedVector3Array:
@@ -329,8 +165,7 @@ static func _bow(m: SubmarineModel, mats: Dictionary) -> void:
 		var a := 0.9 + i * 0.18
 		m.place(HullMesh.lathe(_ball(0.008, 4), 6, 0.0), mats["led%d" % i],
 			at + Vector3(1.12, sin(a) * 0.44, cos(a) * 0.44))
-	_cabin_light = at + Vector3(1.2, 0.05, 0.0)
-	m.add_cockpit_light(_cabin_light)
+	m.add_cockpit_light(at + Vector3(1.2, 0.05, 0.0))
 
 
 ## A lamp bar over the dome and the searchlight on its yoke on the deck.
@@ -352,7 +187,7 @@ static func _lamps(m: SubmarineModel, mats: Dictionary) -> void:
 		var at := Vector3(1.22, BOW_Y + cos(a) * (ring_r + 0.005), sin(a) * (ring_r + 0.005))
 		_lamp_head(m, mats, at, 0.042, Vector3(-a_deg * 0.3, 0, -10))
 	# The searchlight: a finned housing on a pan-and-tilt yoke.
-	var base := Vector3(0.62, deck_y(0.62, 0.0) - 0.01, 0.0)
+	var base := Vector3(0.62, fairing().deck_y(0.62, 0.0) - 0.01, 0.0)
 	m.place(HullMesh.lathe(PackedVector2Array([Vector2(-0.02, 0.1), Vector2(0.03, 0.1), Vector2(0.05, 0.085),
 		Vector2(0.07, 0.06), Vector2(0.075, 0.001)]), 24), mats.frame, base, Vector3(0, 0, 90))
 	var pivot := base + Vector3(0.0, 0.17, 0.0)
@@ -385,7 +220,7 @@ static func _lamp_head(m: SubmarineModel, mats: Dictionary, at: Vector3, r: floa
 ## The sail with its hatch, the mast, the lifting bail, grab rails and the
 ## vertical thruster let into the deck.
 static func _deck(m: SubmarineModel, mats: Dictionary) -> void:
-	var sail_y := deck_y(-0.15, 0.0)
+	var sail_y := fairing().deck_y(-0.15, 0.0)
 	m.place(HullMesh.rounded_box(Vector3(0.82, 0.3, 0.5), 0.13, 4), mats.trim, Vector3(-0.17, sail_y + 0.06, 0.0))
 	var top := sail_y + 0.21
 	# Hatch: a domed lid on a ring, its hinge and handwheel.
@@ -415,7 +250,7 @@ static func _deck(m: SubmarineModel, mats: Dictionary) -> void:
 		Vector2(0.025, 0.001)]), 16), mats.trim, foot.lerp(head, 0.6) + Vector3(0.12, 0.0, 0.0), Vector3(0, 0, 90))
 	# Lifting bail across the deck ahead of the sail.
 	var bx := 0.32
-	var by := deck_y(bx, 0.36)
+	var by := fairing().deck_y(bx, 0.36)
 	m.place(HullMesh.pipe(PackedVector3Array([Vector3(bx, by - 0.02, 0.36), Vector3(bx, by + 0.3, 0.3),
 		Vector3(bx, by + 0.3, -0.3), Vector3(bx, by - 0.02, -0.36)]), 0.026, 12, 0.12), mats.safety)
 	for z: float in [0.34, -0.34]:
@@ -425,13 +260,13 @@ static func _deck(m: SubmarineModel, mats: Dictionary) -> void:
 		var rail := PackedVector3Array()
 		var posts: Array[float] = [-1.35, -1.0, -0.65]
 		for x in posts:
-			var y := deck_y(x, z)
+			var y := fairing().deck_y(x, z)
 			m.place(HullMesh.pipe(PackedVector3Array([Vector3(x, y - 0.02, z), Vector3(x, y + 0.09, z)]), 0.012, 8),
 				mats.steel)
 			rail.append(Vector3(x, y + 0.09, z))
 		m.place(HullMesh.pipe(PackedVector3Array([rail[0], rail[1], rail[2]]), 0.014, 8, 0.05), mats.steel)
 	# The vertical thruster: a grille over a duct in the deck.
-	var vt := Vector3(-1.08, deck_y(-1.08, 0.0) - 0.035, 0.0)
+	var vt := Vector3(-1.08, fairing().deck_y(-1.08, 0.0) - 0.035, 0.0)
 	m.place(_duct(0.19, 0.155, 0.1), mats.frame, vt, Vector3(0, 0, 90))
 	for k in 5:
 		var z := -0.12 + 0.06 * k
@@ -570,7 +405,7 @@ static func _stern(m: SubmarineModel, mats: Dictionary) -> void:
 		Vector3.ZERO, Vector3.ZERO, m.propeller)
 	# Tail: a fin up top and stabilisers either side, their tips lit.
 	var fin := HullMesh.wing(Vector2(-1.42, -1.98), Vector2(-1.78, -2.06), 0.44, 0.1)
-	m.place(fin, mats.trim, Vector3(0.0, deck_y(-1.7, 0.0) - 0.08, 0.0))
+	m.place(fin, mats.trim, Vector3(0.0, fairing().deck_y(-1.7, 0.0) - 0.08, 0.0))
 	var stab := HullMesh.wing(Vector2(-1.45, -2.0), Vector2(-1.76, -2.05), 0.5, 0.1)
 	for sgn: float in [1.0, -1.0]:
 		var basis := Basis(Vector3.RIGHT, sgn * PI * 0.5)
@@ -579,7 +414,7 @@ static func _stern(m: SubmarineModel, mats: Dictionary) -> void:
 		m.place(HullMesh.lathe(_ball(0.03, 8), 12), mats.frame, tip)
 		m.place(HullMesh.lathe(_ball(0.022, 8), 12, 0.0), mats.starboard if sgn > 0.0 else mats.port,
 			tip + Vector3(0.0, 0.0, sgn * 0.016))
-	var fin_tip := Vector3(-1.98, deck_y(-1.7, 0.0) + 0.35, 0.0)
+	var fin_tip := Vector3(-1.98, fairing().deck_y(-1.7, 0.0) + 0.35, 0.0)
 	m.place(HullMesh.lathe(_ball(0.022, 8), 12, 0.0), mats.stern_light, fin_tip)
 	# Lateral thrusters on pylons either side, their own props turning.
 	for sgn: float in [1.0, -1.0]:

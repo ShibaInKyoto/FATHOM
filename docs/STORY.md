@@ -73,6 +73,10 @@ marked LANTERN, with the designation DSV-7 and the placard "TEST DEPTH
 11 000 M" (the hadal floor lies at about 10 900 m). Whose seventh DSV it was
 is as open as who hired the pilot.
 
+The Mako found derelict in the reef is marked MAKO, PROTOTYPE, with the
+designation XP-2 and a RESCUE arrow by its canopy: an experimental racer
+someone built and lost, its second prototype at least.
+
 ## The crew
 
 - **Commander R. Hale.** Station commander, practical and protective. Hale

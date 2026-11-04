@@ -9,7 +9,7 @@ far side (0.75), spaced evenly by distance.
 The fairing's shape comes from the game (tools/art/dump_hull.gd), so the
 maps always fit it:
 
-    python3 tools/art/hull_maps.py            # writes assets/subs/lantern_*.png
+    python3 tools/art/hull_maps.py [frame...]   # writes assets/subs/<frame>_*.png
 """
 import json
 import os
@@ -27,11 +27,11 @@ W, H = 2048, 1024
 rng = np.random.default_rng(7)
 
 
-def load_hull():
+def load_hull(frame):
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "hull.json")
         subprocess.run([os.environ.get("GODOT", "godot"), "--headless", "--path", ROOT, "-s",
-                        "res://tools/art/dump_hull.gd", "--", path], check=True, stdin=subprocess.DEVNULL,
+                        "res://tools/art/dump_hull.gd", "--", path, frame], check=True, stdin=subprocess.DEVNULL,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         with open(path) as f:
             data = json.load(f)
@@ -282,14 +282,170 @@ def normal_map(hull, height, pv):
     return n * 0.5 + 0.5
 
 
+def text_on(hull, paint, height, words, height_world, x, v, far, width_world=None, shear=0.0,
+            ink=(0.07, 0.07, 0.08), depth=0.0004):
+    """Paints words centred at x, v, upright from whichever side they're seen."""
+    mask = text_mask(words, None, height_world * hull.px_v(x))
+    if shear:
+        im = Image.fromarray((mask * 255).astype(np.uint8))
+        extra = int(abs(shear) * im.height)
+        im = im.transform((im.width + extra, im.height), Image.AFFINE, (1, shear, -extra if shear > 0 else 0, 0, 1, 0),
+                          resample=Image.BICUBIC)
+        mask = np.asarray(im, dtype=np.float32) / 255
+    width = width_world * hull.px_x if width_world else mask.shape[1] * hull.px_x / hull.px_v(x)
+    mask = np.asarray(Image.fromarray((mask * 255).astype(np.uint8)).resize(
+        (max(int(width), 1), mask.shape[0]), Image.LANCZOS), dtype=np.float32) / 255
+    m = mask[:, ::-1] if far else mask[::-1, :]
+    stamp(paint, m * 0.92, hull.col(x), hull.row(v), np.array(ink))
+    stamp(height, m * depth, hull.col(x), hull.row(v), 1.0, "add")
+
+
+def side_v(hull, x, far, offset=0.0):
+    """The v of the widest point of the section at x on one side, moved
+    offset towards the deck (negative: towards the keel)."""
+    col = int(np.clip(hull.col(x), 0, W - 1))
+    half = hull.z[: H // 2, col] if not far else -hull.z[H // 2:, col]
+    j = int(np.argmax(half))
+    v = (j + 0.5) / H + (0.0 if not far else 0.5)
+    return v - offset if far else v + offset
+
+
+def paint_mako(hull):
+    paint = np.ones((H, W, 3), dtype=np.float32) * 0.96
+    height = np.zeros((H, W), dtype=np.float32)
+    X, V = hull.X, hull.V
+    per = hull.perimeter[None, :]
+
+    # Flush composite panels: fine seams and countersunk screws, no rivets.
+    seam = np.zeros((H, W), dtype=np.float32)
+    width = 0.0035
+    long_seams = [0.0, 0.085, 0.4, 0.46]
+    long_seams += [1.0 - s for s in long_seams[1:]] + [1.0]
+    for s in long_seams:
+        seam = np.maximum(seam, np.exp(-((np.abs(V - s) * per) / width) ** 2))
+    gills = (-0.42, 0.12)
+    for x in [-1.62, -1.05, -0.5, 0.3, 0.98, 1.62]:
+        d = np.abs(X - x)
+        keep = np.ones_like(V, dtype=bool)
+        if gills[0] - 0.05 < x < gills[1] + 0.05:
+            keep = (np.abs(V - 0.25) > 0.09) & (np.abs(V - 0.75) > 0.09)
+        seam = np.maximum(seam, np.exp(-(d / width) ** 2) * keep)
+    height -= seam * 0.0025
+    paint *= (1 - 0.38 * seam)[..., None]
+    screws = []
+    for s in long_seams[1:-1]:
+        for x in np.arange(hull.x0 + 0.12, hull.x1 - 0.1, 0.075):
+            p_here = np.interp((x - hull.x0) / hull.length, hull.u, hull.perimeter)
+            screws.append((x, s + 0.016 / p_here))
+    for x in [-1.62, -1.05, -0.5, 0.3, 0.98, 1.62]:
+        p_here = np.interp((x - hull.x0) / hull.length, hull.u, hull.perimeter)
+        for v in np.arange(0.02, 0.98, 0.06 / p_here):
+            if gills[0] - 0.05 < x < gills[1] + 0.05 and (abs(v - 0.25) < 0.09 or abs(v - 0.75) < 0.09):
+                continue
+            screws.append((x + 0.016, v))
+    for x, v in screws:
+        rx = 0.0055 * hull.px_x
+        ry = 0.0055 * hull.px_v(x)
+        ys, xs = np.mgrid[-int(ry * 2) - 1:int(ry * 2) + 2, -int(rx * 2) - 1:int(rx * 2) + 2]
+        dist = np.sqrt((xs / rx) ** 2 + (ys / ry) ** 2)
+        dish = np.clip(1 - dist ** 2, 0, 1)
+        stamp(height, -dish * 0.0012, hull.col(x), hull.row(v), 1.0, "add")
+        stamp(paint, np.exp(-((dist - 0.85) / 0.3) ** 2) * 0.35, hull.col(x), hull.row(v), 0.0)
+
+    # Gills: five slanted intakes on each flank, dark inside, their lips raised.
+    for far in (False, True):
+        vc = side_v(hull, -0.15, far)
+        for k in range(5):
+            xc = gills[1] - k * 0.11
+            lean = 0.07  # the top of each slot sits further aft
+            t = (V - vc) * per * (1 if not far else -1)  # height up the side from the slot's middle
+            along = X - (xc - lean * t / 0.13)
+            inside = (np.abs(along) < 0.018) & (np.abs(t) < 0.13 - k * 0.012)
+            soft = np.exp(-(np.maximum(np.abs(along) - 0.018, 0) / 0.004) ** 2) * (np.abs(t) < 0.135 - k * 0.012)
+            height -= inside * 0.006
+            height += (soft - inside) * 0.0015
+            paint *= (1 - 0.85 * inside)[..., None]
+
+    # A dark belly below twin pinstripes along the lower flank, nose to tail.
+    for far in (False, True):
+        vs = np.array([side_v(hull, x, far, -0.06) for x in hull.X[0]])
+        kernel = np.ones(151) / 151
+        vs = np.convolve(np.pad(vs, 75, mode="edge"), kernel, mode="valid")
+        below = (V - vs[None, :]) * per * (1 if not far else -1)
+        side = (V < 0.5) if not far else (V >= 0.5)
+        belly = np.clip(-below / 0.01, 0, 1) * side
+        paint *= (1 - 0.62 * belly)[..., None]
+        for off, w in ((-0.105, 0.006), (-0.125, 0.003)):
+            vs = np.array([side_v(hull, x, far, off * 0.5) for x in hull.X[0]])
+            kernel = np.ones(151) / 151
+            vs = np.convolve(np.pad(vs, 75, mode="edge"), kernel, mode="valid")
+            d = np.abs(V - vs[None, :]) * per
+            band = np.exp(-(d / w) ** 4) * ((X > -1.75) & (X < 1.9))
+            paint *= (1 - 0.6 * band)[..., None]
+
+    # Access panels: outlined hatches with a screw at each corner.
+    for far in (False, True):
+        for (xa, xb, off, half) in ((-1.55, -1.3, 0.03, 0.07), (1.15, 1.42, 0.06, 0.05), (0.42, 0.62, -0.02, 0.06)):
+            vc = side_v(hull, (xa + xb) / 2, far, off)
+            t = (V - vc) * per
+            inside_x = np.minimum(X - xa, xb - X)
+            inside_t = half - np.abs(t)
+            edge = np.minimum(inside_x, inside_t)
+            groove = np.exp(-(edge / 0.003) ** 2) * (np.abs(t) < half + 0.01) * (X > xa - 0.01) * (X < xb + 0.01)
+            height -= groove * 0.002
+            paint *= (1 - 0.5 * groove)[..., None]
+            for cx in (xa + 0.018, xb - 0.018):
+                for ct in (-half + 0.018, half - 0.018):
+                    cv = vc + ct / np.interp((cx - hull.x0) / hull.length, hull.u, hull.perimeter)
+                    rx = 0.007 * hull.px_x
+                    ry = 0.007 * hull.px_v(cx)
+                    ys, xs = np.mgrid[-int(ry * 2) - 1:int(ry * 2) + 2, -int(rx * 2) - 1:int(rx * 2) + 2]
+                    dist = np.sqrt((xs / rx) ** 2 + (ys / ry) ** 2)
+                    stamp(paint, (dist < 1).astype(np.float32) * 0.45, hull.col(cx), hull.row(cv), 0.0)
+
+    # Name, prototype designation and a canopy rescue marking.
+    for far in (False, True):
+        up = 1
+        text_on(hull, paint, height, "MAKO", 0.22, -0.98, side_v(hull, -0.98, far, 0.012), far, shear=0.28)
+        text_on(hull, paint, height, "PROTOTYPE", 0.034, -0.98, side_v(hull, -0.98, far, -0.04), far)
+        text_on(hull, paint, height, "XP-2", 0.08, 0.68, side_v(hull, 0.68, far, 0.035 * up), far, shear=0.2)
+        text_on(hull, paint, height, "RESCUE", 0.026, 0.9, side_v(hull, 0.9, far, 0.105), far)
+        # An arrow under RESCUE pointing up at the canopy.
+        v_arrow = side_v(hull, 0.9, far, 0.085)
+        tip = np.abs(X - 0.9) * 1.0
+        rise = (V - v_arrow) * per * (1 if not far else -1)
+        arrow = ((rise > -0.015) & (rise < 0.012) & (tip < 0.006)) | ((rise >= 0.004) & (rise < 0.022) &
+                                                                    (tip < (0.022 - rise) * 0.9))
+        paint *= (1 - 0.8 * arrow)[..., None]
+
+    # Hazard chevrons round the pump-jet's intake.
+    band = (X > -1.97) & (X < -1.86)
+    chevron = np.floor(((X + 1.97) * 18 + np.abs(V - 0.5) * 22) ) % 2 == 0
+    paint *= (1 - 0.8 * (band & chevron))[..., None]
+
+    # Light grime: a prototype kept clean, dulled underneath and at the tail.
+    low = np.clip((-0.05 - hull.y) / 0.35, 0, 1)
+    fine = smooth_noise((H, W), (60, 160), 11)
+    blotch = smooth_noise((H, W), (10, 24), 12)
+    grime = 0.12 * low + 0.04 * blotch + 0.025 * fine + 0.2 * np.exp(-((X - hull.x0) / 0.15) ** 2)
+    paint *= (1 - np.clip(grime, 0, 0.5))[..., None]
+    height += (fine - 0.5) * 0.0002
+    pv = hull.px_v(X)
+    return np.clip(paint, 0, 1), height, pv
+
+
+PAINTERS = {"lantern": paint_lantern, "mako": paint_mako}
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
-    hull = Hull(*load_hull())
-    paint, height, pv = paint_lantern(hull)
-    Image.fromarray((paint * 255 + 0.5).astype(np.uint8)).save(os.path.join(OUT, "lantern_paint.png"))
-    nm = normal_map(hull, height, pv)
-    Image.fromarray((nm * 255 + 0.5).astype(np.uint8)).save(os.path.join(OUT, "lantern_normal.png"))
-    print("wrote", os.path.relpath(OUT, ROOT))
+    for frame in sys.argv[1:] or list(PAINTERS):
+        hull = Hull(*load_hull(frame))
+        paint, height, pv = PAINTERS[frame](hull)
+        Image.fromarray((paint * 255 + 0.5).astype(np.uint8)).save(os.path.join(OUT, "%s_paint.png" % frame))
+        nm = normal_map(hull, height, pv)
+        Image.fromarray((nm * 255 + 0.5).astype(np.uint8)).save(os.path.join(OUT, "%s_normal.png" % frame))
+        print("painted", frame)
 
 
 if __name__ == "__main__":

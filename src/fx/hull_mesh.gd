@@ -270,11 +270,13 @@ static func pipe(points: PackedVector3Array, radius: float, sides := 10, bend :=
 ## A fin or wing, its root on the XZ plane and its span up +Y: a rounded
 ## airfoil [param thickness] of its chord thick, from [param root] to
 ## [param tip] (each the x of its leading and trailing edge), rounded off at
-## the tip.
-static func wing(root: Vector2, tip: Vector2, span: float, thickness := 0.12, rings := 10, sides := 20) -> ArrayMesh:
+## the tip. Edge curves below 1 bow an edge out early, above 1 late (a
+## shark's dorsal fin is convex in front and hollow behind).
+static func wing(root: Vector2, tip: Vector2, span: float, thickness := 0.12, rings := 10, sides := 20,
+		le_curve := 1.0, te_curve := 1.0) -> ArrayMesh:
 	var fn := func(u: float, v: float) -> Vector3:
-		var le := lerpf(root.x, tip.x, u)
-		var te := lerpf(root.y, tip.y, u)
+		var le := lerpf(root.x, tip.x, pow(u, le_curve))
+		var te := lerpf(root.y, tip.y, pow(u, te_curve))
 		var phi := v * TAU
 		var xi := 0.5 + 0.5 * cos(phi)
 		var chord := absf(le - te)
