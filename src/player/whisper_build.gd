@@ -109,7 +109,10 @@ static func mounts() -> Dictionary:
 	var torpedo := SubEquipment.frame_at(Vector3(0.0, -0.1, f.side_z(0.0, -0.1) - 0.02), Vector3(0.0, -0.3, 1.0))
 	out[&"torpedo"] = [torpedo, SubEquipment.mirror(torpedo)]
 	out[&"drive"] = [f.mount(-1.5, 0.2), f.mount(-1.5, 0.8)]
-	out[&"foil"] = [f.mount(0.1, 0.21), f.mount(0.1, 0.79)]
+	# Foils straight out of the chines, angled a little down.
+	var chine := f.station(0.1)
+	var foil := SubEquipment.frame_at(Vector3(0.1, chine[1], chine[4] - 0.01), Vector3(0.0, -0.18, 1.0))
+	out[&"foil"] = [foil, SubEquipment.mirror(foil)]
 	var deck: Array = []
 	for p: Vector2 in [Vector2(0.55, 0.37), Vector2(-0.35, 0.42), Vector2(-0.95, 0.42)]:
 		deck.append_array([f.mount(p.x, p.y), f.mount(p.x, 1.0 - p.y)])
@@ -125,6 +128,8 @@ static func mounts() -> Dictionary:
 	out[&"belly"] = belly
 	out[&"power"] = SubEquipment.frame_at(Vector3(-0.55, f.keel_y(-0.55, 0.0) + 0.01, 0.0), down)
 	out[&"galvanic"] = Vector3(-1.35, 1.25, 0.08)
+	# The squared duct already has a sawtooth lip: a second collar instead of a skirt.
+	out[&"screw"] = [Vector3(-2.02, JET.y, 0.0), DUCT * 1.0, 3.2, 0.22, 1.0, false]
 	return out
 
 

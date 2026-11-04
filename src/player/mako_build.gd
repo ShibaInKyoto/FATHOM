@@ -101,6 +101,7 @@ static func mounts() -> Dictionary:
 	out[&"power"] = SubEquipment.frame_at(Vector3(0.3, f.keel_y(0.3, 0.0) + 0.01, 0.0), down)
 	# Ending short of the dive planes' roots.
 	out[&"galvanic"] = Vector3(-1.3, 0.42, 0.075)
+	out[&"screw"] = [JET, Vector2(0.197, 0.197), 2.0, 0.31, 0.76, true]
 	return out
 
 

@@ -40,7 +40,11 @@ static func mounts() -> Dictionary:
 	out[&"shock"] = SubEquipment.frame_at(Vector3(1.02, -1.14, 0.0), Vector3.UP)
 	out[&"torpedo"] = pair.call(Vector3(0.3, -0.45, 0.84))
 	out[&"drive"] = pair.call(Vector3(-0.6, -0.1, 0.79))
-	out[&"foil"] = pair.call(Vector3(0.15, -0.72, 0.68))
+	# Foils out of the sphere's sides just below its middle, angled a little down.
+	var foil := SubEquipment.frame_at(Vector3(0.25, -0.12, 0.96).normalized() * R, Vector3(0.25, -0.45, 0.96))
+	out[&"foil"] = [foil, SubEquipment.mirror(foil)]
+	var aft := SubEquipment.frame_at(Vector3(-0.15, -0.12, 0.98).normalized() * R, Vector3(-0.15, -0.45, 0.98))
+	out[&"foil_aft"] = [aft, SubEquipment.mirror(aft)]
 	var deck: Array = []
 	for d: Vector3 in [Vector3(0.3, 0.84, 0.45), Vector3(-0.3, 0.84, 0.45), Vector3(0.0, 0.72, 0.69)]:
 		deck.append_array(pair.call(d))
@@ -50,11 +54,15 @@ static func mounts() -> Dictionary:
 			Vector3(-0.3, 0.42, 0.86)]:
 		flank.append_array(pair.call(d))
 	out[&"flank"] = flank
-	out[&"belly"] = [on.call(Vector3(-0.5, -0.87, 0.0)), on.call(Vector3(0.42, -0.9, 0.0)),
+	# Under the sphere the battery boxes hide everything, so the belly's gear
+	# goes on the near box's outboard face, then on top of the near skid.
+	out[&"belly"] = [SubEquipment.frame_at(Vector3(0.19, -1.09, 0.53), Vector3.BACK),
+		SubEquipment.frame_at(Vector3(-0.45, -1.265, 0.72), Vector3.UP).scaled_local(Vector3.ONE * 1.3),
 		on.call(Vector3(-0.78, -0.62, 0.0))]
 	# The battery pack on the outboard face of the near battery box.
 	out[&"power"] = SubEquipment.frame_at(Vector3(-0.19, -1.09, 0.53), Vector3.BACK)
 	out[&"galvanic"] = Vector3(-0.62, 0.5, 0.19)
+	out[&"screw"] = [Vector3(-1.68, 0.0, 0.0), Vector2(0.34, 0.34), 2.0, 0.07, 1.0, true]
 	return out
 
 

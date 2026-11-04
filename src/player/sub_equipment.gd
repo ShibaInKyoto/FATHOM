@@ -1,5 +1,5 @@
 class_name SubEquipment
-extends SubLaunchers
+extends SubFittings
 ## The kit hung on a submarine, the way gear piles onto a character in a
 ## roguelite: the lamp head on its track, the harpoon launcher, the frame's
 ## own tool, and a piece for every module card taken in the run, each with a
@@ -638,8 +638,7 @@ func _crawler(t: Transform3D) -> void:
 
 ## The Capacitor Bank: one battery pack at the frame's "power" mount, longer
 ## with each card, a charge light lit for each; the Bio-Converter on the deck
-## (see _bioreactor); under the belly the Ink Sac's bladder and the
-## Scavenger Protocol's scoop.
+## (see _bioreactor).
 func _power() -> void:
 	var cells := mini(_n(&"capacitor"), 4)
 	var mount: Variant = _mount(&"power")
@@ -648,22 +647,6 @@ func _power() -> void:
 	if cells > 0 and mount != null:
 		_battery_pack(mount, cells)
 	_bioreactor()
-	if _n(&"ink") > 0:
-		var belly: Variant = _take(&"belly")
-		if belly != null:
-			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.12, 0.001), Vector2(-0.09, 0.05), Vector2(0.02, 0.065),
-				Vector2(0.1, 0.04), Vector2(0.14, 0.012), Vector2(0.16, 0.012), Vector2(0.16, 0.001)]), 16), "ink", belly,
-				_at(Vector3(0, 0.065, 0)))
-			_led(belly, Vector3(0.0, 0.13, 0.0), UTIL, 0.008)
-	if _n(&"scavenger") > 0:
-		var belly: Variant = _take(&"belly")
-		if belly != null:
-			for z: float in [-0.07, 0.0, 0.07]:
-				_put(HullMesh.pipe(PackedVector3Array([Vector3(-0.08, 0.0, z), Vector3(-0.06, 0.09, z), Vector3(0.1, 0.11, z),
-					Vector3(0.14, 0.06, z)]), 0.006, 5, 0.03), "steel", belly)
-			_put(HullMesh.pipe(PackedVector3Array([Vector3(0.14, 0.06, -0.08), Vector3(0.14, 0.06, 0.08)]), 0.008, 5),
-				"steel", belly)
-			_led(belly, Vector3(-0.07, 0.02, 0.0), UTIL, 0.009)
 
 
 ## The battery pack: an olive housing with a yellow band, finned on its face,
@@ -727,108 +710,3 @@ func _bioreactor() -> void:
 			Vector2(0.064, 0.03), Vector2(0.064, 0.026), Vector2(0.034, 0.005)]), 16), "brass", mount,
 			_stand(Vector3(0, 0.168, 0)))
 	_led(mount, Vector3(0.044, 0.025, 0.0), POWER, 0.008)
-
-
-## Aft on the drive mounts: Overdrive's booster pods, their nozzles glowing
-## hotter while the sub boosts (a longer pod with cooling rings and an
-## afterburner ring at two), and Silent Screws' rubber baffles; foils along
-## the flanks for a Hydrodynamic Hull.
-func _drive() -> void:
-	var mounts: Variant = _mount(&"drive")
-	var boost := mini(_n(&"overdrive"), 2)
-	var quiet := _n(&"silent_screws")
-	if mounts != null and (boost > 0 or quiet > 0):
-		if boost > 0:
-			# Lit, not flat: its emission is what the model turns up while boosting.
-			var glow := StandardMaterial3D.new()
-			glow.albedo_color = Color(0.3, 0.12, 0.05)
-			glow.emission_enabled = true
-			glow.emission = Color(1.0, 0.5, 0.18)
-			glow.emission_energy_multiplier = 0.8
-			mats["boost_glow"] = glow
-			m.set_boost_glow(glow)
-		for mount: Transform3D in mounts:
-			var y := 0.08
-			if quiet > 0:
-				_put(HullMesh.rounded_box(Vector3(0.12, y, 0.03), 0.01), "metal", mount, _at(Vector3(0, y * 0.5, 0)))
-				_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.12, 0.001), Vector2(-0.08, 0.05), Vector2(0.08, 0.05),
-					Vector2(0.12, 0.001)]), 14), "rubber", mount, _at(Vector3(0, y, 0)))
-				_led(mount, Vector3(0.0, y + 0.06, 0.0), UTIL, 0.008)
-			if boost > 0:
-				_booster(mount, boost, 0.1 if quiet > 0 else 0.0)
-	var foils: Variant = _mount(&"foil")
-	if foils != null and _n(&"hydrofoil") > 0:
-		var span := 0.16 + 0.06 * _n(&"hydrofoil")
-		for mount: Transform3D in foils:
-			_put(HullMesh.wing(Vector2(0.18, -0.12), Vector2(0.02, -0.14), span, 0.1, 8, 16, 0.8), "paint", mount)
-			_led(mount, Vector3(-0.06, span - 0.01, 0.0), UTIL, 0.008)
-
-
-## One Overdrive booster pod on a pylon, [param out] further off the hull.
-func _booster(mount: Transform3D, level: int, out: float) -> void:
-	var length := 0.2 if level == 1 else 0.27
-	var r := 0.032 if level == 1 else 0.038
-	var h := 0.072 + out
-	_put(HullMesh.rounded_box(Vector3(0.09, h - r * 0.5 + 0.02, 0.022), 0.008), "metal", mount,
-		_at(Vector3(0.0, (h - r * 0.5) * 0.5 - 0.01, 0)))
-	var pod := mount * _at(Vector3(0.02, h, 0))
-	var back := -length * 0.5
-	_put(HullMesh.lathe(PackedVector2Array([Vector2(back + 0.04, 0.001), Vector2(back + 0.04, r),
-		Vector2(length * 0.5 - 0.025, r), Vector2(length * 0.5, r * 0.82), Vector2(length * 0.5, 0.001)]), 20), "paint", pod)
-	# The intake at the front, dark behind a steel lip.
-	_put(HullMesh.lathe(_torus(r * 0.72, 0.005, 6), 18), "steel", pod, _at(Vector3(length * 0.5 + 0.002, 0, 0)))
-	_put(HullMesh.lathe(PackedVector2Array([Vector2(length * 0.5 + 0.001, 0.001), Vector2(length * 0.5 + 0.001, r * 0.7)]),
-		16, 0.0), "rubber", pod)
-	# The nozzle, its throat glowing.
-	_put(HullMesh.lathe(PackedVector2Array([Vector2(back + 0.045, r * 0.96), Vector2(back + 0.01, r * 0.9),
-		Vector2(back - 0.03, r * 1.18), Vector2(back - 0.03, r * 1.04), Vector2(back - 0.03, r * 1.04),
-		Vector2(back + 0.008, r * 0.62)]), 20), "steel", pod)
-	_put(HullMesh.lathe(PackedVector2Array([Vector2(back + 0.01, 0.001), Vector2(back + 0.01, r * 0.66)]), 16, 0.0),
-		"boost_glow", pod)
-	if level >= 2:
-		for k in 5:
-			_put(HullMesh.lathe(_torus(r + 0.003, 0.0035, 5), 18), "steel", pod, _at(Vector3(back + 0.07 + k * 0.03, 0, 0)))
-		_put(HullMesh.lathe(_torus(r * 1.1, 0.004, 6), 20, 0.0), "boost_glow", pod, _at(Vector3(back - 0.03, 0, 0)))
-	_led(mount, Vector3(0.05, h - r * 0.5 - 0.004, 0.012), POWER, 0.007)
-
-
-## On the deck: a magnet coil for a Magnet Coil, cargo crates for Deep
-## Pockets and the Pressure Compass.
-func _utilities() -> void:
-	var coil := 2 * _n(&"magnet_coil")
-	if coil > 0:
-		var mount: Variant = _take(&"deck")
-		if mount != null:
-			var r := 0.05 + 0.012 * coil
-			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.01, r * 0.7), Vector2(0.02, r * 0.7),
-				Vector2(0.02, 0.001)]), 18), "metal", mount, _stand(Vector3.ZERO))
-			for k in 3 + coil:
-				_put(HullMesh.lathe(_torus(r, 0.009, 6), 20), "copper", mount, _stand(Vector3(0, 0.03 + k * 0.017, 0)))
-			_put(HullMesh.lathe(PackedVector2Array([Vector2(0.0, 0.025), Vector2(0.05 + (3 + coil) * 0.017, 0.025),
-				Vector2(0.05 + (3 + coil) * 0.017, 0.001)]), 12), "metal", mount, _stand(Vector3(0, 0.0, 0)))
-			_led(mount, Vector3(0, 0.06 + (3 + coil) * 0.017, 0), UTIL, 0.01)
-	for k in _n(&"lucky"):
-		var mount: Variant = _take(&"deck")
-		if mount == null:
-			break
-		_put(HullMesh.rounded_box(Vector3(0.2, 0.1, 0.14), 0.012), "crate", mount, _at(Vector3(0, 0.05, 0)))
-		for x: float in [-0.06, 0.06]:
-			_put(HullMesh.rounded_box(Vector3(0.018, 0.104, 0.144), 0.004, 1), "rubber", mount, _at(Vector3(x, 0.05, 0)))
-		_led(mount, Vector3(0.101, 0.07, 0.0), UTIL, 0.008)
-	if _n(&"compass") > 0:
-		# The Pressure Compass: a brass binnacle with a gimballed glass bowl and a lit needle.
-		var mount: Variant = _take(&"deck")
-		if mount != null:
-			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.01, 0.045), Vector2(0.02, 0.04), Vector2(0.05, 0.028),
-				Vector2(0.06, 0.03), Vector2(0.065, 0.001)]), 18), "brass", mount, _stand(Vector3.ZERO))
-			var bowl := Vector3(0, 0.12, 0)
-			_put(HullMesh.lathe(_torus(0.066, 0.006, 6), 22), "brass", mount, _at(bowl, Vector3(90, 0, 0)))
-			_put(HullMesh.lathe(_torus(0.058, 0.005, 6), 22), "brass", mount, _at(bowl, Vector3(0, 0, 90)))
-			for sgn: float in [-1.0, 1.0]:
-				_put(HullMesh.pipe(PackedVector3Array([Vector3(0, 0.06, sgn * 0.066), bowl + Vector3(0, 0, sgn * 0.066)]),
-					0.006, 6), "brass", mount)
-			_put(HullMesh.lathe(_ball(0.048, 10), 14), "glass", mount, _at(bowl))
-			_put(HullMesh.rounded_box(Vector3(0.07, 0.004, 0.008), 0.002, 1), SONAR.to_html(), mount,
-				_at(bowl, Vector3(0, 30, 0)))
-			_led(mount, bowl + Vector3(0.03, 0.0, 0.0), WEAPON, 0.006)
-
