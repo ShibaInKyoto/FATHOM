@@ -155,7 +155,9 @@ has not noticed the sub can be **ambushed** (harpoon hits deal double), and
   same field edit as the moving trench.
 * **Audio**: the sound effects and music are made with a Python script in
   `tools/audio/` and committed as OGG files.
-* **Art**: the meshes are built at runtime; rock textures are
+* **Art**: the meshes are built at runtime (`HullMesh` gives the submarines
+  true normals, UVs and tangents); the Lantern's hull wears paint and normal
+  maps from `tools/art/hull_maps.py`, fitted to its shape; rock textures are
   CC0 from Poly Haven.
 
 ## Architecture

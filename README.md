@@ -322,7 +322,8 @@ godot --headless --import                                       # first-time imp
 godot --headless --path . -s res://tests/run_tests.gd           # 167 tests: generation, traversal, events, hazards, bosses, frames, saves, assets
 godot --headless --path . res://tests/flow_test.tscn            # end-to-end menu and dive flow
 godot --headless --export-release "Windows Desktop" build/windows/FATHOM.exe
-python3 tools/audio/generate.py                                 # rebuild all audio (numpy + ffmpeg)
+python3 tools/audio/generate.py                                 # regenerate all audio (numpy + ffmpeg)
+python3 tools/art/hull_maps.py                                  # repaint the hull maps (seams, grime, lettering)
 ```
 
 Debugging helpers: `-- --autopilot --zone=4 --frame=whisper --shots=<dir>` flies

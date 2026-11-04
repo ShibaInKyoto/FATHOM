@@ -4,24 +4,35 @@ extends Node3D
 ## the Lantern research sub, the Mako racer, the armored Bathysphere and the
 ## Whisper stealth drone. The nose points along local +X.
 
+const SURFACE := preload("res://src/player/sub_surface.gdshader")
+
 static var _plating: ImageTexture
 var propeller: Node3D
 var strobe: MeshInstance3D
 var cockpit_material: StandardMaterial3D
-var hull_material: StandardMaterial3D
+var hull_material: ShaderMaterial
 
 var _dark: StandardMaterial3D
 var _steel: StandardMaterial3D
+var _skin: SubSkins.Livery
+var _frame := &""
+## Every painted material, so darkening and the glow's pulse reach them all.
+var _paints: Array[ShaderMaterial] = []
+## Props besides the main one, each turning on its own axis.
+var _props: Array[Node3D] = []
+var _cockpit_light: OmniLight3D
 var _prop_speed := 0.0
+var _prop_angle := 0.0
 var _strobe_t := 0.0
 ## Glowing seams that breathe (a "pulse" finish), or false.
 var _pulse := false
 
 
-
 ## Builds the frame's model in [param skin] (its factory paint if null).
 func build(frame_id: StringName, skin: SubSkins.Livery = null) -> void:
-	_make_materials(skin if skin else SubSkins.factory(frame_id))
+	_frame = frame_id
+	_skin = skin if skin else SubSkins.factory(frame_id)
+	_make_materials()
 	propeller = Node3D.new()
 	add_child(propeller)
 	match frame_id:
@@ -32,66 +43,173 @@ func build(frame_id: StringName, skin: SubSkins.Livery = null) -> void:
 		&"whisper":
 			_build_whisper()
 		_:
-			_build_lantern()
+			LanternBuild.build(self)
 	_merge_static()
 
 
 func animate(delta: float, thrust: float) -> void:
 	_prop_speed = lerpf(_prop_speed, 4.0 + thrust * 30.0, 1.0 - exp(-4.0 * delta))
-	propeller.rotate_x(_prop_speed * delta)
+	propeller.rotate_object_local(Vector3.RIGHT, _prop_speed * delta)
+	for p in _props:
+		p.rotate_object_local(Vector3.RIGHT, _prop_speed * 0.8 * delta)
 	_strobe_t += delta
 	if strobe:
 		strobe.visible = fmod(_strobe_t, 1.6) < 0.08
 	if _pulse:
-		hull_material.emission_energy_multiplier = 0.4 + 1.8 * pow(0.5 + 0.5 * sin(_strobe_t * 1.8), 2.0)
+		var energy := 0.4 + 1.8 * pow(0.5 + 0.5 * sin(_strobe_t * 1.8), 2.0)
+		for mat in _paints:
+			mat.set_shader_parameter(&"glow_energy", energy)
 
 
 func set_cockpit_glow(energy: float) -> void:
 	cockpit_material.emission_energy_multiplier = energy
+	if _cockpit_light:
+		_cockpit_light.light_energy = 0.45 * energy
 
 
-## Darkens the livery, glow and all (for a wreck).
+## Darkens the livery, glow and all, and dims the lamps (for a wreck).
 func darken_hull(amount: float) -> void:
-	hull_material.albedo_color = hull_material.albedo_color.darkened(amount)
-	hull_material.emission_energy_multiplier *= 1.0 - amount
+	for mat in _paints:
+		mat.set_shader_parameter(&"darken", amount)
 	_pulse = false
+	var dimmed := {}
+	for child in get_children():
+		var mi := child as MeshInstance3D
+		var mat := mi.material_override as StandardMaterial3D if mi else null
+		if mat and mat.emission_enabled and mat != cockpit_material and not dimmed.has(mat):
+			dimmed[mat] = true
+			mat.emission_energy_multiplier *= 1.0 - amount
+
+
+# --- Building blocks (used by the frame builders) ---------------------------------
+
+## A material in the livery. With [param maps] it takes the frame's
+## paint-shop maps (seams, grime, lettering) on its UVs; the first such
+## material becomes [member hull_material].
+func paint_material(maps: bool) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = SURFACE
+	var plain := _skin.pattern == &"plates" and _skin.finish == &""
+	var detailed := _frame == &"lantern"
+	mat.set_shader_parameter(&"metallic", 0.12)
+	mat.set_shader_parameter(&"roughness", 0.4)
+	mat.set_shader_parameter(&"coat", 0.6)
+	mat.set_shader_parameter(&"vertex_wear", detailed)
+	mat.set_shader_parameter(&"use_maps", maps)
+	if plain or (detailed and _skin.pattern == &"plates"):
+		mat.set_shader_parameter(&"paint", _skin.color)
+		if not detailed:
+			# The older frames wear their plating as a pattern.
+			mat.set_shader_parameter(&"use_pattern", true)
+			mat.set_shader_parameter(&"pattern_tex", _plating_texture())
+	else:
+		mat.set_shader_parameter(&"paint", Color.WHITE)
+		mat.set_shader_parameter(&"use_pattern", true)
+		mat.set_shader_parameter(&"pattern_tex", SubSkins.textures(_skin)[0])
+	if not plain:
+		var tex := SubSkins.textures(_skin)
+		match _skin.finish:
+			&"chrome":
+				# Mostly mirror, but with nothing down here to mirror it keeps
+				# some of its color, and its edges catch the light.
+				mat.set_shader_parameter(&"metallic", 0.75)
+				mat.set_shader_parameter(&"roughness", 0.16)
+				mat.set_shader_parameter(&"rim", 0.7)
+				mat.set_shader_parameter(&"coat", 0.0)
+			&"glow", &"pulse":
+				mat.set_shader_parameter(&"glow_tex", tex[1])
+				mat.set_shader_parameter(&"glow_energy", 1.6)
+				_pulse = _skin.finish == &"pulse"
+			&"sheen":
+				mat.set_shader_parameter(&"roughness", 0.25)
+				mat.next_pass = SubSkins.sheen()
+	_paints.append(mat)
+	if maps and hull_material == null:
+		hull_material = mat
+	return mat
+
+
+## Bare or painted metal, rubber or plastic. With [param worn], edges wear
+## through to bare steel where the mesh marks them.
+func metal_material(color: Color, metallic: float, roughness: float, worn: bool) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = SURFACE
+	mat.set_shader_parameter(&"paint", color)
+	mat.set_shader_parameter(&"metallic", metallic)
+	mat.set_shader_parameter(&"roughness", roughness)
+	mat.set_shader_parameter(&"rim", 0.15)
+	mat.set_shader_parameter(&"vertex_wear", worn)
+	return mat
+
+
+## Clear acrylic: barely tinted, glossy, brighter at grazing angles.
+func glass_material() -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(0.7, 0.88, 0.95, 0.07)
+	mat.metallic = 0.0
+	mat.roughness = 0.03
+	mat.metallic_specular = 0.9
+	mat.rim_enabled = true
+	mat.rim = 0.45
+	mat.rim_tint = 0.3
+	return mat
+
+
+## Adds [param mesh] at [param pos], turned by [param rot_deg] (degrees), to
+## the model or to [param parent].
+func place(mesh: Mesh, mat: Material, pos := Vector3.ZERO, rot_deg := Vector3.ZERO,
+		parent: Node3D = null) -> MeshInstance3D:
+	var mi := _part(mesh, mat, pos, rot_deg)
+	if parent:
+		remove_child(mi)
+		parent.add_child(mi)
+	return mi
+
+
+func place_xform(mesh: Mesh, mat: Material, xform: Transform3D, parent: Node3D = null) -> MeshInstance3D:
+	var mi := place(mesh, mat, Vector3.ZERO, Vector3.ZERO, parent)
+	mi.transform = xform
+	return mi
+
+
+## The propellers besides the main one.
+func props() -> Array[Node3D]:
+	return _props
+
+
+## Bakes the parts built so far that share a material into one mesh each.
+func merge_parts() -> void:
+	_merge_static()
+
+
+## A second propeller hub at [param at], turning about its own X axis (set by
+## [param rot_deg]); put its blades under it.
+func add_prop(at: Vector3, rot_deg: Vector3) -> Node3D:
+	var pivot := Node3D.new()
+	pivot.position = at
+	pivot.rotation_degrees = rot_deg
+	add_child(pivot)
+	_props.append(pivot)
+	return pivot
+
+
+## A soft light inside the cockpit that follows its glow.
+func add_cockpit_light(at: Vector3) -> void:
+	_cockpit_light = OmniLight3D.new()
+	_cockpit_light.position = at
+	_cockpit_light.light_color = Color(0.55, 0.85, 1.0)
+	_cockpit_light.omni_range = 0.9
+	_cockpit_light.light_energy = 0.45 * cockpit_material.emission_energy_multiplier
+	_cockpit_light.shadow_enabled = false
+	add_child(_cockpit_light)
 
 
 # --- Materials ---------------------------------------------------------------------
 
-func _make_materials(skin: SubSkins.Livery) -> void:
-	hull_material = StandardMaterial3D.new()
-	hull_material.uv1_triplanar = true
-	hull_material.uv1_scale = Vector3(0.9, 0.9, 0.9)
-	hull_material.metallic = 0.4
-	hull_material.roughness = 0.4
-	hull_material.rim_enabled = true
-	hull_material.rim = 0.25
-	if skin.pattern == &"plates" and skin.finish == &"":
-		# Plain paint over the plating.
-		hull_material.albedo_color = skin.color
-		hull_material.albedo_texture = _plating_texture()
-	else:
-		var tex := SubSkins.textures(skin)
-		hull_material.albedo_texture = tex[0]
-		match skin.finish:
-			&"chrome":
-				# Mostly mirror, but with nothing down here to mirror it keeps
-				# some of its color, and its edges catch the light.
-				hull_material.metallic = 0.75
-				hull_material.roughness = 0.16
-				hull_material.rim = 0.7
-			&"glow", &"pulse":
-				hull_material.emission_enabled = true
-				hull_material.emission = Color.WHITE
-				hull_material.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
-				hull_material.emission_texture = tex[1]
-				hull_material.emission_energy_multiplier = 1.6
-				_pulse = skin.finish == &"pulse"
-			&"sheen":
-				hull_material.roughness = 0.25
-				hull_material.next_pass = SubSkins.sheen()
-
+func _make_materials() -> void:
+	if _frame != &"lantern":
+		hull_material = paint_material(false)
 	_dark = StandardMaterial3D.new()
 	_dark.albedo_color = Color(0.12, 0.13, 0.15)
 	_dark.metallic = 0.7
@@ -140,69 +258,6 @@ static func _plating_texture() -> ImageTexture:
 
 
 # --- Frames ------------------------------------------------------------------------
-
-func _build_lantern() -> void:
-	# A deep research submersible: a blunt pressure hull under a flat foam deck
-	# and a short sail, viewports in heavy bezels at the bow, a lamp bar, a
-	# folded manipulator, ducted thrusters and a skid frame.
-	var hull := MeshKit.lathe(PackedVector2Array([Vector2(0.0, 0.25), Vector2(0.06, 0.5), Vector2(0.2, 0.68),
-		Vector2(0.55, 0.74), Vector2(0.8, 0.7), Vector2(0.92, 0.58), Vector2(0.98, 0.36), Vector2(1.0, 0.12)]),
-		3.8, 24, 18, 0.88, 1.0)
-	_part(hull, hull_material, Vector3(-0.1, 0, 0), Vector3.ZERO)
-	var deck := MeshKit.lathe(PackedVector2Array([Vector2(0, 0.12), Vector2(0.12, 0.42), Vector2(0.85, 0.46),
-		Vector2(1, 0.2)]), 2.7, 16, 8, 0.32, 1.0)
-	_part(deck, hull_material, Vector3(-0.25, 0.6, 0), Vector3.ZERO)
-	var sail := MeshKit.lathe(PackedVector2Array([Vector2(0, 0.16), Vector2(0.25, 0.3), Vector2(0.8, 0.3),
-		Vector2(1, 0.14)]), 0.95, 14, 6, 1.25, 0.72)
-	_part(sail, hull_material, Vector3(-0.35, 0.92, 0), Vector3.ZERO)
-	_ring(0.2, 0.05, _dark, Vector3(-0.35, 1.28, 0), Vector3(0, 0, 0))
-	_part(_cylinder(0.71, 0.71, 0.14, 24), _dark, Vector3(-1.15, 0, 0), Vector3(0, 0, -90))
-	# Bow viewport in a heavy bezel, with two small side ports.
-	_part(MeshKit.sphere(0.4, 20, 10), cockpit_material, Vector3(1.58, -0.08, 0), Vector3.ZERO)
-	_ring(0.42, 0.07, _dark, Vector3(1.66, -0.08, 0), Vector3(0, 0, 90))
-	for z: float in [0.56, -0.56]:
-		_part(MeshKit.sphere(0.12, 10, 6), cockpit_material, Vector3(1.2, -0.28, z), Vector3.ZERO)
-		_ring(0.13, 0.035, _dark, Vector3(1.2, -0.28, z * 1.04), Vector3(90, 0, 0))
-	# Lamp bar over the viewport.
-	_part(_box(Vector3(0.32, 0.13, 0.72)), _dark, Vector3(1.38, 0.5, 0), Vector3(0, 0, -12))
-	_part(_box(Vector3(0.03, 0.07, 0.62)), MeshKit.emissive_material(Color(1.0, 0.95, 0.8), 4.0),
-		Vector3(1.55, 0.47, 0), Vector3(0, 0, -12))
-	# Manipulator arm folded under the bow, claw forward.
-	var shoulder := Vector3(1.05, -0.6, 0.34)
-	var elbow := Vector3(1.62, -0.74, 0.4)
-	var wrist := Vector3(1.42, -0.92, 0.44)
-	_part(MeshKit.sphere(0.09, 8, 4), _steel, shoulder, Vector3.ZERO)
-	_seg(shoulder, elbow, 0.055, _steel)
-	_part(MeshKit.sphere(0.07, 8, 4), _dark, elbow, Vector3.ZERO)
-	_seg(elbow, wrist, 0.045, _steel)
-	_seg(wrist, wrist + Vector3(0.18, 0.05, 0.03), 0.02, _dark)
-	_seg(wrist, wrist + Vector3(0.18, -0.06, 0.03), 0.02, _dark)
-	# Ducted lateral thrusters and a vertical one in the deck.
-	for z: float in [0.86, -0.86]:
-		_ring(0.2, 0.05, _dark, Vector3(-0.85, 0.05, z), Vector3(0, 0, 90))
-		_part(_cylinder(0.05, 0.05, 0.2, 8), _steel, Vector3(-0.85, 0.05, z), Vector3(0, 0, -90))
-		_seg(Vector3(-0.85, 0.05, z * 0.72), Vector3(-0.85, 0.05, z * 0.9), 0.045, _dark)
-	_ring(0.22, 0.05, _dark, Vector3(-1.35, 0.72, 0), Vector3.ZERO)
-	# Stern: shrouded main propeller and stabilisers.
-	_part(_cylinder(0.3, 0.16, 0.4, 16), _dark, Vector3(-2.12, 0, 0), Vector3(0, 0, -90))
-	_ring(0.42, 0.06, _dark, Vector3(-2.32, 0, 0), Vector3(0, 0, 90))
-	_add_propeller(Vector3(-2.3, 0, 0), 3, 0.36)
-	var stab := MeshKit.fin(PackedVector2Array([Vector2(0.3, 0), Vector2(-0.35, 0), Vector2(-0.45, 0.42),
-		Vector2(-0.1, 0.4)]), 0.05)
-	_part(stab, hull_material, Vector3(-1.75, 0.0, 0.5), Vector3(90, 0, 0))
-	_part(stab, hull_material, Vector3(-1.75, 0.0, -0.5), Vector3(-90, 0, 0))
-	_part(stab, hull_material, Vector3(-1.75, 0.45, 0), Vector3.ZERO)
-	# Skid frame.
-	for z: float in [0.42, -0.42]:
-		_seg(Vector3(-1.3, -0.9, z), Vector3(1.05, -0.9, z), 0.04, _steel)
-		_seg(Vector3(1.05, -0.9, z), Vector3(1.3, -0.72, z), 0.04, _steel)
-		for x: float in [-0.9, 0.0, 0.85]:
-			_seg(Vector3(x, -0.55, z * 0.8), Vector3(x, -0.9, z), 0.03, _steel)
-	_part(_cylinder(0.015, 0.03, 0.6, 6), _steel, Vector3(-0.5, 1.55, 0), Vector3(0, 0, 10))
-	strobe = _part(MeshKit.sphere(0.06), MeshKit.emissive_material(Color.WHITE, 6.0), Vector3(-0.56, 1.86, 0),
-		Vector3.ZERO)
-	_running_lights(Vector3(-1.95, 0.05, 0.95), Vector3(-1.95, 0.05, -0.95))
-
 
 func _build_mako() -> void:
 	# A fast attack sub: a long torpedo hull, a low canopy faired into a hump,

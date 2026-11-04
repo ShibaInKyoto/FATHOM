@@ -47,9 +47,12 @@ func test_every_livery_builds() -> void:
 	for skin in SubSkins.all():
 		var model := SubmarineModel.new()
 		model.build(skin.frame if skin.frame != &"" else &"lantern", skin)
-		check(model.hull_material.albedo_texture != null, "%s is drawn" % skin.id)
+		var hull := model.hull_material
+		var drawn: bool = hull.get_shader_parameter(&"pattern_tex") != null \
+			or hull.get_shader_parameter(&"paint_map") != null
+		check(drawn, "%s is drawn" % skin.id)
 		if skin.finish == &"glow" or skin.finish == &"pulse":
-			check(model.hull_material.emission_enabled, "%s glows" % skin.id)
+			check(float(hull.get_shader_parameter(&"glow_energy")) > 0.0, "%s glows" % skin.id)
 		model.free()
 
 

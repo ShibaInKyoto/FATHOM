@@ -2,6 +2,7 @@ extends Node3D
 ## Debug helper: one submarine frame close up under studio light, from a
 ## three-quarter angle, side on and from above, with optional modules fitted.
 ## Usage: xvfb-run godot --path . res://tools/debug/preview_sub.tscn -- <out.png> <frame> [skin id] [modules,...]
+## [close|side|rear|top] (one view, filling the frame)
 
 var _frames := 0
 
@@ -36,18 +37,25 @@ func _ready() -> void:
 	rim.light_energy = 0.8
 	rim.light_color = Color(0.6, 0.85, 1.0)
 	add_child(rim)
-	# Three views in a row: three-quarter, side, top.
+	# Three views in a row: three-quarter, side, top; or one of them close up.
 	var views := [Vector3(-12, -32, 0), Vector3(0, 0, 0), Vector3(80, 0, 0)]
+	var single := {"close": Vector3(-14, -35, 0), "side": Vector3.ZERO, "top": Vector3(80, 0, 0),
+		"rear": Vector3(-10, 140, 0), "far": Vector3(0, 180, 0), "bow": Vector3(-6, -62, 0), "dome": Vector3(-5, -55, 0)}
+	var one: String = args[4] if args.size() > 4 else ""
+	if single.has(one):
+		views = [single[one]]
 	for i in views.size():
 		var m := SubmarineModel.new()
 		add_child(m)
 		m.build(frame, skin)
 		if not modules.is_empty():
 			ModuleKit.fit(m, frame, modules)
-		m.position = Vector3((i - 1) * 6.2, 0.0, 0.0)
+		m.position = Vector3((i - (views.size() - 1) * 0.5) * 6.2, 0.0, 0.0)
 		m.rotation_degrees = views[i]
 	var cam := Camera3D.new()
-	cam.position = Vector3(0, 0.3, 11.5)
+	cam.position = Vector3(0, 0.3, 11.5 if views.size() > 1 else 5.6)
+	if one == "dome":
+		cam.position = Vector3(0.9, 0.15, 3.0)
 	cam.fov = 42
 	add_child(cam)
 
