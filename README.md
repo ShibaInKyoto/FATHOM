@@ -224,12 +224,13 @@ settings and key bindings are kept).
 * **Contracts** in the hangar: take a handicap for one dive (Glass Hull,
   Silent Running, Failing Lamp, Infested Waters, Weak Cells) in exchange for
   a bigger score and payout.
-* 32 modules to draft into a build (9 at first, the rest from research). Their
-  stats stack; the pause menu lists what you have installed.
+* 33 modules to draft into a build (9 at first, the rest from research). Their
+  stats stack; the pause menu lists what you have installed. Each sub starts
+  with only its own tools; any other tool is a kit card found during the dive.
 * 4 submarine frames: **Lantern** (balanced, flares), **Mako** (fast, torpedoes,
   fragile), **Bathysphere** (armored, long sonar, shock pulse), **Whisper**
   (near silent, quick scanner, sonar decoys).
-* 12 hangar upgrade lines (3 at first, the rest from research), 15 research
+* 8 hangar upgrade lines (3 at first, the rest from research), 15 research
   projects, a creature codex (hover a scanned species in the hangar
   to see it in the viewport) and 13 story logs to recover (find them all to learn
   what became of the crew). The hangar archive also lists the eleven **wonders**

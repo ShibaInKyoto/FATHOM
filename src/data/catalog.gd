@@ -71,9 +71,16 @@ const TOOL_NAMES: Dictionary[StringName, String] = {
 	&"flare": "Flare", &"torpedo": "Torpedo", &"shock": "Shock Pulse", &"decoy": "Decoy",
 }
 
-## Modules that install a tool; only offered to subs that lack it.
+## Modules that install a tool; only offered to subs that lack it. A sub
+## starts a dive with only its frame's own tools; every other tool is one of
+## these cards, found during the run.
 const KIT_TOOLS: Dictionary[StringName, StringName] = {
-	&"flare_kit": &"flare", &"torpedo_kit": &"torpedo", &"decoy_kit": &"decoy",
+	&"flare_kit": &"flare", &"torpedo_kit": &"torpedo", &"decoy_kit": &"decoy", &"shock_kit": &"shock",
+}
+## Hangar upgrades that once unlocked a tool on every frame, with what each
+## level cost, so a save that bought them gets the salvage back.
+const RETIRED_UPGRADES: Dictionary[String, Array] = {
+	"flares": [110, 200], "torpedoes": [190, 325], "shock": [225, 350], "decoys": [150, 275],
 }
 
 static var _frames: Array[FrameDef] = []
@@ -219,22 +226,6 @@ static func _build_upgrades() -> void:
 		UpgradeDef.new(&"insurance", "Salvage Insurance", "Bank 10% more of your salvage when you lose the sub.",
 			PackedInt32Array([100, 225, 400]), func(s: SubStats, l: int) -> void:
 				s.insurance += 0.1 * l),
-		UpgradeDef.new(&"flares", "Flare Launcher", "Unlocks flares on every frame. More flares per level.",
-			PackedInt32Array([110, 200]), func(s: SubStats, l: int) -> void:
-				s.add_tool(&"flare")
-				s.flare_capacity = maxi(s.flare_capacity, 2) + l),
-		UpgradeDef.new(&"torpedoes", "Torpedo Bay", "Unlocks torpedoes on every frame. More torpedoes per level.",
-			PackedInt32Array([190, 325]), func(s: SubStats, l: int) -> void:
-				s.add_tool(&"torpedo")
-				s.torpedo_capacity = maxi(s.torpedo_capacity, 1) + l),
-		UpgradeDef.new(&"shock", "Shock Emitter", "Unlocks the shock pulse on every frame. Cheaper per level.",
-			PackedInt32Array([225, 350]), func(s: SubStats, l: int) -> void:
-				s.add_tool(&"shock")
-				s.shock_cost *= 1.0 - 0.15 * (l - 1)),
-		UpgradeDef.new(&"decoys", "Decoy Launcher", "Unlocks sonar decoys on every frame. More decoys per level.",
-			PackedInt32Array([150, 275]), func(s: SubStats, l: int) -> void:
-				s.add_tool(&"decoy")
-				s.decoy_capacity = maxi(s.decoy_capacity, 1) + l),
 	]
 
 
@@ -331,4 +322,6 @@ static func _build_modules() -> void:
 			func(s: SubStats) -> void:
 				s.add_tool(&"torpedo")
 				s.torpedo_capacity += 2),
+		ModuleDef.new(&"shock_kit", "Salvaged Shock Emitter", "Adds a shock pulse emitter.", 2, 1, weapon,
+			func(s: SubStats) -> void: s.add_tool(&"shock")),
 	]

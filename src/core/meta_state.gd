@@ -266,7 +266,14 @@ static func from_dict(d: Dictionary) -> MetaState:
 	m.research = int(d.get("research", 0))
 	var ups: Dictionary = d.get("upgrades", {})
 	for k in ups:
-		m.upgrades[String(k)] = int(ups[k])
+		var level := int(ups[k])
+		# Tools are no longer hangar upgrades: give back what they cost.
+		if Catalog.RETIRED_UPGRADES.has(String(k)):
+			var costs: Array = Catalog.RETIRED_UPGRADES[String(k)]
+			for i in mini(level, costs.size()):
+				m.salvage += int(costs[i])
+			continue
+		m.upgrades[String(k)] = level
 	for id in d.get("projects", []):
 		if Research.find(String(id)) and not m.projects.has(String(id)):
 			m.projects.append(String(id))

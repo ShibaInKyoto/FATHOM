@@ -83,7 +83,7 @@ func _build() -> void:
 	_flares()
 	_torpedoes()
 	_decoys()
-	if tools.has(&"shock"):
+	if tools.has(&"shock") or _n(&"shock_kit") > 0:
 		_shock()
 	_armour()
 	_power()

@@ -141,3 +141,10 @@ func test_daily_record_resets_each_day() -> void:
 	check_eq(restored.daily_attempts, 1)
 	check_eq(restored.daily_best_depth, 0)
 	check_eq(m.daily_summary("2026-10-29"), "")
+
+
+func test_retired_tool_upgrades_are_refunded() -> void:
+	var m := MetaState.from_dict({"salvage": 10, "upgrades": {"hull": 2, "torpedoes": 2, "flares": 1}})
+	check_eq(m.salvage, 10 + 190 + 325 + 110, "salvage spent on tool upgrades comes back")
+	check_eq(m.upgrade_level(&"hull"), 2, "other upgrades are kept")
+	check(not m.upgrades.has("torpedoes") and not m.upgrades.has("flares"), "tool upgrades are gone")
