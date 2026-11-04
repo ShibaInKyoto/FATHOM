@@ -114,7 +114,7 @@ static func mounts() -> Dictionary:
 	var foil := SubEquipment.frame_at(Vector3(0.1, chine[1], chine[4] - 0.01), Vector3(0.0, -0.18, 1.0))
 	out[&"foil"] = [foil, SubEquipment.mirror(foil)]
 	var deck: Array = []
-	for p: Vector2 in [Vector2(0.55, 0.37), Vector2(-0.35, 0.42), Vector2(-0.95, 0.42)]:
+	for p: Vector2 in [Vector2(0.55, 0.345), Vector2(-0.35, 0.42), Vector2(-0.95, 0.42)]:
 		deck.append_array([f.mount(p.x, p.y), f.mount(p.x, 1.0 - p.y)])
 	out[&"deck"] = deck
 	# Armour on the lower sides, under the chines.
