@@ -196,7 +196,7 @@ func _lamp() -> void:
 	swivel.add_child(lens)
 	m.merge_under(swivel)
 	m.merge_under(head)
-	m.set_lamp_head(head, swivel, lens)
+	m.set_lamp_head(head, swivel, lens, lens_r)
 
 
 ## A plain lamp arm for a frame built without its own track: a hub at the

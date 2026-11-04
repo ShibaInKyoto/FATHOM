@@ -167,6 +167,8 @@ func setup() -> void:
 	_beam_mat.shader = preload("res://src/fx/shaders/lamp_beam.gdshader")
 	_beam_mat.set_shader_parameter(&"noise_tex", TerrainRenderer.detail_noise())
 	_beam_mat.set_shader_parameter(&"beam_color", Color(WORK_LIGHT, 1.0))
+	_beam_mat.set_shader_parameter(&"beam_length", length)
+	_beam_mat.set_shader_parameter(&"glass_radius", cone.top_radius)
 	beam.material_override = _beam_mat
 	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	beam.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0.0, 0.0, -length * 0.5))

@@ -35,6 +35,9 @@ var lamp_socket: Node3D
 var lamp_tilt: Node3D
 var lamp_swivel: Node3D
 var lamp_lens: Node3D
+## The radius of the lamp's glass, its head's scale applied, so the beam can
+## leave the glass at its own width.
+var lamp_lens_radius := 0.065
 
 var _skin: SubSkins.Livery
 var _frame := &""
@@ -242,11 +245,12 @@ func finish_equipment() -> void:
 
 
 ## Fits the lamp head ([param head], its [param swivel] and the point on its
-## [param lens]) into the track's socket.
-func set_lamp_head(head: Node3D, swivel: Node3D, lens: Node3D) -> void:
+## [param lens], glass [param radius] across) into the track's socket.
+func set_lamp_head(head: Node3D, swivel: Node3D, lens: Node3D, radius := 0.065) -> void:
 	_lamp_head = head
 	lamp_swivel = swivel
 	lamp_lens = lens
+	lamp_lens_radius = radius * (lamp_tilt.scale.x if lamp_tilt else 1.0)
 
 
 ## The shock emitter's glowing parts, flared by flash_shock().

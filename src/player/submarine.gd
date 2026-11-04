@@ -96,7 +96,6 @@ func setup(p_level: Level, p_run: RunState, start: Vector2) -> void:
 
 	# Visible cone of scattered light. A child of the lamp so it follows its aim.
 	_beam_mesh = CylinderMesh.new()
-	_beam_mesh.top_radius = 0.15
 	_beam_mesh.radial_segments = 20
 	_beam_mesh.rings = 1
 	_beam_mesh.cap_top = false
@@ -109,11 +108,6 @@ func setup(p_level: Level, p_run: RunState, start: Vector2) -> void:
 	beam.material_override = beam_mat
 	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	lamp.add_child(beam)
-	var lens := MeshInstance3D.new()
-	lens.mesh = MeshKit.sphere(0.13, 10, 6)
-	lens.material_override = MeshKit.emissive_material(Color(1.0, 0.95, 0.8), 7.0)
-	lens.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	lamp.add_child(lens)
 
 	fill_light = OmniLight3D.new()
 	fill_light.light_color = Color(0.6, 0.85, 1.0)
@@ -167,11 +161,18 @@ func _apply_lamp_stats() -> void:
 	lamp.spot_range = stats.lamp_range
 	lamp.spot_angle = stats.lamp_angle
 	lamp.light_energy = stats.lamp_energy
-	# The cone points down the lamp's -Z axis; the cylinder's narrow top sits at the lamp.
+	# The cone points down the lamp's -Z axis; its narrow top is the lamp's
+	# glass, so the light leaves the lens at the lens's own width.
 	var length := stats.lamp_range * 0.75
+	var glass := model.lamp_lens_radius
 	_beam_mesh.height = length
-	_beam_mesh.bottom_radius = tan(deg_to_rad(stats.lamp_angle * 0.8)) * length
+	_beam_mesh.top_radius = glass
+	_beam_mesh.bottom_radius = glass + tan(deg_to_rad(stats.lamp_angle * 0.8)) * length
 	beam.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0, -length * 0.5))
+	var mat := beam.material_override as ShaderMaterial
+	mat.set_shader_parameter(&"beam_length", length)
+	mat.set_shader_parameter(&"glass_radius", glass)
+	mat.set_shader_parameter(&"beam_color", lamp.light_color.lerp(Color.WHITE, 0.3))
 
 
 ## Where a shot of [param id] leaves the sub: its launcher's muzzle, or

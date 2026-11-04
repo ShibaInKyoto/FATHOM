@@ -10,10 +10,15 @@ extends Node3D
 ## "full" fits every module card once (two of each card that stacks), "max" every card stacked to its
 ## limit. The aim turns the lamp
 ## that many degrees round from the screen's right; "flash" shows the shock emitter firing,
-## "boost" the Overdrive boosters hot.
+## "boost" the Overdrive boosters hot, "beam" the lamp lit with its beam leaving the glass.
 
 var _frames := 0
 var _aims: Array = []
+var _beams: Array = []
+## With at:lamp the camera follows the lens once the lamp has swung to its aim.
+var _cam: Camera3D
+var _lamp_off := Vector3.ZERO
+var _lamp_model: SubmarineModel
 
 
 func _ready() -> void:
@@ -80,6 +85,8 @@ func _ready() -> void:
 			m.animate(0.0, 0.0)
 		elif args.size() > 6 and args[6] == "boost":
 			m.animate(2.0, 1.6)
+		elif args.size() > 6 and args[6] == "beam":
+			_beams.append(m)
 		if args.size() > 5 and args[5] != "-":
 			var a := deg_to_rad(float(args[5]))
 			_aims.append([m, Vector3(cos(a), sin(a), 0.0)])
@@ -102,7 +109,7 @@ func _ready() -> void:
 	elif one == "compass":
 		cam.position = Vector3(0.96, 0.42, 1.15)
 	if focus != "":
-		var target: Variant = last.muzzle(StringName(focus))
+		var target: Variant = last.lamp_origin() if focus == "lamp" else last.muzzle(StringName(focus))
 		if one.begins_with("pt:"):
 			var p := focus.split_floats(",")
 			target = last.global_transform * Vector3(p[0], p[1], p[2])
@@ -112,15 +119,56 @@ func _ready() -> void:
 			off = Vector3(o[0], o[1], o[2])
 		if target != null:
 			cam.position = (target as Vector3) + off
+		if focus == "lamp":
+			_lamp_off = off
+			_lamp_model = last
 	cam.fov = 42
 	add_child(cam)
+	_cam = cam
 
 
 func _process(_d: float) -> void:
 	_frames += 1
 	for pair: Array in _aims:
 		(pair[0] as SubmarineModel).aim_lamp(pair[1], 1.0)
+	if _frames == 3:
+		for m: SubmarineModel in _beams:
+			_add_beam(m)
+		if _lamp_model:
+			_cam.position = _lamp_model.lamp_origin() + _lamp_off
 	if _frames == 12:
 		var args := OS.get_cmdline_user_args()
 		get_viewport().get_texture().get_image().save_png(args[0] if args.size() > 0 else "user://sub.png")
 		get_tree().quit()
+
+
+## The lamp's light and beam as the dive draws them, out of [param m]'s lens.
+func _add_beam(m: SubmarineModel) -> void:
+	var length := 9.0
+	var glass := m.lamp_lens_radius
+	var spot := SpotLight3D.new()
+	spot.spot_range = 12.0
+	spot.spot_angle = 32.0
+	spot.light_energy = 6.0
+	add_child(spot)
+	var dir := m.lamp_direction()
+	spot.global_transform = Transform3D(Basis.looking_at(dir, Vector3.BACK if absf(dir.z) < 0.9 else Vector3.UP),
+		m.lamp_origin())
+	var cone := CylinderMesh.new()
+	cone.top_radius = glass
+	cone.bottom_radius = glass + tan(deg_to_rad(32.0 * 0.8)) * length
+	cone.height = length
+	cone.radial_segments = 20
+	cone.rings = 1
+	cone.cap_top = false
+	cone.cap_bottom = false
+	var mat := ShaderMaterial.new()
+	mat.shader = preload("res://src/fx/shaders/lamp_beam.gdshader")
+	mat.set_shader_parameter(&"noise_tex", TerrainRenderer.detail_noise())
+	mat.set_shader_parameter(&"beam_length", length)
+	mat.set_shader_parameter(&"glass_radius", glass)
+	var beam := MeshInstance3D.new()
+	beam.mesh = cone
+	beam.material_override = mat
+	beam.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0, -length * 0.5))
+	spot.add_child(beam)
