@@ -16,6 +16,8 @@ func _init() -> void:
 			hull = BathysphereBuild.fairing()
 		"whisper":
 			hull = WhisperBuild.fairing()
+		"whisper_house":
+			hull = WhisperBuild.house_fairing()
 	var points: Array = []
 	for p in hull.grid():
 		points.append([snappedf(p.x, 0.0001), snappedf(p.y, 0.0001), snappedf(p.z, 0.0001)])

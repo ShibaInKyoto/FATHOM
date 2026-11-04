@@ -501,89 +501,314 @@ def paint_bathysphere(hull):
     return np.concatenate([np.clip(paint, 0, 1), alpha[..., None]], axis=-1), height, pv
 
 
+def coating(shape, seed):
+    """The Whisper's anechoic coating: a dark, patchy shade and a fine rubbery
+    grain (its height)."""
+    blotch = smooth_noise(shape, (8, 20), seed)
+    mid = smooth_noise(shape, (30, 80), seed + 1)
+    fine = smooth_noise(shape, (120, 320), seed + 2)
+    shade = 0.49 * (1 + 0.08 * (blotch - 0.5) + 0.05 * (mid - 0.5) + 0.04 * (fine - 0.5))
+    return shade, (fine - 0.5) * 0.0003 + (mid - 0.5) * 0.0002
+
+
+def groove_of(mask, px=2):
+    """The rim of a mask, px texels wide: where a panel's edge is cut."""
+    inner = mask.copy()
+    for dy in (-px, 0, px):
+        for dx in (-px, 0, px):
+            inner &= np.roll(np.roll(mask, dy, axis=0), dx, axis=1)
+    return mask & ~inner
+
+
+def tri(t):
+    """A triangle wave, 0..1, period 1: the teeth of a sawtooth edge."""
+    return 1 - np.abs((t % 1.0) * 2 - 1)
+
+
+def fastener_rows(d, along, offset, spacing, r=0.0032):
+    """Flush fasteners in a row either side of a seam: d is the distance across
+    it, along the distance along it (both in world units)."""
+    across = np.minimum(np.abs(d - offset), np.abs(d + offset))
+    step = (along / spacing) % 1.0 - 0.5
+    return (across ** 2 + (step * spacing) ** 2) < r * r
+
+
+def stealth_panels(paint, height, X, T, x_lines, t_lines, seed, tape=()):
+    """Panels between seams across x and round the hull (t, distance round in
+    world units), each its own shade, the seams grooved and lined with flush
+    fasteners; tape strips laid over some seams."""
+    w = 0.0024
+    seam = np.zeros(X.shape, dtype=np.float32)
+    dots = np.zeros(X.shape, dtype=bool)
+    xi = np.zeros(X.shape, dtype=np.int32)
+    for x in x_lines:
+        seam = np.maximum(seam, np.exp(-((X - x) / w) ** 2))
+        dots |= fastener_rows(X - x, T, 0.013, 0.045)
+        xi += (X > x)
+    ti = np.zeros(X.shape, dtype=np.int32)
+    for t in t_lines:
+        seam = np.maximum(seam, np.exp(-((T - t) / w) ** 2))
+        dots |= fastener_rows(T - t, X, 0.013, 0.045)
+        ti += (T > t)
+    rnd = ((np.sin(xi * 12.9898 + ti * 78.233 + seed) * 43758.5453) % 1.0 + 1.0) % 1.0
+    paint *= (0.95 + 0.1 * rnd)[..., None]
+    for kind, at, width in tape:
+        d = (X - at) if kind == "x" else (T - at)
+        strip = np.clip((width / 2 - np.abs(d)) / 0.004, 0, 1)
+        paint *= (1 + 0.07 * strip)[..., None]
+        height += strip * 0.0004
+        dots &= strip < 0.5
+    paint *= (1 - 0.32 * seam)[..., None]
+    height -= seam * 0.0016
+    paint *= np.where(dots[..., None], 0.84, 1.0)
+    height += dots * 0.0003
+
+
+def sawtooth_hatch(paint, height, X, T, xa, xb, ta, tb, tooth=0.022):
+    """An access hatch whose edges are cut into a sawtooth, as on stealth
+    craft: grooved round, a shade apart, a fastener in each corner."""
+    amp = tooth * 0.5
+    inside = ((X > xa + amp * tri((T - ta) / tooth)) & (X < xb - amp * tri((T - ta) / tooth)) &
+              (T > ta + amp * tri((X - xa) / tooth)) & (T < tb - amp * tri((X - xa) / tooth)))
+    groove = groove_of(inside)
+    paint *= np.where(inside[..., None], 0.93, 1.0)
+    paint *= np.where(groove[..., None], 0.6, 1.0)
+    height -= groove * 0.002
+    for cx in (xa + 0.02, xb - 0.02):
+        for ct in (ta + 0.02, tb - 0.02):
+            dot = (X - cx) ** 2 + (T - ct) ** 2 < 0.0045 ** 2
+            paint *= np.where(dot[..., None], 0.7, 1.0)
+            height += dot * 0.0004
+
+
+def flakes(hull_shape, X, T, spots, seed):
+    """Where the coating has flaked off: returns (bare 0..1, rim 0..1)."""
+    noise = smooth_noise(hull_shape, (40, 100), seed)
+    bare = np.zeros(hull_shape, dtype=np.float32)
+    for (x, t, r) in spots:
+        d = np.sqrt((X - x) ** 2 + ((T - t) * 1.3) ** 2) / r
+        bare = np.maximum(bare, (d < 0.55 + 0.6 * noise).astype(np.float32))
+    rim = groove_of(bare > 0.5, 2).astype(np.float32)
+    return bare, rim
+
+
 def paint_whisper(hull):
-    paint = np.ones((H, W, 3), dtype=np.float32) * 0.56
+    paint = np.ones((H, W, 3), dtype=np.float32)
     height = np.zeros((H, W), dtype=np.float32)
     X, V = hull.X, hull.V
     per = hull.perimeter[None, :]
-    arc = V * per  # distance round from the keel
+    shade, grain = coating((H, W), 31)
+    paint *= shade[..., None]
+    height += grain
 
-    # Anechoic tiles: staggered rows of rubber tiles, each a shade apart,
-    # domed a little, with dark grout between.
-    tw, th = 0.12, 0.085
-    row = np.floor(arc / th)
-    shift = (row % 2) * tw * 0.5
-    along = (X - hull.x0 + shift) / tw
-    col = np.floor(along)
-    fx = along - col
-    fy = arc / th - row
-    edge = np.minimum(np.minimum(fx, 1 - fx) * tw, np.minimum(fy, 1 - fy) * th)
-    grout = np.exp(-(edge / 0.0026) ** 2)
-    rnd = ((np.sin(col * 12.9898 + row * 78.233) * 43758.5453) % 1.0 + 1.0) % 1.0
-    shade = 0.94 + 0.09 * rnd
-    paint *= (shade * (1 - 0.3 * grout))[..., None]
-    height += np.clip(edge / 0.012, 0, 1) * 0.0012 - grout * 0.0015
-    # A few tiles lost, the bonded metal showing in the gap.
-    lost = (rnd > 0.975) & (np.abs(X) < 1.7) & (edge > 0.003)
-    lost_soft = (rnd > 0.975) & (np.abs(X) < 1.7)
-    paint *= np.where(lost[..., None], np.array([0.5, 0.52, 0.48]), 1.0)
-    height -= lost_soft * 0.0035
+    # Distance round the hull from the near chine (positive towards the deck),
+    # and from the far chine the same way, so panels sit square to the facets.
+    vc = np.array([side_v(hull, x, False) for x in hull.X[0]])
+    vcf = np.array([side_v(hull, x, True) for x in hull.X[0]])
+    k = np.ones(61) / 61
+    vc = np.convolve(np.pad(vc, 30, mode="edge"), k, mode="valid")[None, :]
+    vcf = np.convolve(np.pad(vcf, 30, mode="edge"), k, mode="valid")[None, :]
+    near = V < 0.5
+    T = np.where(near, (V - vc) * per, (vcf - V) * per)
 
-    # The conformal hydrophone arrays on the upper facets: dark panels set
-    # with a grid of elements.
-    for far in (False, True):
-        for (xa, xb) in ((-0.3, 0.55),):
-            vc = side_v(hull, (xa + xb) / 2, far, 0.045)
-            t = (V - vc) * per
-            inside = (X > xa) & (X < xb) & (np.abs(t) < 0.035)
-            paint *= np.where(inside[..., None], 0.55, 1.0)
-            height -= inside * 0.0008
-            gx = ((X - xa) / 0.028) % 1.0
-            gy = ((t + 0.035) / 0.0175) % 1.0
-            dot = inside & (np.hypot(gx - 0.5, gy - 0.5) < 0.24)
-            paint *= np.where(dot[..., None], 1.35, 1.0)
-            height += dot * 0.0006
+    # Panels square to the facets: seams at the chines, along the sides, at
+    # the ridge and keel, and across at the facets' joints.
+    x_lines = [-1.45, -1.12, -0.55, -0.1, 0.3, 0.68, 1.05, 1.4]
+    t_lines = [-0.12, 0.0, 0.24, 0.4]
+    stealth_panels(paint, height, X, T, x_lines, t_lines, 3,
+                   tape=(("x", 0.3, 0.035), ("t", 0.4, 0.03)))
+    ridge = np.exp(-((np.abs(V - 0.5) * per) / 0.0024) ** 2) + np.exp(-((np.minimum(V, 1 - V) * per) / 0.0024) ** 2)
+    paint *= (1 - 0.3 * np.clip(ridge, 0, 1))[..., None]
+    height -= np.clip(ridge, 0, 1) * 0.0015
 
-    # Flush intakes aft: a slot each side, dark in its throat.
-    for far in (False, True):
-        vc = side_v(hull, -1.35, far, 0.06)
-        t = (V - vc) * per
-        d = X + 1.35
-        slot = (np.abs(d) < 0.11) & (np.abs(t) < 0.012 + 0.02 * np.clip((d + 0.11) / 0.22, 0, 1))
-        paint *= np.where(slot[..., None], 0.3, 1.0)
-        height -= slot * 0.004
+    # Sawtooth access hatches: on each roof facet aft and forward, and low on
+    # each side amidships.
+    for (xa, xb, ta, tb) in ((-1.4, -1.18, 0.27, 0.37), (0.74, 0.98, 0.07, 0.15), (-0.45, -0.18, -0.1, -0.03)):
+        sawtooth_hatch(paint, height, X, T, xa, xb, ta, tb)
+
+    # The conformal hydrophone arrays: a darker panel set with a grid of elements.
+    inside = (X > -0.05) & (X < 0.27) & (T > 0.03) & (T < 0.12)
+    paint *= np.where(inside[..., None], 0.8, 1.0)
+    height -= groove_of(inside) * 0.0015
+    gx = ((X + 0.05) / 0.026) % 1.0
+    gy = ((T - 0.03) / 0.0225) % 1.0
+    dot = inside & (np.hypot(gx - 0.5, gy - 0.5) < 0.26)
+    paint *= np.where(dot[..., None], 0.72, 1.0)
+    height -= dot * 0.0006
+
+    # Flush intakes aft: a slot each side, dark in its throat, a streak of grime behind.
+    d = X + 1.3
+    slot = (np.abs(d) < 0.1) & (np.abs(T - 0.1) < 0.008 + 0.016 * np.clip((d + 0.1) / 0.2, 0, 1))
+    paint *= np.where(slot[..., None], 0.3, 1.0)
+    height -= slot * 0.004
+    streak = np.exp(-((T - 0.1) / 0.012) ** 2) * (X < -1.38) * np.exp((X + 1.38) / 0.25)
+    paint *= (1 - 0.18 * streak)[..., None]
 
     # Low-visibility lettering: the name and designation in a darker grey,
     # and the coating's placard.
-    ink = (0.5, 0.5, 0.56)
+    ink = (0.62, 0.62, 0.68)
     for far in (False, True):
-        text_on(hull, paint, height, "WHISPER", 0.085, -0.85, side_v(hull, -0.85, far, 0.05), far, ink=ink,
+        text_on(hull, paint, height, "WHISPER", 0.085, -0.82, side_v(hull, -0.82, far, 0.06), far, ink=ink,
                 depth=0.0002)
-        text_on(hull, paint, height, "ANECHOIC COATING - DO NOT PAINT", 0.02, -0.85, side_v(hull, -0.85, far, 0.012),
+        text_on(hull, paint, height, "ANECHOIC COATING - DO NOT PAINT", 0.02, -0.82, side_v(hull, -0.82, far, 0.025),
                 far, ink=ink, depth=0.0001)
-        text_on(hull, paint, height, "SD-4", 0.07, 1.12, side_v(hull, 1.12, far, 0.045), far, ink=ink, depth=0.0002)
+        text_on(hull, paint, height, "SD-4", 0.07, 1.22, side_v(hull, 1.22, far, 0.045), far, ink=ink, depth=0.0002)
+
+    # Flaked patches down to the primer, mostly at the bow and along the chines.
+    spots = [(1.6, 0.02, 0.03), (1.75, -0.02, 0.022), (0.9, -0.01, 0.025), (-0.3, 0.015, 0.02), (-1.0, -0.02, 0.028),
+             (-1.55, 0.03, 0.022), (0.45, 0.25, 0.018), (1.3, 0.12, 0.02)]
+    bare, rim = flakes((H, W), X, T, spots, 41)
+    height -= bare * 0.0025
+    paint *= (1 + 0.25 * rim)[..., None]
+
+    # Scuffs: short pale scrapes along the chines and the bow.
+    rng_s = np.random.default_rng(5)
+    scuff = np.zeros((H, W), dtype=np.float32)
+    for _ in range(46):
+        x = rng_s.uniform(-1.6, 1.8)
+        t = rng_s.normal(0.0, 0.05)
+        length = rng_s.uniform(0.03, 0.12)
+        ang = rng_s.normal(0.0, 0.25)
+        dx, dt = np.cos(ang), np.sin(ang)
+        rx, rt = X - x, T - t
+        along = rx * dx + rt * dt
+        across = -rx * dt + rt * dx
+        scuff = np.maximum(scuff, (np.abs(across) < 0.0012) * (np.abs(along) < length / 2) * 0.8)
+    paint *= (1 + 0.3 * scuff)[..., None]
 
     # Dulled underneath and towards the jet.
-    low = np.clip((-0.02 - hull.y) / 0.25, 0, 1)
+    low = np.clip((-0.08 - hull.y) / 0.2, 0, 1)
     blotch = smooth_noise((H, W), (10, 24), 21)
-    fine = smooth_noise((H, W), (60, 160), 22)
-    grime = 0.1 * low + 0.05 * blotch + 0.02 * fine + 0.18 * np.exp(-((X - hull.x0) / 0.12) ** 2)
+    grime = 0.1 * low + 0.04 * blotch + 0.16 * np.exp(-((X - hull.x0) / 0.12) ** 2)
     paint *= (1 - np.clip(grime, 0, 0.5))[..., None]
-    height += (fine - 0.5) * 0.00015
     pv = hull.px_v(X)
-    return np.clip(paint, 0, 1), height, pv
+    alpha = 1 - bare
+    return np.concatenate([np.clip(paint, 0, 1), alpha[..., None]], axis=-1), height, pv
+
+
+def paint_whisper_house(hull):
+    paint = np.ones((H, W, 3), dtype=np.float32)
+    height = np.zeros((H, W), dtype=np.float32)
+    X, V = hull.X, hull.V
+    per = hull.perimeter[None, :]
+    shade, grain = coating((H, W), 51)
+    paint *= shade[..., None]
+    height += grain
+    vc = np.array([side_v(hull, x, False) for x in hull.X[0]])[None, :]
+    vcf = np.array([side_v(hull, x, True) for x in hull.X[0]])[None, :]
+    near = V < 0.5
+    T = np.where(near, (V - vc) * per, (vcf - V) * per)
+    stealth_panels(paint, height, X, T, [0.14, 0.36, 0.55], [0.07], 7, tape=(("x", 0.55, 0.026),))
+    ridge = np.exp(-((np.abs(V - 0.5) * per) / 0.0022) ** 2)
+    paint *= (1 - 0.3 * ridge)[..., None]
+    height -= ridge * 0.0015
+    for (xa, xb, ta, tb) in ((0.17, 0.33, 0.015, 0.06), (0.6, 0.76, 0.1, 0.16)):
+        sawtooth_hatch(paint, height, X, T, xa, xb, ta, tb, tooth=0.018)
+    bare, rim = flakes((H, W), X, T, [(0.06, 0.05, 0.016), (0.78, 0.02, 0.014)], 52)
+    height -= bare * 0.0025
+    paint *= (1 + 0.25 * rim)[..., None]
+    low = np.clip((0.22 - hull.y) / 0.08, 0, 1)
+    paint *= (1 - 0.12 * low)[..., None]
+    pv = hull.px_v(X)
+    return np.concatenate([np.clip(paint, 0, 1), (1 - bare)[..., None]], axis=-1), height, pv
+
+
+def paint_whisper_fin(shape):
+    """A fin's map, on its own surface: u (across) runs root to tip, v (down)
+    round the section from the leading edge (0), over one face to the
+    trailing edge (0.5) and back over the other."""
+    h, w = shape
+    U = np.broadcast_to(((np.arange(w) + 0.5) / w)[None, :], shape)
+    V = np.broadcast_to(((np.arange(h) + 0.5) / h)[:, None], shape)
+    paint = np.ones((h, w, 3), dtype=np.float32)
+    height = np.zeros(shape, dtype=np.float32)
+    shade, grain = coating(shape, 61)
+    paint *= shade[..., None]
+    height += grain
+    # Edge strips round the leading and trailing edges, their inner sides cut in a sawtooth.
+    edge = np.minimum(np.minimum(V, 1 - V), np.abs(V - 0.5))
+    bound = 0.07 + 0.018 * tri(U * 9)
+    strip = edge < bound
+    paint *= np.where(strip[..., None], 1.07, 1.0)
+    groove = groove_of(strip, 1)
+    paint *= np.where(groove[..., None], 0.62, 1.0)
+    height -= groove * 0.002
+    # A seam across each face, and fasteners along the root.
+    seam = np.exp(-((U - 0.52) / 0.004) ** 2) * ~strip
+    paint *= (1 - 0.3 * seam)[..., None]
+    height -= seam * 0.0015
+    dots = (np.abs(U - 0.06) < 0.012) & (np.abs(((V / 0.035) % 1.0) - 0.5) < 0.18) & ~strip
+    paint *= np.where(dots[..., None], 0.8, 1.0)
+    height += dots * 0.0004
+    # Wear at the tip and along the leading edge.
+    tip = np.clip((U - 0.88) / 0.1, 0, 1) * smooth_noise(shape, (12, 12), 62)
+    paint *= (1 + 0.3 * tip)[..., None]
+    le = np.clip(1 - np.minimum(V, 1 - V) / 0.025, 0, 1) * smooth_noise(shape, (16, 16), 63)
+    paint *= (1 + 0.25 * le)[..., None]
+    return np.clip(paint, 0, 1), height, (0.3 / w, 0.4 / h)
+
+
+def paint_whisper_duct(shape):
+    """The jet duct's map, on its own surface: u (across) runs from the
+    sawtooth lip (0) forward to the intake (1), v (down) round the duct."""
+    h, w = shape
+    U = np.broadcast_to(((np.arange(w) + 0.5) / w)[None, :], shape)
+    V = np.broadcast_to(((np.arange(h) + 0.5) / h)[:, None], shape)
+    paint = np.ones((h, w, 3), dtype=np.float32)
+    height = np.zeros(shape, dtype=np.float32)
+    shade, grain = coating(shape, 71)
+    paint *= shade[..., None]
+    height += grain
+    seam = np.zeros(shape, dtype=np.float32)
+    for v in (0.125, 0.375, 0.625, 0.875):
+        seam = np.maximum(seam, np.exp(-((V - v) / 0.003) ** 2) * (U > 0.12) * (U < 0.9))
+    for u in (0.12, 0.9):
+        seam = np.maximum(seam, np.exp(-((U - u) / 0.004) ** 2))
+    paint *= (1 - 0.32 * seam)[..., None]
+    height -= seam * 0.0016
+    dots = np.zeros(shape, dtype=bool)
+    for u in (0.17, 0.85):
+        dots |= (np.abs(U - u) < 0.012) & (np.abs(((V / 0.02) % 1.0) - 0.5) < 0.2)
+    paint *= np.where(dots[..., None], 0.8, 1.0)
+    height += dots * 0.0004
+    # Heat and wear at the lip, scrapes at the intake.
+    lip = np.clip(1 - U / 0.12, 0, 1)
+    paint *= (1 - 0.25 * lip)[..., None] * np.array([1.0, 0.97, 1.06])
+    front = np.clip((U - 0.94) / 0.06, 0, 1) * smooth_noise(shape, (20, 6), 72)
+    paint *= (1 + 0.3 * front)[..., None]
+    return np.clip(paint, 0, 1), height, (0.45 / w, 1.1 / h)
+
+
+def normal_map_flat(height, scale):
+    """A normal map from a height field on a surface's own coordinates, scale
+    being the world size of a texel (across, down)."""
+    gx = (np.roll(height, -1, axis=1) - np.roll(height, 1, axis=1)) / (2 * scale[0])
+    gy = (np.roll(height, -1, axis=0) - np.roll(height, 1, axis=0)) / (2 * scale[1])
+    n = np.stack([-gx, gy, np.ones_like(gx)], axis=-1)
+    n /= np.linalg.norm(n, axis=-1, keepdims=True)
+    return n * 0.5 + 0.5
 
 
 PAINTERS = {"lantern": paint_lantern, "mako": paint_mako, "bathysphere": paint_bathysphere,
-            "whisper": paint_whisper}
+            "whisper": paint_whisper, "whisper_house": paint_whisper_house}
+## Maps for parts painted on their own surface's coordinates, with no hull to dump.
+PART_PAINTERS = {"whisper_fin": (paint_whisper_fin, (512, 512)), "whisper_duct": (paint_whisper_duct, (512, 512))}
 ## Texture size (along, round) for hulls far from twice as long as they are round.
-SIZES = {"bathysphere": (1024, 2048)}
+SIZES = {"bathysphere": (1024, 2048), "whisper_house": (1024, 1024)}
 
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    for frame in sys.argv[1:] or list(PAINTERS):
+    for frame in sys.argv[1:] or list(PAINTERS) + list(PART_PAINTERS):
         global W, H
+        if frame in PART_PAINTERS:
+            fn, (w, h) = PART_PAINTERS[frame]
+            paint, height, scale = fn((h, w))
+            Image.fromarray((paint * 255 + 0.5).astype(np.uint8)).save(os.path.join(OUT, "%s_paint.png" % frame))
+            nm = normal_map_flat(height, scale)
+            Image.fromarray((nm * 255 + 0.5).astype(np.uint8)).save(os.path.join(OUT, "%s_normal.png" % frame))
+            print("painted", frame)
+            continue
         W, H = SIZES.get(frame, (2048, 1024))
         hull = Hull(*load_hull(frame))
         paint, height, pv = PAINTERS[frame](hull)
