@@ -38,7 +38,7 @@ static func mounts() -> Dictionary:
 	# Decoys ride on the near skid behind its rear leg, a size up to suit the sphere.
 	out[&"decoy"] = SubEquipment.frame_at(Vector3(-0.92, -1.265, 0.72), Vector3.UP).scaled_local(Vector3.ONE * 1.6)
 	out[&"shock"] = SubEquipment.frame_at(Vector3(1.02, -1.14, 0.0), Vector3.UP)
-	out[&"torpedo"] = pair.call(Vector3(0.3, -0.45, 0.84))
+	out[&"torpedo"] = pair.call(Vector3(0.25, -0.52, 0.82))
 	out[&"drive"] = pair.call(Vector3(-0.6, -0.1, 0.79))
 	# Foils out of the sphere's sides just below its middle, angled a little down.
 	var foil := SubEquipment.frame_at(Vector3(0.25, -0.12, 0.96).normalized() * R, Vector3(0.25, -0.45, 0.96))
