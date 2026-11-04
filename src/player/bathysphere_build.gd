@@ -34,7 +34,7 @@ static func mounts() -> Dictionary:
 	var out := {}
 	out[&"sonar"] = on.call(Vector3(-0.8, 0.55, 0.0))
 	out[&"harpoon"] = on.call(Vector3(0.5, 0.15, 0.85))
-	out[&"flare"] = on.call(Vector3(-0.45, 0.4, 0.8))
+	out[&"flare"] = on.call(Vector3(-0.5, 0.62, 0.6))
 	out[&"decoy"] = on.call(Vector3(-0.45, 0.4, -0.8))
 	out[&"shock"] = SubEquipment.frame_at(Vector3(1.02, -1.14, 0.0), Vector3.UP)
 	out[&"torpedo"] = pair.call(Vector3(0.3, -0.45, 0.84))

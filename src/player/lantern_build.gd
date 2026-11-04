@@ -87,7 +87,7 @@ static func mounts() -> Dictionary:
 	var out := {}
 	out[&"sonar"] = SubEquipment.frame_at(Vector3(0.62, f.deck_y(0.62, 0.0) - 0.01, 0.0), up)
 	out[&"harpoon"] = SubEquipment.frame_at(Vector3(0.86, -0.36, 0.52), Vector3(0.0, -0.2, 1.0))
-	out[&"flare"] = SubEquipment.frame_at(Vector3(-0.74, f.deck_y(-0.74, 0.0) - 0.01, 0.0), up)
+	out[&"flare"] = SubEquipment.frame_at(Vector3(-0.7, f.deck_y(-0.7, 0.0) - 0.01, 0.0), up)
 	out[&"decoy"] = f.mount(-1.28, 0.38)
 	out[&"shock"] = SubEquipment.frame_at(Vector3(1.5, -0.65, 0.0), up)
 	var torpedo := SubEquipment.frame_at(Vector3(-0.25, -0.36, 0.53), Vector3(0.0, -0.3, 1.0))

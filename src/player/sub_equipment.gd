@@ -90,8 +90,7 @@ func _build() -> void:
 	_lamp()
 	_harpoon()
 	_sonar()
-	if tools.has(&"flare") or _n(&"flare_kit") > 0:
-		_flares()
+	_flares()
 	if tools.has(&"torpedo") or _n(&"torpedo_kit") > 0:
 		_torpedoes()
 	if tools.has(&"decoy") or _n(&"decoy_kit") > 0:
@@ -120,6 +119,8 @@ func _materials() -> void:
 		"warhead": m.metal_material(Color(0.95, 0.72, 0.08), 0.2, 0.4, true),
 		"crate": m.metal_material(Color(0.46, 0.4, 0.28), 0.0, 0.8, true),
 		"ink": m.metal_material(Color(0.03, 0.025, 0.04), 0.2, 0.08, false),
+		"canvas": m.metal_material(Color(0.25, 0.25, 0.18), 0.0, 0.95, false),
+		"flare_red": m.metal_material(Color(0.7, 0.07, 0.05), 0.0, 0.45, false),
 		"glass": m.glass_material(),
 		"lens": MeshKit.emissive_material(Color(1.0, 0.94, 0.78), 6.0),
 		"lens_cold": MeshKit.emissive_material(Color(0.75, 0.9, 1.0), 6.0),
@@ -443,33 +444,149 @@ func _spear(node: Node3D, serrated: int, galvanic: int) -> void:
 
 # --- The tools -----------------------------------------------------------------------
 
-## The flare launcher: a box of tubes angled up and forward, more of them
-## with each level and Flare Pouch. Emergency Flares alone give one
-## strapped-on tube.
+## The flares. A launcher (on a sub that has one): tubes in a clamped pack on
+## a yoke, angled up and forward, a flare's red cap in each mouth. Flare Pouch
+## straps canvas pouches of spare cartridges behind it (a third tube with the
+## second, and with the third a belt of cartridges feeding the breech and a
+## fourth tube). Emergency Flares alone give an orange distress canister on a
+## saddle, more strapped alongside as Flare Pouch stacks; on a sub that already
+## has a launcher, a spare canister lashed beside it.
 func _flares() -> void:
 	var mount: Variant = _mount(&"flare")
-	if mount == null:
+	if mount == null or not (tools.has(&"flare") or _n(&"flare_kit") > 0):
 		return
-	var kit_only := not tools.has(&"flare")
-	var tubes := clampi((1 if kit_only else 2) + _n(&"flare_pouch"), 1, 5)
-	var cols := mini(tubes, 4)
-	var rows := ceili(tubes / 4.0)
-	var w := 0.05 * cols + 0.03
-	var d := 0.05 * rows + 0.04
-	_put(HullMesh.rounded_box(Vector3(w, 0.05, d), 0.012), "safety" if kit_only else "metal", mount,
-		_at(Vector3(0, 0.025, 0), Vector3(0, 90, 0)))
-	var tilt := Basis.from_euler(Vector3(0, 0, deg_to_rad(-55.0)))
+	var pouch := mini(_n(&"flare_pouch"), 3)
+	if tools.has(&"flare"):
+		var width := _flare_launcher(mount, pouch)
+		if _n(&"flare_kit") > 0:
+			_flare_canister(mount, Vector3(-0.01, 0.024, width * 0.5 + 0.05), 0.0, false)
+	else:
+		var count := 1 + maxi(pouch - 1, 0)
+		for k in count:
+			_flare_canister(mount, Vector3(0.0, 0.058, (k - (count - 1) * 0.5) * 0.056), 24.0, k == 0)
+		_led(mount, Vector3(0.062, 0.05, (count - 1) * 0.028 + 0.022), LIGHT, 0.008)
+	for k in mini(pouch, 2):
+		_flare_pouch(mount, Vector3(-0.135, -0.006, 0.034 if k == 0 else -0.034))
+	if pouch >= 3:
+		_flare_belt(mount)
+
+
+## The launcher proper; returns its width.
+func _flare_launcher(mount: Transform3D, pouch: int) -> float:
+	var tubes := 2 + maxi(pouch - 1, 0)
+	var pitch := 0.05
+	var pack_w := (tubes - 1) * pitch + 0.05
+	# Base plate bolted down, two cheeks and the pivot pin through them.
+	_put(HullMesh.rounded_box(Vector3(0.17, 0.05, pack_w + 0.06), 0.006), "metal", mount, _at(Vector3(0, -0.007, 0)))
+	for x: float in [-0.07, 0.07]:
+		for sgn: float in [-1.0, 1.0]:
+			_put(HullMesh.bolt_head(0.008), "steel", mount, _at(Vector3(x, 0.018, sgn * (pack_w * 0.5 + 0.018)),
+				Vector3(0, 0, 90)))
+	var pivot := Vector3(-0.005, 0.092, 0.0)
+	for sgn: float in [-1.0, 1.0]:
+		var z := sgn * (pack_w * 0.5 + 0.009)
+		_put(HullMesh.rounded_box(Vector3(0.065, 0.085, 0.012), 0.005), "metal", mount, _at(Vector3(pivot.x, 0.058, z)))
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(0.0, 0.001), Vector2(0.0, 0.016), Vector2(0.008, 0.014),
+			Vector2(0.01, 0.001)]), 12), "steel", mount, Transform3D(Basis(Vector3.UP, -sgn * PI * 0.5),
+			pivot + Vector3(0, 0, z + sgn * 0.006)))
+	# The elevation quadrant on the near cheek.
+	var arc := PackedVector3Array()
+	for k in 9:
+		var a := deg_to_rad(lerpf(-150.0, -60.0, k / 8.0))
+		arc.append(pivot + Vector3(cos(a) * 0.05, sin(a) * 0.05, pack_w * 0.5 + 0.017))
+	_put(HullMesh.pipe(arc, 0.004, 5), "brass", mount)
+	# The pack: tubes side by side, pitched up 40 degrees.
+	var pack := mount * Transform3D(Basis(Vector3.BACK, deg_to_rad(40.0)), pivot)
 	for k in tubes:
-		var cx := (k / 4 - (rows - 1) * 0.5) * 0.05
-		var cz := (k % 4 - (cols - 1) * 0.5) * 0.05
-		var at := Vector3(cx, 0.05, cz)
-		var tube := Transform3D(tilt, at)
-		_put(HullMesh.lathe(PackedVector2Array([Vector2(0.0, 0.001), Vector2(0.0, 0.021), Vector2(0.09, 0.021),
-			Vector2(0.095, 0.017), Vector2(0.095, 0.017), Vector2(0.095, 0.001)]), 12), "metal", mount, tube)
-		_put(HullMesh.lathe(PackedVector2Array([Vector2(0.094, 0.015), Vector2(0.1, 0.012), Vector2(0.102, 0.001)]), 10,
-			0.0), "flare_glow", mount, tube)
-	_led(mount, Vector3(-d * 0.5 - 0.005, 0.03, w * 0.5 - 0.01), LIGHT, 0.009)
-	m.add_muzzle(&"flare", mount * Vector3(0.06, 0.12, 0))
+		var at := _at(Vector3(0, 0, (k - (tubes - 1) * 0.5) * pitch))
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.058, 0.001), Vector2(-0.058, 0.019), Vector2(-0.054, 0.021),
+			Vector2(0.118, 0.021), Vector2(0.118, 0.024), Vector2(0.134, 0.024), Vector2(0.134, 0.017),
+			Vector2(0.134, 0.017), Vector2(0.1, 0.017)]), 16), "metal", pack, at)
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(0.1, 0.001), Vector2(0.1, 0.0165), Vector2(0.114, 0.0162),
+			Vector2(0.122, 0.011), Vector2(0.125, 0.001)]), 14, 0.0), "flare_glow", pack, at)
+	for x: float in [-0.028, 0.078]:
+		_put(HullMesh.rounded_box(Vector3(0.022, 0.05, pack_w + 0.006), 0.007), "paint", pack, _at(Vector3(x, 0, 0)))
+	_put(HullMesh.rounded_box(Vector3(0.016, 0.048, pack_w), 0.006), "metal", pack, _at(Vector3(-0.064, 0, 0)))
+	# The firing lead from the breech down into the base.
+	_put(HullMesh.pipe(PackedVector3Array([pivot + Basis(Vector3.BACK, deg_to_rad(40.0)) * Vector3(-0.07, 0.0, 0.0),
+		Vector3(-0.075, 0.03, 0.0), Vector3(-0.075, 0.012, 0.0)]), 0.006, 6, 0.012), "rubber", mount)
+	_led(mount, Vector3(pivot.x + 0.02, 0.03, pack_w * 0.5 + 0.017), LIGHT, 0.008)
+	m.add_muzzle(&"flare", pack * Vector3(0.15, 0, 0))
+	return pack_w + 0.06
+
+
+## An orange distress canister along +X from [param at], pitched up by
+## [param pitch] degrees on a saddle with hose clamps, a pull ring at the back.
+func _flare_canister(mount: Transform3D, at: Vector3, pitch: float, muzzle: bool) -> void:
+	var tilt := Basis(Vector3.BACK, deg_to_rad(pitch))
+	var can := mount * Transform3D(tilt, at)
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.1, 0.001), Vector2(-0.1, 0.018), Vector2(-0.095, 0.021),
+		Vector2(0.09, 0.021), Vector2(0.094, 0.018), Vector2(0.094, 0.001)]), 16), "safety", can)
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(0.03, 0.0208), Vector2(0.03, 0.0222), Vector2(0.056, 0.0222),
+		Vector2(0.056, 0.0208)]), 16, 0.0), "ceramic", can)
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(0.092, 0.001), Vector2(0.092, 0.0175), Vector2(0.106, 0.0175),
+		Vector2(0.112, 0.011), Vector2(0.114, 0.001)]), 14, 0.0), "flare_glow", can)
+	for x: float in [-0.055, 0.05]:
+		_put(HullMesh.lathe(_torus(0.0215, 0.0035, 6), 16), "steel", can, _at(Vector3(x, 0, 0)))
+	# The pull ring on a short cord.
+	_put(HullMesh.pipe(PackedVector3Array([Vector3(-0.1, 0, 0), Vector3(-0.118, 0, 0)]), 0.0025, 4), "rubber", can)
+	_put(HullMesh.lathe(_torus(0.011, 0.0025, 5), 12), "steel", can, _at(Vector3(-0.129, 0, 0), Vector3(0, 90, 0)))
+	# The saddle: a block under the front clamp, the back end resting on the hull.
+	var front := at + tilt * Vector3(0.05, -0.021, 0)
+	var foot := maxf(front.y, 0.012)
+	_put(HullMesh.rounded_box(Vector3(0.03, foot + 0.046, 0.036), 0.005), "metal", mount,
+		_at(Vector3(front.x, foot * 0.5 - 0.02, at.z)))
+	var back := at + tilt * Vector3(-0.055, -0.021, 0)
+	_put(HullMesh.rounded_box(Vector3(0.026, maxf(back.y, 0.0) + 0.046, 0.036), 0.005), "metal", mount,
+		_at(Vector3(back.x, maxf(back.y, 0.0) * 0.5 - 0.02, at.z)))
+	if muzzle:
+		m.add_muzzle(&"flare", can * Vector3(0.13, 0, 0))
+
+
+## A canvas pouch of spare cartridges, brass heads up, its flap thrown back.
+func _flare_pouch(mount: Transform3D, at: Vector3) -> void:
+	_put(HullMesh.rounded_box(Vector3(0.06, 0.1, 0.056), 0.017), "canvas", mount, _at(at + Vector3(0, 0.03, 0)))
+	_put(HullMesh.rounded_box(Vector3(0.008, 0.045, 0.054), 0.004), "canvas", mount,
+		_at(at + Vector3(-0.036, 0.066, 0), Vector3(0, 0, -18)))
+	_put(HullMesh.rounded_box(Vector3(0.064, 0.012, 0.06), 0.005), "rubber", mount, _at(at + Vector3(0, 0.036, 0)))
+	_put(HullMesh.rounded_box(Vector3(0.006, 0.016, 0.014), 0.002, 1), "steel", mount,
+		_at(at + Vector3(0.033, 0.036, 0)))
+	for k in 3:
+		var z := (k - 1) * 0.017
+		_flare_shell(mount, Transform3D(Basis(Vector3.BACK, PI * 0.5).rotated(Vector3.BACK, (k - 1) * -0.08),
+			at + Vector3((1 - k) * 0.004, 0.05, z)))
+
+
+## One flare cartridge along +X from [param t]: a red hull and a brass head.
+func _flare_shell(mount: Transform3D, t: Transform3D) -> void:
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(0.0, 0.001), Vector2(0.0, 0.0105), Vector2(0.044, 0.0105),
+		Vector2(0.044, 0.001)]), 12), "flare_red", mount, t)
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(0.043, 0.0108), Vector2(0.054, 0.0108), Vector2(0.055, 0.0125),
+		Vector2(0.058, 0.0125), Vector2(0.058, 0.001)]), 12), "brass", mount, t)
+
+
+## Flare Pouch three times: a belt of cartridges out of the near pouch, over
+## and down into a feed box on the launcher's breech.
+func _flare_belt(mount: Transform3D) -> void:
+	var z := 0.034
+	var p0 := Vector3(-0.135, 0.11, z)
+	var p1 := Vector3(-0.115, 0.165, z)
+	var p2 := Vector3(-0.07, 0.1, z)
+	_put(HullMesh.rounded_box(Vector3(0.034, 0.042, 0.06), 0.006), "metal", mount, _at(p2 + Vector3(0, -0.028, 0)))
+	var pts := PackedVector3Array()
+	for k in 8:
+		var t := k / 7.0
+		var p := p0.lerp(p1, t).lerp(p1.lerp(p2, t), t)
+		var d := (p1 - p0).lerp(p2 - p1, t).normalized()
+		pts.append(p)
+		# Each round across the belt, its brass head to the near side.
+		var across := Basis(Vector3.UP, -PI * 0.5)
+		_flare_shell(mount, Transform3D(Basis(Vector3.BACK, atan2(d.y, d.x)) * across, p + Vector3(0, 0, -0.03)))
+	for dz: float in [-0.024, 0.016]:
+		var link := PackedVector3Array()
+		for p: Vector3 in pts:
+			link.append(p + Vector3(0, 0, dz))
+		_put(HullMesh.pipe(link, 0.003, 4), "steel", mount)
 
 
 ## Torpedo pods either side, each with its tubes' mouths in the nose; more
