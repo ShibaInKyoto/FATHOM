@@ -6,7 +6,7 @@ on:
       tag:
         description: "Release tag (e.g. v1.0.0)"
         required: true
-        default: "v1.0.0"
+        default: "v1.1.0"
   push:
     tags: ["v*"]
 
@@ -92,8 +92,10 @@ jobs:
               light-and-sound stealth system: ambushes, decoys, flares and pings all matter.
             - A trench that reshapes itself around you when the Choir sings, the ruins of Meridian
               Deep, the crew's thirteen logs, and eleven wonders of the deep to witness.
-            - Four submarines, 32 modules, 12 hangar upgrades, contracts, a daily dive, pressure
-              levels, 17 milestones and a records table.
+            - Four submarines, each built in detail, and 32 modules: every module card you take fits
+              its own piece of kit to your sub, changing again as the card stacks.
+            - 12 hangar upgrades, research projects, contracts, a daily dive, pressure levels,
+              30 challenges and a records table.
             - Rebindable controls, photo mode, Assist mode, sound cues, a reduce-flashing option and
               four graphics presets.
 
