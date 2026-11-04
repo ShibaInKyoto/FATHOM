@@ -35,7 +35,7 @@ static func default_mounts(length: float, radius: float) -> Dictionary:
 	var out := {}
 	out[&"harpoon"] = frame_at(Vector3(h * 0.55, -radius * 0.6, radius * 0.75), Vector3(0, -0.4, 1))
 	out[&"flare"] = frame_at(Vector3(-h * 0.3, radius * 0.95, 0.0), Vector3.UP)
-	out[&"decoy"] = frame_at(Vector3(-h * 0.6, radius * 0.8, 0.0), Vector3.UP)
+	out[&"decoy"] = frame_at(Vector3(-h * 0.72, radius * 0.75, radius * 0.45), Vector3(0, 1, 0.6))
 	out[&"shock"] = frame_at(Vector3(h * 0.6, -radius * 0.95, 0.0), Vector3.DOWN)
 	out[&"sonar"] = frame_at(Vector3(h * 0.1, radius, 0.0), Vector3.UP)
 	out[&"torpedo"] = _pair(frame_at(Vector3(h * 0.2, -radius * 0.5, radius * 0.85), Vector3(0, -0.3, 1)))
@@ -75,8 +75,7 @@ func _build() -> void:
 	_sonar()
 	_flares()
 	_torpedoes()
-	if tools.has(&"decoy") or _n(&"decoy_kit") > 0:
-		_decoys()
+	_decoys()
 	if tools.has(&"shock"):
 		_shock()
 	_armour()

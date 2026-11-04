@@ -48,6 +48,7 @@ func _materials() -> void:
 		"arc": MeshKit.emissive_material(Color(0.45, 0.85, 1.0), 3.0),
 		"beacon": MeshKit.emissive_material(Color(1.0, 0.6, 0.1), 5.0),
 		"cockpit_sonar": MeshKit.emissive_material(Color(0.25, 0.9, 0.8), 2.2),
+		"decoy_glow": MeshKit.emissive_material(Color(0.35, 1.0, 0.72), 2.5),
 	}
 	for c: Color in [HULL, POWER, LIGHT, SONAR, WEAPON, UTIL]:
 		mats[c.to_html()] = MeshKit.emissive_material(c, 3.0)

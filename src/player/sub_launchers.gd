@@ -308,27 +308,86 @@ func _salvaged_tubes(mount: Transform3D, count: int, warhead: int, at: Vector3) 
 		m.add_muzzle(&"torpedo", mount * (at + Vector3(0.3, 0, 0)))
 
 
-## The decoy launcher: a rack of orange canisters with sonar-blue bands, more
-## with each level and Decoy Rack. Sonar Decoys alone clamp on a single one.
+## The decoys: little copies of the buoy that goes out, orange with a green
+## beacon on top. A sub with a decoy launcher carries them standing in a clip
+## tray, a row of three and two more for each Decoy Rack, filling a second
+## row behind. Sonar Decoys alone strap a pair lying in a steel cradle, with
+## two more for each Decoy Rack; on a sub with a tray already, a cradled pair
+## beside it.
 func _decoys() -> void:
 	var mount: Variant = _mount(&"decoy")
-	if mount == null:
+	if mount == null or not (tools.has(&"decoy") or _n(&"decoy_kit") > 0):
 		return
-	var kit_only := not tools.has(&"decoy")
-	var count := clampi((1 if kit_only else 2) + _n(&"decoy_rack"), 1, 5)
-	var w := 0.06 * count + 0.02
-	_put(HullMesh.rounded_box(Vector3(0.1, 0.03, w), 0.01), "metal", mount, _at(Vector3(0, 0.015, 0)))
-	var tilt := Basis.from_euler(Vector3(0, 0, deg_to_rad(75.0)))
+	var rack := mini(_n(&"decoy_rack"), 3)
+	if tools.has(&"decoy"):
+		var depth := _decoy_tray(mount, 3 + 2 * rack)
+		if _n(&"decoy_kit") > 0:
+			_decoy_cradle(mount, Vector3(0, 0, depth * 0.5 + 0.035), 2, false)
+	else:
+		_decoy_cradle(mount, Vector3.ZERO, 2 + 2 * rack, true)
+
+
+## The clip tray, its buoys standing in rows of up to five; returns its depth.
+func _decoy_tray(mount: Transform3D, count: int) -> float:
+	var front := mini(count, 5)
+	var rows := 1 if count <= 5 else 2
+	var pitch := 0.05
+	var length := front * pitch + 0.03
+	var depth := rows * 0.046 + 0.024
+	_put(HullMesh.rounded_box(Vector3(length, 0.05, depth), 0.008), "metal", mount, _at(Vector3(0, -0.005, 0)))
 	for k in count:
-		var z := (k - (count - 1) * 0.5) * 0.06
-		var can := Transform3D(tilt, Vector3(0.0, 0.03, z))
-		_put(HullMesh.lathe(PackedVector2Array([Vector2(0.0, 0.001), Vector2(0.0, 0.024), Vector2(0.11, 0.024),
-			Vector2(0.125, 0.016), Vector2(0.13, 0.001)]), 12), "canister", mount, can)
-		_put(HullMesh.lathe(PackedVector2Array([Vector2(0.05, 0.024), Vector2(0.05, 0.026), Vector2(0.065, 0.026),
-			Vector2(0.065, 0.024)]), 12, 0.0), SONAR.to_html(), mount, can)
-		_put(HullMesh.pipe(PackedVector3Array([Vector3(0.13, 0, 0), Vector3(0.18, 0, 0)]), 0.003, 4), "metal", mount,
-			can)
-	m.add_muzzle(&"decoy", mount * Vector3(0.0, 0.14, 0))
+		var row := 0 if k < front else 1
+		var i := k if row == 0 else k - front
+		var x := (i - (front - 1) * 0.5) * pitch + (pitch * 0.5 if row == 1 else 0.0)
+		var z := (rows - 1) * 0.023 - row * 0.046
+		_decoy_buoy(mount * _stand(Vector3(x, 0.02, z)))
+		_put(HullMesh.lathe(_torus(0.0215, 0.0035, 6), 14), "steel", mount, _stand(Vector3(x, 0.05, z)))
+	# A rail along each side at the clips' height, on end posts.
+	for sz: float in [-1.0, 1.0]:
+		var z := sz * (depth * 0.5 - 0.004)
+		_put(HullMesh.pipe(PackedVector3Array([Vector3(-length * 0.5, 0.02, z), Vector3(-length * 0.5, 0.06, z),
+			Vector3(length * 0.5, 0.06, z), Vector3(length * 0.5, 0.02, z)]), 0.004, 6, 0.01), "steel", mount)
+	_led(mount, Vector3(length * 0.5 + 0.002, 0.008, 0.0), SONAR, 0.009)
+	m.add_muzzle(&"decoy", mount * Vector3(0, 0.16, 0))
+	return depth
+
+
+## Sonar Decoys' cradle: [param count] buoys lying along X, two layers of
+## them once there are more than two, in two steel hoops, strapped down.
+func _decoy_cradle(mount: Transform3D, at: Vector3, count: int, muzzle: bool) -> void:
+	var abreast := 2 if count <= 4 else ceili(count / 2.0)
+	var layers := ceili(float(count) / abreast)
+	var pitch := 0.044
+	var width := abreast * pitch
+	for k in count:
+		var layer := k / abreast
+		var i := k % abreast
+		var c := at + Vector3(-0.04, 0.026 + layer * 0.042, (i - (abreast - 1) * 0.5) * pitch)
+		_decoy_buoy(mount * _at(c))
+	var top := 0.026 + (layers - 1) * 0.042 + 0.024
+	for x: float in [-0.02, 0.025]:
+		# A hoop up both sides and over, its feet bolted down.
+		var w := width * 0.5 + 0.006
+		_put(HullMesh.pipe(PackedVector3Array([at + Vector3(x, -0.01, -w), at + Vector3(x, top, -w),
+			at + Vector3(x, top, w), at + Vector3(x, -0.01, w)]), 0.0045, 6, 0.012), "steel", mount)
+		_put(HullMesh.rounded_box(Vector3(0.022, 0.03, width + 0.024), 0.004), "metal", mount, _at(at + Vector3(x, 0.0, 0)))
+		_put(HullMesh.rounded_box(Vector3(0.014, 0.004, width + 0.012), 0.002, 1), "rubber", mount,
+			_at(at + Vector3(x + 0.016, top + 0.001, 0)))
+	_led(mount, at + Vector3(0.036, 0.008, width * 0.5 + 0.008), SONAR, 0.008)
+	if muzzle:
+		m.add_muzzle(&"decoy", mount * (at + Vector3(0, top + 0.08, 0)))
+
+
+## One buoy along X from [param t]: an orange body with a dark band, the
+## green beacon and a whip antenna at its head.
+func _decoy_buoy(t: Transform3D) -> void:
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(0.0, 0.001), Vector2(0.0, 0.014), Vector2(0.006, 0.019),
+		Vector2(0.066, 0.019), Vector2(0.072, 0.014), Vector2(0.072, 0.001)]), 12), "canister", t)
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(0.024, 0.0192), Vector2(0.024, 0.0204), Vector2(0.034, 0.0204),
+		Vector2(0.034, 0.0192)]), 12, 0.0), "metal", t)
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(0.07, 0.0105), Vector2(0.077, 0.0105), Vector2(0.083, 0.007),
+		Vector2(0.085, 0.001)]), 10, 0.0), "decoy_glow", t)
+	_put(HullMesh.pipe(PackedVector3Array([Vector3(0.083, 0, 0.006), Vector3(0.11, 0, 0.006)]), 0.0014, 4), "metal", t)
 
 
 ## The shock emitter: a tower on an insulated housing, a glowing orb held in
