@@ -128,6 +128,7 @@ func _materials() -> void:
 		"boost": MeshKit.emissive_material(Color(1.0, 0.55, 0.2), 2.5),
 		"arc": MeshKit.emissive_material(Color(0.45, 0.85, 1.0), 3.0),
 		"beacon": MeshKit.emissive_material(Color(1.0, 0.6, 0.1), 5.0),
+		"cockpit_sonar": MeshKit.emissive_material(Color(0.25, 0.9, 0.8), 2.2),
 	}
 	for c: Color in [HULL, POWER, LIGHT, SONAR, WEAPON, UTIL]:
 		mats[c.to_html()] = MeshKit.emissive_material(c, 3.0)
@@ -569,41 +570,85 @@ func _shock() -> void:
 	_led(mount, Vector3(0.03, 0.035, 0.0), WEAPON)
 
 
-## The sonar head: a rubber transducer dome, bigger with each level and
-## ringed with a fairing at level 2. Pulse Amplifier raises rods round it,
-## Quick Ping adds pinger cans, the Echo Analyzer a lit processor box and a
-## Concussive Ping a dish ahead of it. The Pressure Compass sits on the deck.
+## The sonar head: a rubber transducer dome on a pedestal. Its cards each
+## change it, and again as they stack: a Pulse Amplifier lifts the dome on a
+## ribbed amplifier stage (rings a reflector round it at two, reaches
+## hydrophone booms out either side at three); Quick Ping sets pinger cans by
+## its foot (and a capacitor rack behind it at two); the Echo Analyzer puts a
+## processor with a glowing sweep display and a whip antenna behind it; a
+## Concussive Ping mounts a dish with a red-tipped emitter ahead of it. The
+## Pressure Compass sits on the deck (see _utilities).
 func _sonar() -> void:
 	var mount: Variant = _mount(&"sonar")
 	if mount == null:
 		return
-	var r := 0.08
-	_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.01, r * 0.9), Vector2(0.03, r * 0.9), Vector2(0.035, r * 0.85),
-		Vector2(0.035, 0.001)]), 24), "metal", mount, _stand(Vector3.ZERO))
-	_put(HullMesh.lathe(_cap(r, 10), 24), "rubber", mount, _stand(Vector3(0, 0.035, 0)))
-	for k in _n(&"amplifier") * 2:
-		var a := TAU * (k + 0.5) / maxf(_n(&"amplifier") * 2.0, 1.0)
-		var foot := Vector3(cos(a) * (r + 0.03), 0.03, sin(a) * (r + 0.03))
-		_put(HullMesh.pipe(PackedVector3Array([foot, foot + Vector3(0, 0.16, 0)]), 0.006, 6), "steel", mount)
-		_led(mount, foot + Vector3(0, 0.165, 0), SONAR, 0.01)
-	if _n(&"quick_ping") > 0:
-		for sgn: float in [-1.0, 1.0]:
-			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.03, 0.001), Vector2(-0.03, 0.022), Vector2(0.03, 0.022),
-				Vector2(0.035, 0.012), Vector2(0.035, 0.001)]), 12), "metal", mount, _at(Vector3(-r * 0.4, 0.05,
-				sgn * (r + 0.04))))
-			_led(mount, Vector3(-r * 0.4 + 0.036, 0.05, sgn * (r + 0.04)), SONAR, 0.008)
-	if _n(&"echo_analyzer") > 0:
-		var at := Vector3(-r - 0.08, 0.04, 0.0)
-		_put(HullMesh.rounded_box(Vector3(0.1, 0.07, 0.08), 0.015), "metal", mount, _at(at))
+	var amp := mini(_n(&"amplifier"), 3)
+	var quick := mini(_n(&"quick_ping"), 2)
+	var r := 0.085
+	_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.01, 0.075), Vector2(0.02, 0.075), Vector2(0.03, 0.068),
+		Vector2(0.035, 0.06), Vector2(0.035, 0.001)]), 24), "metal", mount, _stand(Vector3.ZERO))
+	var top := 0.035
+	if amp >= 1:
+		# The amplifier stage: a ribbed drum with a glowing band.
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(0.0, 0.001), Vector2(0.0, r * 0.95), Vector2(0.055, r * 0.95),
+			Vector2(0.055, 0.001)]), 24), "steel", mount, _stand(Vector3(0, top, 0)))
 		for k in 3:
-			_led(mount, at + Vector3(0.051, 0.012 - k * 0.012, 0.0), SONAR, 0.006)
+			_put(HullMesh.lathe(_torus(r * 0.97, 0.006, 6), 24), "metal", mount, _stand(Vector3(0, top + 0.01 + k * 0.017, 0)))
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(0.0, r * 0.955), Vector2(0.0, r * 0.97), Vector2(0.006, r * 0.97),
+			Vector2(0.006, r * 0.955)]), 24, 0.0), SONAR.to_html(), mount, _stand(Vector3(0, top + 0.044, 0)))
+		top += 0.055
+	_put(HullMesh.lathe(_torus(r * 1.02, 0.009, 8), 24), "metal", mount, _stand(Vector3(0, top + 0.004, 0)))
+	_put(HullMesh.lathe(_cap(r, 10), 24), "rubber", mount, _stand(Vector3(0, top, 0)))
+	_led(mount, Vector3(r * 0.7, top + 0.012, 0.0), SONAR, 0.008)
+	if amp >= 2:
+		# A reflector ring flaring round the dome's foot.
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.004, r * 1.06), Vector2(0.03, r * 1.75), Vector2(0.034, r * 1.73),
+			Vector2(0.002, r * 1.05)]), 28), "steel", mount, _stand(Vector3(0, top - 0.01, 0)))
+	if amp >= 3:
+		# Hydrophone booms out to either side, a little dome at each tip.
+		for sgn: float in [-1.0, 1.0]:
+			var tip := Vector3(0.0, top + 0.02, sgn * (r + 0.2))
+			_put(HullMesh.pipe(PackedVector3Array([Vector3(0, top - 0.02, sgn * r * 0.8), tip]), 0.009, 8), "metal", mount)
+			_put(HullMesh.lathe(_cap(0.035, 8), 14), "rubber", mount, _stand(tip))
+			_put(HullMesh.lathe(_torus(0.036, 0.005, 6), 14), "metal", mount, _stand(tip + Vector3(0, 0.002, 0)))
+			_led(mount, tip + Vector3(0.0, 0.04, 0.0), SONAR, 0.007)
+	if quick >= 1:
+		# Pinger cans at the foot, either side.
+		for sgn: float in [-1.0, 1.0]:
+			var at := Vector3(0.0, 0.0, sgn * (r + 0.075))
+			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.01, 0.026), Vector2(0.05, 0.026), Vector2(0.055, 0.02),
+				Vector2(0.055, 0.001)]), 14), "metal", mount, _stand(at))
+			_put(HullMesh.lathe(_cap(0.02, 6), 10), "rubber", mount, _stand(at + Vector3(0, 0.055, 0)))
+			_led(mount, at + Vector3(0.027, 0.03, 0.0), SONAR, 0.007)
+	if quick >= 2:
+		# A capacitor rack behind, strapped together.
+		for k in 3:
+			var at := Vector3(-r - 0.06, 0.0, (k - 1) * 0.04)
+			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.01, 0.018), Vector2(0.075, 0.018), Vector2(0.078, 0.012),
+				Vector2(0.078, 0.001)]), 12), "olive", mount, _stand(at))
+			_led(mount, at + Vector3(0, 0.082, 0), SONAR, 0.006)
+		_put(HullMesh.rounded_box(Vector3(0.05, 0.012, 0.13), 0.004, 1), "metal", mount,
+			_at(Vector3(-r - 0.06, 0.045, 0)))
+	if _n(&"echo_analyzer") > 0:
+		# A processor behind the dome, a glowing sweep on each face and a whip antenna.
+		var at := Vector3(-r - 0.07, 0.05, 0.0) if quick < 2 else Vector3(-r - 0.07, 0.12, 0.0)
+		_put(HullMesh.rounded_box(Vector3(0.09, 0.08, 0.1), 0.014), "metal", mount, _at(at))
+		for sgn: float in [-1.0, 1.0]:
+			_put(HullMesh.rounded_box(Vector3(0.06, 0.05, 0.004), 0.004, 1), "cockpit_sonar", mount,
+				_at(at + Vector3(0.0, 0.004, sgn * 0.051)))
+		_put(HullMesh.pipe(PackedVector3Array([at + Vector3(-0.03, 0.04, 0), at + Vector3(-0.06, 0.22, 0)]), 0.004, 5),
+			"metal", mount)
 	if _n(&"sonar_stun") > 0:
-		var dish := _at(Vector3(r + 0.06, 0.08, 0.0), Vector3(0, 0, 15))
-		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.015, 0.001), Vector2(0.02, 0.06), Vector2(0.03, 0.065),
-			Vector2(0.012, 0.03), Vector2(0.0, 0.001)]), 18), "metal", mount, dish)
-		_put(HullMesh.pipe(PackedVector3Array([Vector3(r * 0.5, 0.03, 0), Vector3(r + 0.05, 0.075, 0)]), 0.008, 6), "metal",
-			mount)
-		_led(mount, Vector3(r + 0.075, 0.084, 0), WEAPON, 0.01)
+		# A concussion dish ahead of the dome, its emitter tipped red.
+		var arm := Vector3(r + 0.03, 0.03, 0.0)
+		var dish := _at(Vector3(r + 0.1, top * 0.5 + 0.04, 0.0), Vector3(0, 0, 12))
+		_put(HullMesh.pipe(PackedVector3Array([Vector3(r * 0.4, 0.02, 0), arm, Vector3(r + 0.08, top * 0.5 + 0.04, 0)]),
+			0.01, 6, 0.02), "metal", mount)
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.012, 0.001), Vector2(-0.006, 0.02), Vector2(0.02, 0.065),
+			Vector2(0.026, 0.07), Vector2(0.03, 0.068), Vector2(0.008, 0.024), Vector2(0.0, 0.001)]), 24), "metal", mount, dish)
+		_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.01, 0.001), Vector2(-0.01, 0.009), Vector2(0.04, 0.006),
+			Vector2(0.045, 0.001)]), 10), "steel", mount, dish)
+		_led(mount, (dish * Vector3(0.046, 0, 0)), WEAPON, 0.009)
 
 
 # --- Module cards --------------------------------------------------------------------
@@ -722,14 +767,21 @@ func _utilities() -> void:
 			_put(HullMesh.rounded_box(Vector3(0.018, 0.104, 0.144), 0.004, 1), "rubber", mount, _at(Vector3(x, 0.05, 0)))
 		_led(mount, Vector3(0.101, 0.07, 0.0), UTIL, 0.008)
 	if _n(&"compass") > 0:
+		# The Pressure Compass: a brass binnacle with a gimballed glass bowl and a lit needle.
 		var mount: Variant = _take(&"deck")
 		if mount != null:
-			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.01, 0.04), Vector2(0.03, 0.035), Vector2(0.035, 0.001)]), 14),
-				"brass", mount, _stand(Vector3.ZERO))
-			_put(HullMesh.lathe(_torus(0.06, 0.006, 6), 20), "brass", mount, _at(Vector3(0, 0.1, 0), Vector3(0, 0, 90)))
-			_put(HullMesh.lathe(_torus(0.06, 0.006, 6), 20), "brass", mount, _at(Vector3(0, 0.1, 0), Vector3(90, 0, 90)))
-			_put(HullMesh.lathe(_ball(0.045, 10), 14), "glass", mount, _at(Vector3(0, 0.1, 0)))
-			_led(mount, Vector3(0, 0.1, 0), SONAR, 0.012)
+			_put(HullMesh.lathe(PackedVector2Array([Vector2(-0.01, 0.045), Vector2(0.02, 0.04), Vector2(0.05, 0.028),
+				Vector2(0.06, 0.03), Vector2(0.065, 0.001)]), 18), "brass", mount, _stand(Vector3.ZERO))
+			var bowl := Vector3(0, 0.12, 0)
+			_put(HullMesh.lathe(_torus(0.066, 0.006, 6), 22), "brass", mount, _at(bowl, Vector3(90, 0, 0)))
+			_put(HullMesh.lathe(_torus(0.058, 0.005, 6), 22), "brass", mount, _at(bowl, Vector3(0, 0, 90)))
+			for sgn: float in [-1.0, 1.0]:
+				_put(HullMesh.pipe(PackedVector3Array([Vector3(0, 0.06, sgn * 0.066), bowl + Vector3(0, 0, sgn * 0.066)]),
+					0.006, 6), "brass", mount)
+			_put(HullMesh.lathe(_ball(0.048, 10), 14), "glass", mount, _at(bowl))
+			_put(HullMesh.rounded_box(Vector3(0.07, 0.004, 0.008), 0.002, 1), SONAR.to_html(), mount,
+				_at(bowl, Vector3(0, 30, 0)))
+			_led(mount, bowl + Vector3(0.03, 0.0, 0.0), WEAPON, 0.006)
 	if _n(&"shock_hull") > 0:
 		for mount: Transform3D in m.mounts.get(&"flank", []):
 			_put(HullMesh.pipe(PackedVector3Array([Vector3(-0.2, 0.008, 0), Vector3(0.2, 0.008, 0)]), 0.006, 6), "arc",
