@@ -36,7 +36,7 @@ Hangar (spend salvage & research) -> Dive -> Zone 1 -> Decompression stop
 ### A dive
 
 * 5 biomes x 2 zones + the final zone. ~2-4 minutes per zone.
-* Each zone is a procedurally generated cave cross-section. The exit (a downward
+* Each zone is a cave cross-section carved fresh for each dive. The exit (a downward
   fissure with a strong current) is hidden; sonar reveals it on the HUD.
 * Side chambers hold wrecks with caches (salvage, modules), signal logs (lore),
   and bioluminescent bulbs that recharge the battery.
@@ -112,7 +112,7 @@ has not noticed the sub can be **ambushed** (harpoon hits deal double), and
 
 ## Replayability
 
-* Seeded procedural zones, random module drafts, random cache contents.
+* Seeded zones, random module drafts, random cache contents.
 * 4 submarine frames with different stats and starting tools.
 * Meta upgrades (hull, battery, thrusters, lamp, sonar, cargo, tool unlocks).
 * Codex: scan every creature, collect every signal log.
@@ -134,7 +134,7 @@ has not noticed the sub can be **ambushed** (harpoon hits deal double), and
 
 ## Technical approach
 
-* **Terrain**: a 2D density grid is carved by a path/chamber generator, eroded
+* **Terrain**: a 2D density grid is carved along paths and chambers, eroded
   by domain-warped noise, flood-filled for connectivity, then converted to a
   signed distance field (exact Euclidean distance transform). The SDF drives
   *both* gameplay collision (sphere vs SDF, raymarched projectiles, steering)
@@ -153,9 +153,9 @@ has not noticed the sub can be **ambushed** (harpoon hits deal double), and
   whale's clicks all chart the cave the same way. The singing glass listens
   for the sub's pings arriving at the speed of the wave and opens with the
   same field edit as the moving trench.
-* **Audio**: all sound effects and music are synthesized by a Python script in
+* **Audio**: the sound effects and music are made with a Python script in
   `tools/audio/` and committed as OGG files.
-* **Art**: all meshes are procedurally built at runtime; rock textures are
+* **Art**: the meshes are built at runtime; rock textures are
   CC0 from Poly Haven.
 
 ## Architecture
@@ -163,7 +163,7 @@ has not noticed the sub can be **ambushed** (harpoon hits deal double), and
 **Scene flow.** `main.tscn` installs the theme and hands over to the
 `Router` autoload, which owns every scene change (with a fade): title,
 hangar, dive and ending. The dive scene (`src/dive/dive.gd`) runs one zone
-at a time: it generates the layout on a worker thread, builds a `Level`,
+at a time: it lays out the zone on a worker thread, builds a `Level`,
 populates it, spawns the `Submarine`, and between zones shows the
 `DecompressionStop` before loading the next.
 

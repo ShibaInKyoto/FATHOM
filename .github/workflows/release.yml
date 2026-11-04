@@ -73,7 +73,7 @@ jobs:
 
             ![FATHOM](https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/docs/screenshots/sonar.jpg)
 
-            Pilot a small salvage sub down eleven procedurally generated cave zones,
+            Pilot a small salvage sub down eleven cave zones, carved fresh every dive,
             through five biomes, to the thing that is singing at the bottom of the trench.
 
             ### Play (Windows 10/11)
@@ -83,7 +83,7 @@ jobs:
             Needs a GPU with Vulkan or Direct3D 12 (any dedicated GPU from the last decade).
 
             ### What's inside
-            - Eleven procedurally generated cave zones in five biomes, each with its own creatures,
+            - Eleven cave zones in five biomes, carved fresh every dive, each with its own creatures,
               hazards, music and ambience.
             - Three guardians, each with one weakness to find: the Lamplighter, who sees only light;
               the Blind Mother, who hears only sound; the Ironclad, whose shell only a vent's heat
