@@ -28,7 +28,7 @@ var _collected: Array = []
 
 func _materials() -> void:
 	mats = {
-		"paint": m.paint_material(false),
+		"paint": m.paint_material(false, m.equipment_matte),
 		"metal": m.metal_material(Color(0.085, 0.09, 0.095), 0.6, 0.45, true),
 		"steel": m.metal_material(Color(0.78, 0.79, 0.8), 0.95, 0.2, false),
 		"brass": m.metal_material(Color(0.76, 0.56, 0.27), 1.0, 0.32, false),
@@ -58,6 +58,8 @@ func _materials() -> void:
 		"nanite": MeshKit.emissive_material(Color(1.0, 0.5, 0.22), 2.0),
 		"bubble": MeshKit.emissive_material(Color(0.8, 1.0, 0.85), 2.2),
 	}
+	if m.equipment_darken > 0.0:
+		(mats["paint"] as ShaderMaterial).set_shader_parameter(&"darken", m.equipment_darken)
 	for c: Color in [HULL, POWER, LIGHT, SONAR, WEAPON, UTIL]:
 		mats[c.to_html()] = MeshKit.emissive_material(c, 3.0)
 

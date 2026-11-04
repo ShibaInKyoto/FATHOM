@@ -501,7 +501,81 @@ def paint_bathysphere(hull):
     return np.concatenate([np.clip(paint, 0, 1), alpha[..., None]], axis=-1), height, pv
 
 
-PAINTERS = {"lantern": paint_lantern, "mako": paint_mako, "bathysphere": paint_bathysphere}
+def paint_whisper(hull):
+    paint = np.ones((H, W, 3), dtype=np.float32) * 0.56
+    height = np.zeros((H, W), dtype=np.float32)
+    X, V = hull.X, hull.V
+    per = hull.perimeter[None, :]
+    arc = V * per  # distance round from the keel
+
+    # Anechoic tiles: staggered rows of rubber tiles, each a shade apart,
+    # domed a little, with dark grout between.
+    tw, th = 0.12, 0.085
+    row = np.floor(arc / th)
+    shift = (row % 2) * tw * 0.5
+    along = (X - hull.x0 + shift) / tw
+    col = np.floor(along)
+    fx = along - col
+    fy = arc / th - row
+    edge = np.minimum(np.minimum(fx, 1 - fx) * tw, np.minimum(fy, 1 - fy) * th)
+    grout = np.exp(-(edge / 0.0026) ** 2)
+    rnd = ((np.sin(col * 12.9898 + row * 78.233) * 43758.5453) % 1.0 + 1.0) % 1.0
+    shade = 0.94 + 0.09 * rnd
+    paint *= (shade * (1 - 0.3 * grout))[..., None]
+    height += np.clip(edge / 0.012, 0, 1) * 0.0012 - grout * 0.0015
+    # A few tiles lost, the bonded metal showing in the gap.
+    lost = (rnd > 0.975) & (np.abs(X) < 1.7) & (edge > 0.003)
+    lost_soft = (rnd > 0.975) & (np.abs(X) < 1.7)
+    paint *= np.where(lost[..., None], np.array([0.5, 0.52, 0.48]), 1.0)
+    height -= lost_soft * 0.0035
+
+    # The conformal hydrophone arrays on the upper facets: dark panels set
+    # with a grid of elements.
+    for far in (False, True):
+        for (xa, xb) in ((-0.3, 0.55),):
+            vc = side_v(hull, (xa + xb) / 2, far, 0.045)
+            t = (V - vc) * per
+            inside = (X > xa) & (X < xb) & (np.abs(t) < 0.035)
+            paint *= np.where(inside[..., None], 0.55, 1.0)
+            height -= inside * 0.0008
+            gx = ((X - xa) / 0.028) % 1.0
+            gy = ((t + 0.035) / 0.0175) % 1.0
+            dot = inside & (np.hypot(gx - 0.5, gy - 0.5) < 0.24)
+            paint *= np.where(dot[..., None], 1.35, 1.0)
+            height += dot * 0.0006
+
+    # Flush intakes aft: a slot each side, dark in its throat.
+    for far in (False, True):
+        vc = side_v(hull, -1.35, far, 0.06)
+        t = (V - vc) * per
+        d = X + 1.35
+        slot = (np.abs(d) < 0.11) & (np.abs(t) < 0.012 + 0.02 * np.clip((d + 0.11) / 0.22, 0, 1))
+        paint *= np.where(slot[..., None], 0.3, 1.0)
+        height -= slot * 0.004
+
+    # Low-visibility lettering: the name and designation in a darker grey,
+    # and the coating's placard.
+    ink = (0.5, 0.5, 0.56)
+    for far in (False, True):
+        text_on(hull, paint, height, "WHISPER", 0.085, -0.85, side_v(hull, -0.85, far, 0.05), far, ink=ink,
+                depth=0.0002)
+        text_on(hull, paint, height, "ANECHOIC COATING - DO NOT PAINT", 0.02, -0.85, side_v(hull, -0.85, far, 0.012),
+                far, ink=ink, depth=0.0001)
+        text_on(hull, paint, height, "SD-4", 0.07, 1.12, side_v(hull, 1.12, far, 0.045), far, ink=ink, depth=0.0002)
+
+    # Dulled underneath and towards the jet.
+    low = np.clip((-0.02 - hull.y) / 0.25, 0, 1)
+    blotch = smooth_noise((H, W), (10, 24), 21)
+    fine = smooth_noise((H, W), (60, 160), 22)
+    grime = 0.1 * low + 0.05 * blotch + 0.02 * fine + 0.18 * np.exp(-((X - hull.x0) / 0.12) ** 2)
+    paint *= (1 - np.clip(grime, 0, 0.5))[..., None]
+    height += (fine - 0.5) * 0.00015
+    pv = hull.px_v(X)
+    return np.clip(paint, 0, 1), height, pv
+
+
+PAINTERS = {"lantern": paint_lantern, "mako": paint_mako, "bathysphere": paint_bathysphere,
+            "whisper": paint_whisper}
 ## Texture size (along, round) for hulls far from twice as long as they are round.
 SIZES = {"bathysphere": (1024, 2048)}
 

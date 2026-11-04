@@ -14,6 +14,8 @@ func _init() -> void:
 			hull = MakoBuild.fairing()
 		"bathysphere":
 			hull = BathysphereBuild.fairing()
+		"whisper":
+			hull = WhisperBuild.fairing()
 	var points: Array = []
 	for p in hull.grid():
 		points.append([snappedf(p.x, 0.0001), snappedf(p.y, 0.0001), snappedf(p.z, 0.0001)])

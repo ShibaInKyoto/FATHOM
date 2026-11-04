@@ -6,7 +6,7 @@ extends Node3D
 
 const SURFACE := preload("res://src/player/sub_surface.gdshader")
 ## Frames rebuilt in full detail, with painted maps and wear.
-const DETAILED: Array[StringName] = [&"lantern", &"mako", &"bathysphere"]
+const DETAILED: Array[StringName] = [&"lantern", &"mako", &"bathysphere", &"whisper"]
 
 static var _plating: ImageTexture
 ## Finished models kept by frame after their first build: [slot, mesh,
@@ -22,6 +22,10 @@ var hull_material: ShaderMaterial
 var mounts: Dictionary = {}
 ## The hull's skin (for pieces that follow its curve), or null for a frame without one.
 var hull_skin: HullFairing
+## How painted equipment is finished to match the frame: matte, and darkened
+## by this much (a stealth coating), or as the livery is.
+var equipment_matte := false
+var equipment_darken := 0.0
 ## The lamp's track, built into the frame: a pivot at the bow that swings
 ## round to the aim, and the socket on it that the lamp head (equipment) fits
 ## into. Past the ends of the track the head tilts on in its socket; its
@@ -32,8 +36,6 @@ var lamp_tilt: Node3D
 var lamp_swivel: Node3D
 var lamp_lens: Node3D
 
-var _dark: StandardMaterial3D
-var _steel: StandardMaterial3D
 var _skin: SubSkins.Livery
 var _frame := &""
 ## Every painted material, so darkening and the glow's pulse reach them all.
@@ -84,12 +86,13 @@ func build(frame_id: StringName, skin: SubSkins.Livery = null) -> void:
 		&"bathysphere":
 			BathysphereBuild.build(self)
 		&"whisper":
-			_build_whisper()
-			SubEquipment.default_track(self, 3.8, 0.45)
+			WhisperBuild.build(self)
 		_:
 			LanternBuild.build(self)
 	_merge_static()
 	hull_skin = null
+	equipment_matte = frame_id == &"whisper"
+	equipment_darken = 0.68 if frame_id == &"whisper" else 0.0
 	match frame_id:
 		&"mako":
 			mounts = MakoBuild.mounts()
@@ -98,7 +101,8 @@ func build(frame_id: StringName, skin: SubSkins.Livery = null) -> void:
 			mounts = BathysphereBuild.mounts()
 			hull_skin = BathysphereBuild.fairing()
 		&"whisper":
-			mounts = SubEquipment.default_mounts(3.8, 0.45)
+			mounts = WhisperBuild.mounts()
+			hull_skin = WhisperBuild.fairing()
 		_:
 			mounts = LanternBuild.mounts()
 			hull_skin = LanternBuild.fairing()
@@ -303,14 +307,15 @@ func add_equipment_prop(parent: Node3D, at: Vector3, basis: Basis) -> Node3D:
 ## A material in the livery. With [param maps] it takes the frame's
 ## paint-shop maps (seams, grime, lettering) on its UVs; the first such
 ## material becomes [member hull_material].
-func paint_material(maps: bool) -> ShaderMaterial:
+func paint_material(maps: bool, matte := false) -> ShaderMaterial:
 	var mat := ShaderMaterial.new()
 	mat.shader = SURFACE
 	var plain := _skin.pattern == &"plates" and _skin.finish == &""
 	var detailed := DETAILED.has(_frame)
-	mat.set_shader_parameter(&"metallic", 0.12)
-	mat.set_shader_parameter(&"roughness", 0.4)
-	mat.set_shader_parameter(&"coat", 0.6)
+	# Matte: a stealth coating's dull, rubbery finish (a livery's finish still wins).
+	mat.set_shader_parameter(&"metallic", 0.02 if matte else 0.12)
+	mat.set_shader_parameter(&"roughness", 0.72 if matte else 0.4)
+	mat.set_shader_parameter(&"coat", 0.08 if matte else 0.6)
 	mat.set_shader_parameter(&"vertex_wear", detailed)
 	mat.set_shader_parameter(&"use_maps", maps)
 	if plain or (detailed and _skin.pattern == &"plates"):
@@ -509,16 +514,6 @@ func add_cockpit_light(at: Vector3, color := Color(0.55, 0.85, 1.0)) -> void:
 func _make_materials() -> void:
 	if not DETAILED.has(_frame):
 		hull_material = paint_material(false)
-	_dark = StandardMaterial3D.new()
-	_dark.albedo_color = Color(0.12, 0.13, 0.15)
-	_dark.metallic = 0.7
-	_dark.roughness = 0.35
-
-	_steel = StandardMaterial3D.new()
-	_steel.albedo_color = Color(0.55, 0.58, 0.6)
-	_steel.metallic = 0.85
-	_steel.roughness = 0.28
-
 	cockpit_material = StandardMaterial3D.new()
 	cockpit_material.albedo_color = Color(0.05, 0.2, 0.28)
 	cockpit_material.metallic = 0.2
@@ -558,36 +553,6 @@ static func _plating_texture() -> ImageTexture:
 
 # --- Frames ------------------------------------------------------------------------
 
-func _build_whisper() -> void:
-	# A flattened, faceted stealth drone: smoked glass and a glowing sensor
-	# strip instead of a canopy, seams of light, a faceted dorsal blade and a
-	# hexagonal pump-jet.
-	var hull := MeshKit.lathe(PackedVector2Array([
-			Vector2(0.0, 0.25), Vector2(0.2, 0.55), Vector2(0.6, 0.6), Vector2(0.9, 0.35), Vector2(1.0, 0.05)]),
-		3.8, 6, 10, 0.45, 1.25)
-	_part(hull, hull_material, Vector3(0, 0, 0), Vector3.ZERO)
-	var seam := MeshKit.emissive_material(Color(0.6, 0.4, 1.0), 3.0)
-	_part(_box(Vector3(3.0, 0.03, 1.35)), seam, Vector3(-0.1, 0.0, 0.0), Vector3.ZERO)
-	var glass := MeshKit.lathe(PackedVector2Array([Vector2(0, 0.02), Vector2(0.45, 0.22), Vector2(1, 0.02)]), 1.2, 6,
-			6, 0.5, 1.0)
-	_part(glass, _dark, Vector3(0.95, 0.2, 0), Vector3.ZERO)
-	_part(_box(Vector3(0.5, 0.03, 0.08)), cockpit_material, Vector3(1.2, 0.27, 0), Vector3(0, 0, -8))
-	var blade := MeshKit.fin(PackedVector2Array([Vector2(0.35, 0), Vector2(-0.55, 0), Vector2(-0.75, 0.5),
-		Vector2(-0.45, 0.42)]), 0.05)
-	_part(blade, hull_material, Vector3(-0.85, 0.24, 0), Vector3.ZERO)
-	var vane := MeshKit.fin(PackedVector2Array([Vector2(0.2, 0), Vector2(-0.5, 0), Vector2(-0.7, 0.55), Vector2(-0.3,
-			0.5)]), 0.04)
-	_part(vane, hull_material, Vector3(-1.2, 0.05, 0.6), Vector3(80, 0, 0))
-	_part(vane, hull_material, Vector3(-1.2, 0.05, -0.6), Vector3(-80, 0, 0))
-	_part(_cylinder(0.32, 0.36, 0.5, 6), _dark, Vector3(-1.95, 0, 0), Vector3(0, 0, -90))
-	var shroud := _ring(0.36, 0.05, _dark, Vector3(-2.2, 0, 0), Vector3(0, 0, 90))
-	(shroud.mesh as TorusMesh).rings = 6
-	_add_propeller(Vector3(-2.1, 0, 0), 6, 0.26)
-	strobe = _part(MeshKit.sphere(0.04), MeshKit.emissive_material(Color(0.6, 0.4, 1.0), 4.0), Vector3(-1.45, 0.72, 0),
-			Vector3.ZERO)
-	_part(_cylinder(0.1, 0.14, 0.25, 8), _dark, Vector3(1.4, -0.22, 0.0), Vector3(0, 0, -90))
-
-
 # --- Helpers ---------------------------------------------------------------------
 
 ## Bakes the static parts sharing a material into one mesh each (a frame is
@@ -624,48 +589,6 @@ func _merge_children(parent: Node3D) -> void:
 		parent.add_child(merged)
 
 
-## A cylinder strut from [param a] to [param b].
-func _seg(a: Vector3, b: Vector3, r: float, mat: Material) -> MeshInstance3D:
-	var y := (b - a).normalized()
-	var x := y.cross(Vector3.BACK)
-	if x.length_squared() < 0.01:
-		x = y.cross(Vector3.RIGHT)
-	x = x.normalized()
-	var mi := _part(_cylinder(r, r, a.distance_to(b), 8), mat, (a + b) * 0.5, Vector3.ZERO)
-	mi.basis = Basis(x, y, x.cross(y).normalized())
-	return mi
-
-
-## A ring (bezel, duct, collar) of [param radius] around its local Y axis.
-func _ring(radius: float, thickness: float, mat: Material, pos: Vector3, rot_deg: Vector3) -> MeshInstance3D:
-	var t := TorusMesh.new()
-	t.inner_radius = radius - thickness
-	t.outer_radius = radius + thickness
-	t.rings = 24
-	t.ring_segments = 8
-	return _part(t, mat, pos, rot_deg)
-
-
-func _add_propeller(at: Vector3, blades: int, length: float) -> void:
-	propeller.position = at
-	for i in blades:
-		var blade := MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		bm.size = Vector3(0.05, length, 0.12)
-		blade.mesh = bm
-		blade.material_override = _steel
-		blade.rotation = Vector3(TAU * i / blades, 0, 0)
-		blade.position = Vector3(0, length * 0.47, 0).rotated(Vector3.RIGHT, TAU * i / blades)
-		blade.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		propeller.add_child(blade)
-
-
-## Red port and green starboard navigation lights.
-func _running_lights(port: Vector3, starboard: Vector3) -> void:
-	_part(MeshKit.sphere(0.05), MeshKit.emissive_material(Color(1.0, 0.1, 0.1), 5.0), port, Vector3.ZERO)
-	_part(MeshKit.sphere(0.05), MeshKit.emissive_material(Color(0.1, 1.0, 0.3), 5.0), starboard, Vector3.ZERO)
-
-
 func _part(mesh: Mesh, mat: Material, pos: Vector3, rot_deg: Vector3) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
@@ -676,28 +599,3 @@ func _part(mesh: Mesh, mat: Material, pos: Vector3, rot_deg: Vector3) -> MeshIns
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 	return mi
-
-
-static func _cylinder(top: float, bottom: float, height: float, segments: int) -> CylinderMesh:
-	var c := CylinderMesh.new()
-	c.top_radius = top
-	c.bottom_radius = bottom
-	c.height = height
-	c.radial_segments = segments
-	c.rings = 1
-	return c
-
-
-static func _capsule(radius: float, height: float) -> CapsuleMesh:
-	var c := CapsuleMesh.new()
-	c.radius = radius
-	c.height = height
-	c.radial_segments = 16
-	c.rings = 4
-	return c
-
-
-static func _box(size: Vector3) -> BoxMesh:
-	var b := BoxMesh.new()
-	b.size = size
-	return b

@@ -82,6 +82,12 @@ DO NOT OPEN UNDER PRESSURE by its hatch: a cast sphere far older than
 Meridian, its paint flaking to rust, an observer's leather cap and goggles
 on the seat inside.
 
+The Whisper in the vents is a stealth survey drone with room for one pilot:
+a flat, chined hull tiled in anechoic coating, marked only in low-visibility
+grey (WHISPER, the designation SD-4, and a placard reading ANECHOIC COATING -
+DO NOT PAINT), a smoked visor where a canopy would be, and violet light
+along its chines. A few of its tiles are missing.
+
 ## The crew
 
 - **Commander R. Hale.** Station commander, practical and protective. Hale

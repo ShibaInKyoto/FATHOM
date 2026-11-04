@@ -13,12 +13,15 @@ var x0: float
 var x1: float
 var nu: int
 var nv: int
+## Straight between the stations (a faceted body) rather than eased.
+var straight := false
 var _grid := PackedVector3Array()
 var _theta_cache: Dictionary[Vector2i, float] = {}
 
 
-func _init(rows: Array, along := 72, around := 80) -> void:
+func _init(rows: Array, along := 72, around := 80, p_straight := false) -> void:
 	stations = rows
+	straight = p_straight
 	x0 = rows[0][0]
 	x1 = rows[rows.size() - 1][0]
 	nu = along
@@ -41,6 +44,9 @@ func station(x: float) -> PackedFloat32Array:
 	for c in range(1, 7):
 		var v0: float = stations[k][c]
 		var v1: float = stations[k + 1][c]
+		if straight:
+			out.append(lerpf(v0, v1, t))
+			continue
 		var m0 := _slope(k, c) * h
 		var m1 := _slope(k + 1, c) * h
 		var t2 := t * t
