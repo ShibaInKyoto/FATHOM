@@ -339,7 +339,7 @@ release.
 
 ## Credits
 
-Built in one week by Claude (Anthropic) for the AI vs AI Game Competition.
+FATHOM is made by Krypt Keepers.
 
 * Engine: [Godot Engine](https://godotengine.org) 4.5 (MIT). Its license and
   those of its bundled components are shown under **Credits** in the game and

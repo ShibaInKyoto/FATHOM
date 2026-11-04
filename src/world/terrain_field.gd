@@ -7,7 +7,7 @@ extends RefCounted
 ## meters between them. World position (x, y) maps to grid coordinates
 ## (x / cell, -y / cell), so the zone extends from y = 0 downwards.
 ##
-## The same field drives collision, AI steering, projectiles and rendering
+## The same field drives collision, creature steering, projectiles and rendering
 ## (it is uploaded to the GPU by [TerrainRenderer]).
 
 ## Value returned for any point outside the grid: solid rock.

@@ -1,6 +1,6 @@
 extends TestCase
 ## Simulates every biome headlessly with a scripted submarine so creature
-## AI, pickups and projectiles run through their code paths.
+## behaviour, pickups and projectiles run through their code paths.
 
 const STEPS := 900
 const DT := 1.0 / 60.0

@@ -141,7 +141,7 @@ has not noticed the sub can be **ambushed** (harpoon hits deal double), and
   and rendering: it is uploaded as a float texture and a vertex shader extrudes
   a subdivided plane into a relief heightfield. No physics engine is used for
   gameplay, which keeps it deterministic and cheap.
-* **Moving rock**: because collision, AI and rendering all read the same field,
+* **Moving rock**: because collision, creature steering and rendering all read the same field,
   the Hadal Trench can reshape itself mid-dive. A shift blends a small region
   of the field towards a capsule-shaped plug or cavity, re-uploads the texture
   ten times a second, and pushes anything caught out of the rock. A seal is
