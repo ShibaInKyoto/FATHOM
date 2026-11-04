@@ -108,11 +108,11 @@ def lantern_douse():
 
 def water_rise():
     # Dark water welling up: a low swell, a slow slosh, bubbles breaking loose.
-    d = 3.6
-    swell = lowpass(noise(d, "brown"), 400) * lerp_env([(0, 0), (1.5, 0.8), (3.0, 1.0), (3.6, 0)], d)
+    d = 4.8
+    swell = lowpass(noise(d, "brown"), 400) * lerp_env([(0, 0), (1.5, 0.8), (3.6, 1.0), (4.8, 0)], d)
     slosh = bandpass(noise(d, "pink"), 700, 1.2) * (0.5 + 0.5 * np.sin(t_axis(d) * 2.6)) * \
-        lerp_env([(0, 0), (1.0, 0.6), (3.6, 0)], d)
-    bubbles = _bubbles(d, 18, 200, 700) * 0.5
+        lerp_env([(0, 0), (1.0, 0.6), (4.8, 0)], d)
+    bubbles = _bubbles(d, 24, 200, 700) * 0.5
     return normalize(mix(swell, slosh * 0.5, bubbles), 0.45)
 
 

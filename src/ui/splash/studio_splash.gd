@@ -2,8 +2,8 @@ extends Control
 ## The studio splash at startup: the Krypt Keepers lantern alone, no name.
 ## Out of the black the lantern appears, lit. Dark water rises from below,
 ## laps at the wick and puts the flame out in a hiss of steam and a burst of
-## bubbles, then closes over the lantern. The sunken lantern fades into the
-## black, then the title screen. Any key, button or click skips it.
+## bubbles, then climbs over the lantern and past the top of the screen. The
+## sunken lantern fades into the black, then the title screen. Any key, button or click skips it.
 
 const LANTERN := preload("res://assets/branding/lantern.png")
 const FLAME := preload("res://assets/branding/lantern_flame.png")
@@ -22,14 +22,14 @@ const T_LIT := 1.2
 const T_BURN := 0.7
 const T_RISE := 1.7
 const T_LAP := 0.7
-const T_SINK := 1.8
+const T_SINK := 2.3
 const T_UNDER := 0.7
 const T_FADE := 1.1
 const T_HOLD := 0.3
 ## Water height (share of the screen from the top): below the screen at the
-## start, a sliver above the lantern's handle at the end.
+## start, past the top at the end, so the whole screen is under.
 const LEVEL_START := 1.04
-const LEVEL_END := 0.1
+const LEVEL_END := -0.04
 const WARM := Color(1.0, 0.82, 0.55)
 const BUBBLE := Color(0.72, 0.9, 1.0)
 
