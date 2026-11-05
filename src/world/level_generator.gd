@@ -25,6 +25,13 @@ const MIN_CORRIDOR := 2.2
 ## way down; a braid, where the way splits round a mass of rock and joins
 ## again; a shaft, dropping almost straight down past ledges.
 const STYLES: Array[StringName] = [&"classic", &"classic", &"hall", &"braid", &"shaft"]
+## A guardian's lair: its size, and how far its walls stay from the zone's
+## sides (the solid rim would otherwise cut a straight wall through it).
+const LAIR_ROOM := Vector2(25.0, 14.0)
+const LAIR_SIDE_GAP := 10.0
+## The part of a lair (as a share of its size) kept clear of every lump,
+## spire and pillar, so its guardian can move through all of it.
+const LAIR_CLEAR := 0.9
 
 var _rng := RandomNumberGenerator.new()
 var _w := 0
@@ -64,6 +71,15 @@ func _try_generate(biome: BiomeDef, zone_seed: int, zone: int) -> LevelLayout:
 	if zone > 0 and not BiomeLibrary.is_lair(zone):
 		layout.style = STYLES[_rng.randi() % STYLES.size()]
 	var waypoints := _plan_main_path(size, layout.style)
+	var lair := BiomeLibrary.is_lair(zone)
+	var exit_r := LAIR_ROOM if lair else Vector2(10.0, 7.0)
+	if lair:
+		# The lair stays clear of the zone's sides.
+		var last := waypoints.size() - 1
+		var lo := exit_r.x + LAIR_SIDE_GAP
+		var hi := size.x - exit_r.x - LAIR_SIDE_GAP
+		if hi > lo:
+			waypoints[last] = Vector2(clampf(waypoints[last].x, lo, hi), waypoints[last].y)
 	layout.start = waypoints[0]
 	var exit_room := waypoints[waypoints.size() - 1]
 
@@ -94,7 +110,6 @@ func _try_generate(biome: BiomeDef, zone_seed: int, zone: int) -> LevelLayout:
 			_carve_ledges(layout, waypoints, size)
 
 	# The exit: a room with a fissure dropping out of the bottom of the zone.
-	var exit_r := Vector2(25.0, 14.0) if BiomeLibrary.is_lair(zone) else Vector2(10.0, 7.0)
 	_carve_ellipse(exit_room, exit_r)
 	layout.chambers.append(LevelLayout.Chamber.new(exit_room, exit_r, &"exit"))
 	_carve_capsule(exit_room, Vector2(exit_room.x, -size.y - 4.0), 3.6, 2.8)
@@ -103,6 +118,11 @@ func _try_generate(biome: BiomeDef, zone_seed: int, zone: int) -> LevelLayout:
 	_carve_branches(layout, waypoints, size, biome)
 	_add_spires(layout, biome)
 	_erode(biome, PackedFloat32Array([layout.start.x, exit_room.x]))
+	if lair:
+		# Erosion, and the spires and pillars of rooms next door, can leave rock
+		# standing inside a lair, where its guardian would snag or even start
+		# buried: clear all but its rim again.
+		_carve_ellipse(exit_room, exit_r * LAIR_CLEAR)
 	_keep_route_open(layout, exit_room)
 	_build_field(layout)
 	_flood_reachable(layout)

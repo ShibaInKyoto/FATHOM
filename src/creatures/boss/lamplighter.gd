@@ -85,7 +85,7 @@ func setup() -> void:
 	salvage_drop = 60
 	glow_color = LURE_COLOR
 	ambushable = false
-	pos = lair_center + Vector2(lair_radius.x * 0.35, -lair_radius.y * 0.1)
+	pos = level.field.resolve_circle(lair_center + Vector2(lair_radius.x * 0.35, -lair_radius.y * 0.1), radius + 0.5)
 	facing = Vector2.LEFT
 	super.setup()
 	active_radius = 1000.0

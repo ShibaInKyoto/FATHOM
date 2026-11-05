@@ -52,7 +52,8 @@ func setup() -> void:
 	glow_color = Color(1.0, 0.5, 0.3)
 	hearing = 2.4
 	ambushable = false
-	pos = lair_center + Vector2(0.0, -lair_radius.y * 0.45)
+	# Low in the lair, never in its rock (or she would lie buried, unseen).
+	pos = level.field.resolve_circle(lair_center + Vector2(0.0, -lair_radius.y * 0.45), radius + 0.5)
 	super.setup()
 	active_radius = 1000.0
 	_orbit = level.rng.randf() * TAU
