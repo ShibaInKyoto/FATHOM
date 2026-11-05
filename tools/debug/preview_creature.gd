@@ -9,7 +9,10 @@ extends Node3D
 ## and saves every frame as <out>_NNN.png; "gameclip" films the "game" view
 ## the same way (a school is startled half way through).
 ## Usage: xvfb-run godot --path . res://tools/debug/preview_creature.tscn -- <out.png> <species>
-## [sheet|swim|game|gameclip|stroke|clip] [biome index] [backdrop]
+## [sheet|swim|game|gameclip|stroke|clip|wall|wallclip|wallgame] [biome index] [backdrop]
+## "wall", "wallclip" and "wallgame" set a wall dweller on a real floor of
+## the cave, rock and all: close, filmed (it strikes part way through), or
+## at the game camera's distance.
 ## "backdrop" hangs a lit rock-grey wall behind them, to judge see-through
 ## flesh.
 
@@ -23,6 +26,7 @@ var _crits: Array[Creature] = []
 var _turns: Array[float] = []
 var _mode := "sheet"
 var _school: Creature
+var _dweller: Creature
 var _filming := false
 
 
@@ -49,7 +53,7 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	var id := StringName(args[1]) if args.size() > 1 else &"stalker"
 	_mode = args[2] if args.size() > 2 else "sheet"
-	_filming = _mode == "clip" or _mode == "gameclip"
+	_filming = _mode == "clip" or _mode == "gameclip" or _mode == "wallclip"
 	if _mode == "gameclip":
 		_mode = "game"
 	var biome := int(args[3]) if args.size() > 3 else 2
@@ -64,6 +68,9 @@ func _ready() -> void:
 	_level.environment_rig.environment.fog_enabled = false
 	var origin := Vector2(layout.size().x * 0.5, -60)
 	var script: Script = LevelPopulator.SPECIES.get(id, null)
+	if _mode.begins_with("wall"):
+		_wall_scene(script, layout)
+		return
 	if id == &"shoal" and _mode != "game":
 		script = SchoolFish
 	if script == null:
@@ -79,7 +86,8 @@ func _ready() -> void:
 	for i in count:
 		var c: Creature = script.new()
 		c.pos = origin
-		c.set(&"wall_normal", Vector2.UP)
+		# A burrower shown side on, reaching out to the right.
+		c.set(&"wall_normal", Vector2.RIGHT if c is Gulper else Vector2.UP)
 		_level.add_entity(c)
 		c.lock_facing = true
 		span = maxf(c.body_span, maxf(c.reach * 2.0, c.radius * 2.0))
@@ -101,9 +109,18 @@ func _ready() -> void:
 			c._last_heading = c.facing.angle()
 			c.set(&"_swim_clock", i * 0.37)
 		c.sync_transform()
+		if c.has_method(&"_rebuild_body"):
+			# Laid out in the world where it started: lay it out again here.
+			c.call(&"_rebuild_body")
 	if _mode == "sheet":
 		_view(_crits[1], 1)
 		_view(_crits[2], 2)
+		# A burrower's body is laid out in the world, not on its model: keep
+		# only the first, or the others' bodies cross its picture.
+		for i in range(1, count):
+			var body: Variant = _crits[i].get(&"_body")
+			if body is Node3D:
+				(body as Node3D).visible = false
 	var key := DirectionalLight3D.new()
 	key.rotation_degrees = Vector3(-35, 30, 0)
 	key.light_energy = 1.5
@@ -146,6 +163,16 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	var dt := 1.0 / 30.0
 	_frames += 1
+	if _dweller:
+		if _mode == "wallclip" and _frames == 50 and _dweller is Gulper:
+			# Strike out across the cave.
+			var g := _dweller as Gulper
+			g.state = Gulper.State.STRIKE
+			g.set(&"_timer", Gulper.STRIKE_TIME)
+			g.set(&"_strike_from", g.pos)
+			g.set(&"_strike_to", g.pos + (g.wall_normal + Vector2(0.5, 0.0)).normalized() * 7.0)
+		_dweller.tick(dt)
+		_dweller.sync_transform()
 	if _school:
 		if _frames == 55:
 			(_school as Shoal).scare(_school.pos + Vector2(-4.0, -1.0))
@@ -199,3 +226,40 @@ func _view(c: Creature, view: int) -> void:
 		c.model.basis = Basis(Vector3.RIGHT, [0.0, 0.5, -0.7, 1.2][view]) * Basis(Vector3.BACK, PI * 0.5)
 	else:
 		c.model.rotation_degrees = [Vector3.ZERO, Vector3(0, -35, 0), Vector3(80, 0, 0), Vector3(90, 0, 0)][view]
+
+
+## A wall dweller on the open floor of a cave nearest its middle, the rock
+## shown, seen close or from the dive camera.
+func _wall_scene(script: Script, layout: LevelLayout) -> void:
+	_level.terrain.visible = true
+	_level.environment_rig.environment.ambient_light_energy = 1.0
+	var mid := layout.size() * 0.5
+	var best: LevelLayout.Anchor = null
+	for a in layout.anchors:
+		if a.normal.y < 0.8 or _level.field.sample(a.pos + a.normal * 6.0) < 4.0:
+			continue
+		if best == null or a.pos.distance_to(mid) < best.pos.distance_to(mid):
+			best = a
+	_dweller = script.new()
+	_dweller.pos = best.pos + best.normal * 0.6
+	_dweller.set(&"wall_normal", best.normal)
+	_level.add_entity(_dweller)
+	var key := DirectionalLight3D.new()
+	key.rotation_degrees = Vector3(-35, 30, 0)
+	key.light_energy = 1.2
+	add_child(key)
+	var cam := Camera3D.new()
+	cam.fov = 42.0
+	cam.far = 400
+	var lift: float = {"wall": 0.9, "wallclip": 3.5}.get(_mode, 4.0)
+	var distance: float = {"wall": 8.0, "wallclip": 13.0}.get(_mode, DiveCamera.BASE_DISTANCE)
+	var look := best.pos + best.normal * lift
+	cam.position = Vector3(look.x, look.y, distance)
+	add_child(cam)
+	cam.current = true
+	# The sub's lamp, off to one side.
+	var lamp := OmniLight3D.new()
+	lamp.position = Vector3(look.x - 3.0, look.y + 1.5, 3.0)
+	lamp.light_energy = 3.0
+	lamp.omni_range = 16.0
+	add_child(lamp)

@@ -2,13 +2,30 @@ class_name Gulper
 extends Creature
 ## Gulper eel living in a wall burrow. It feels vibrations: subs that pass
 ## fast, loud or with a lamp in its face get struck by a lunge from the rock.
-## The entity position is the head; the body is a tube back into the burrow.
+## The entity position is the head; the body runs back into the burrow.
+## A real gulper's head: a slender upper jaw with pin eyes at its tip over a
+## pair of long thin jaw bones holding a vast black pouch. Lurking, the
+## mouth hangs a little open, breathing, its lips aglow; striking, the jaws
+## drop wide and the pouch balloons, then snap shut. The burrow is a rocky
+## rim in the cave face, dark inside, prey bones strewn on it, and the body
+## arcs out of it, swaying.
 
 enum State { LURK, STRIKE, RETRACT, HIDE }
 
 const REACH := 9.5
 const STRIKE_TIME := 0.32
 const SENSE_RANGE := 10.0
+## Model space: the head, x from where the body joins it to the snout.
+## Stations as in [method BodyKit.body].
+const HEAD := [[-0.7, 0.13, 0.13, 0.12, 0.0], [-0.5, 0.17, 0.17, 0.1, 0.01], [-0.32, 0.18, 0.17, 0.06, 0.02],
+	[-0.1, 0.13, 0.12, 0.04, 0.04], [0.3, 0.08, 0.07, 0.03, 0.045], [0.7, 0.045, 0.045, 0.02, 0.045],
+	[0.92, 0.012, 0.016, 0.01, 0.04]]
+const HINGE := Vector3(-0.42, -0.05, 0.0)
+const JAW_LEN := 1.32
+## Sections down the jaw and points across each, for the pouch.
+const POUCH_ROWS := 20
+const POUCH_COLS := 12
+const ROCK_SHADER := preload("res://src/fx/shaders/burrow_rock.gdshader")
 
 var wall_normal := Vector2.UP
 var state := State.LURK
@@ -22,6 +39,13 @@ var _t := 0.0
 var _body_mesh := ArrayMesh.new()
 var _body: MeshInstance3D
 var _head: MeshInstance3D
+var _jaw: MeshInstance3D
+var _pouch_mesh := ArrayMesh.new()
+var _gape := 0.16
+## Where the burrow opens in the rock face (3D) and the way it points out;
+## none until the eel is found to sit against rock.
+var _mouth := Vector3.INF
+var _axis := Vector3.UP
 
 
 func setup() -> void:
@@ -38,29 +62,62 @@ func setup() -> void:
 	super.setup()
 	lock_facing = true
 	facing = wall_normal
+	_rebuild_body()
 
 
 func build_model() -> void:
 	var mat := species_material(func(m: ShaderMaterial) -> void:
-		m.set_shader_parameter(&"back_color", Color(0.12, 0.08, 0.1))
-		m.set_shader_parameter(&"belly_color", Color(0.3, 0.18, 0.2))
+		m.set_shader_parameter(&"back_color", Color(0.085, 0.08, 0.095))
+		m.set_shader_parameter(&"belly_color", Color(0.2, 0.1, 0.11))
 		m.set_shader_parameter(&"glow_color", Color(1.0, 0.3, 0.45))
 		m.set_shader_parameter(&"glow_strength", 2.5)
-		m.set_shader_parameter(&"glow_pulse", 0.5)
-		m.set_shader_parameter(&"roughness", 0.35)
+		m.set_shader_parameter(&"glow_pulse", 0.4)
+		# Velvet, not plastic: matte skin with a soft sheen where it turns
+		# away, finely pitted.
+		m.set_shader_parameter(&"roughness", 0.58)
+		m.set_shader_parameter(&"metallic", 0.0)
 		m.set_shader_parameter(&"rim_strength", 0.4)
+		m.set_shader_parameter(&"skin_pits", 0.006)
 		m.set_shader_parameter(&"body_length", 1.6)
-		m.set_shader_parameter(&"swim_amp", 0.0))
-	var head := MeshKit.lathe(PackedVector2Array([
-			Vector2(0.0, 0.32), Vector2(0.4, 0.5), Vector2(0.8, 0.55), Vector2(1.0, 0.25)]), 1.6, 12, 8, 0.9, 1.0,
-		func(t: float, a: float) -> float:
-			return 1.0 if (t > 0.78 and t < 0.84 and cos(a) > 0.45) else 0.0)
-	var fangs := []
-	for i in 4:
-		var z := -0.24 + i * 0.16
-		fangs.append([MeshKit.spike(0.05, 0.3, 0.3, 4), Transform3D(Basis(Vector3.BACK, -PI * 0.5), Vector3(0.7, 0.3, z))])
-	_head = add_visual(MeshKit.merge([[head], [MeshKit.merge(fangs)]]), mat)
-	add_eyes(Vector3(0.55, 0.32, 0.38), 0.08, Color(1.0, 0.4, 0.5), 3.0)
+		m.set_shader_parameter(&"swim_amp", 0.0)
+		m.set_shader_parameter(&"flutter_amp", 0.03)
+		m.set_shader_parameter(&"flutter_freq", 6.0)
+		m.set_shader_parameter(&"flutter_wave", 4.0)
+		m.set_shader_parameter(&"tooth_color", Color(0.82, 0.78, 0.72)))
+	var parts := [[BodyKit.body(HEAD, 30, 16)]]
+	# Glowing lips along the upper jaw, and needle teeth inside them.
+	for sgn: float in [1.0, -1.0]:
+		var lip := PackedVector3Array()
+		var radii := PackedFloat32Array()
+		for i in 12:
+			var x := lerpf(HINGE.x + 0.08, 0.9, i / 11.0)
+			lip.append(_upper_lip(x, sgn))
+			radii.append(0.009)
+		var tube := ArrayMesh.new()
+		MeshKit.tube(tube, lip, radii, 5)
+		parts.append([MeshKit.painted(tube, func(_v: Vector3) -> Color: return Color(0.0, 0.5, 0.0))])
+		for t: Array in BodyKit.teeth_row(_upper_lip(-0.2, sgn) - Vector3(0.0, 0.0, 0.025 * sgn),
+				_upper_lip(0.84, sgn) - Vector3(0.0, 0.0, 0.01 * sgn), 14, 0.06, Vector3(0.0, -1.0, -0.15 * sgn),
+				3 if sgn > 0.0 else 4, false):
+			parts.append([BodyKit.enamel(t[0]), t[1]])
+	_head = add_visual(BodyKit.merged(parts), mat)
+	# The lower jaw: two long, thin, blade-like jaw bones under the skin,
+	# needle teeth along them.
+	var jaw_parts := []
+	for sgn: float in [1.0, -1.0]:
+		jaw_parts.append([_jaw_blade(sgn)])
+		for t: Array in BodyKit.teeth_row(_mandible(0.12, sgn) + Vector3(0.0, 0.02, -0.005 * sgn),
+				_mandible(0.95, sgn) + Vector3(0.0, 0.012, 0.0), 13, 0.055, Vector3(0.0, 1.0, -0.15 * sgn),
+				5 if sgn > 0.0 else 6, false):
+			jaw_parts.append([BodyKit.enamel(t[0]), t[1]])
+	_jaw = add_visual(BodyKit.merged(jaw_parts), mat, Transform3D(Basis(), HINGE))
+	var pouch := MeshInstance3D.new()
+	pouch.mesh = _pouch_mesh
+	pouch.material_override = mat
+	pouch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	model.add_child(pouch)
+	visuals.append(pouch)
+	add_eyes(Vector3(0.74, 0.065, 0.042), 0.026, Color(0.6, 0.22, 0.28), 0.45, Eye.FISH)
 	# The body is rebuilt in world space every frame, so it lives outside `model`.
 	_body = MeshInstance3D.new()
 	_body.mesh = _body_mesh
@@ -69,6 +126,53 @@ func build_model() -> void:
 	_body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_body)
 	visuals.append(_body)
+	_rebuild_pouch()
+
+
+## The upper jaw's lip on side [param sgn] at model x [param x].
+static func _upper_lip(x: float, sgn: float) -> Vector3:
+	return Vector3(x, BodyKit.at(HEAD, x, 4) - BodyKit.at(HEAD, x, 3) * 0.85, BodyKit.at(HEAD, x, 1) * 0.86 * sgn)
+
+
+## One side of the lower jaw (jaw space): a flattened blade along the jaw
+## bone, deep at the hinge and tapering to the chin, pale beneath.
+static func _jaw_blade(sgn: float) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rows := 18
+	var sides := 10
+	for i in rows + 1:
+		var u := i / float(rows)
+		var p := _mandible(u, sgn)
+		var ahead := _mandible(minf(u + 0.02, 1.0), sgn) - _mandible(maxf(u - 0.02, 0.0), sgn)
+		var tangent := ahead.normalized()
+		var side := tangent.cross(Vector3.UP).normalized()
+		var up := side.cross(tangent)
+		var w := lerpf(0.02, 0.006, u)
+		var h := lerpf(0.055, 0.012, u)
+		for j in sides + 1:
+			var a := TAU * j / sides
+			st.set_color(Color(0.0, smoothstep(0.2, -0.6, sin(a)), 0.0))
+			st.set_uv(Vector2(p.x, 0.0))
+			st.add_vertex(p + side * cos(a) * w + up * sin(a) * h)
+	var row := sides + 1
+	for i in rows:
+		for j in sides:
+			var a := i * row + j
+			st.add_index(a)
+			st.add_index(a + 1)
+			st.add_index(a + row)
+			st.add_index(a + 1)
+			st.add_index(a + row + 1)
+			st.add_index(a + row)
+	st.generate_normals()
+	return st.commit()
+
+
+## A lower jaw bone on side [param sgn], [param u] of the way from the hinge
+## to the chin (jaw space).
+static func _mandible(u: float, sgn: float) -> Vector3:
+	return Vector3(u * JAW_LEN, 0.06 * u * u, lerpf(0.16, 0.015, pow(u, 1.1)) * sgn)
 
 
 func think() -> void:
@@ -112,6 +216,13 @@ func behave(delta: float) -> void:
 				state = State.LURK
 				_cooldown = 2.0
 	vel = Vector2.ZERO
+	# The mouth hangs open, breathing, the dark of the pouch showing;
+	# striking, it drops wide and snaps shut at the end of the lunge.
+	var want := 0.16 + 0.05 * sin(_t * 1.3)
+	if state == State.STRIKE:
+		var f := 1.0 - _timer / STRIKE_TIME
+		want = 1.0 * sin(minf(f / 0.75, 1.0) * PI * 0.5) if f < 0.8 else 0.1
+	_gape = lerpf(_gape, want, 1.0 - exp(-(22.0 if want < _gape else 14.0) * delta))
 	var to_head := pos - _burrow
 	facing = to_head.normalized() if to_head.length() > 0.1 else wall_normal
 
@@ -126,20 +237,286 @@ func move_and_collide_field(_delta: float, _bounce := 0.1) -> Vector2:
 	return Vector2.ZERO
 
 
+func _update_visuals(delta: float) -> void:
+	super._update_visuals(delta)
+	_jaw.rotation.z = -_gape
+	_rebuild_pouch()
+
+
+## The pouch: loose skin slung between the two jaw bones, a bag under the
+## throat even when shut, ballooning as the jaw drops; black outside, the
+## inside dark red with a faint glow deep in it.
+func _rebuild_pouch() -> void:
+	var rot := Basis(Vector3.BACK, -_gape)
+	var sag := 0.1 + 0.4 * clampf(_gape / 0.9, 0.0, 1.0)
+	var cols := POUCH_COLS + 1
+	var grid := PackedVector3Array()
+	for k in POUCH_ROWS + 1:
+		var u := k / float(POUCH_ROWS)
+		var left := _mandible(u, 1.0)
+		var right := _mandible(u, -1.0)
+		# Deepest a little behind the middle of the jaw, gathered to the
+		# hinge and the chin.
+		var depth := sag * pow(sin(PI * pow(u, 0.8)), 0.9)
+		for j in cols:
+			var f := j / float(POUCH_COLS)
+			var p := left.lerp(right, f)
+			# Inset a touch under the bones so its edge tucks into them.
+			p.y -= 0.02 + depth * pow(sin(PI * f), 0.75)
+			p.z *= 1.0 + 0.25 * depth * sin(PI * f)
+			grid.append(HINGE + rot * p)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for side in 2:
+		# Each face of the skin keeps its own normals (the two share points).
+		st.set_smooth_group(side)
+		for k in POUCH_ROWS + 1:
+			for j in cols:
+				var deep := smoothstep(0.1, 0.4, minf(j, POUCH_COLS - j) / float(POUCH_COLS))
+				st.set_color(Color(0.0, 0.55, 0.0) if side == 0 else Color(0.07 * deep, 1.0, 0.0))
+				st.set_uv(Vector2(grid[k * cols + j].x, 0.0))
+				st.add_vertex(grid[k * cols + j])
+		var base := side * (POUCH_ROWS + 1) * cols
+		for k in POUCH_ROWS:
+			for j in cols - 1:
+				var a := base + k * cols + j
+				if side == 0:
+					st.add_index(a)
+					st.add_index(a + cols)
+					st.add_index(a + 1)
+					st.add_index(a + 1)
+					st.add_index(a + cols)
+					st.add_index(a + cols + 1)
+				else:
+					st.add_index(a)
+					st.add_index(a + 1)
+					st.add_index(a + cols)
+					st.add_index(a + 1)
+					st.add_index(a + cols + 1)
+					st.add_index(a + cols)
+	st.generate_normals()
+	_pouch_mesh.clear_surfaces()
+	st.commit(_pouch_mesh)
+
+
 func _rebuild_body() -> void:
+	if _mouth == Vector3.INF and level and level.field.sample(_rest) < 2.0:
+		_dig_burrow()
+	var head := pos - facing * 0.3
+	var joint := Vector3(head.x, head.y, 0.0)
+	var face := Vector3(facing.x, facing.y, 0.0)
+	var start: Vector3
+	var out: Vector3
+	if _mouth != Vector3.INF:
+		start = _mouth - _axis * 2.2
+		out = _axis
+	else:
+		# No rock to burrow in (a specimen shown in open water): it trails away.
+		start = joint - Vector3(wall_normal.x, wall_normal.y, 0.0) * 3.0
+		out = Vector3(wall_normal.x, wall_normal.y, 0.0)
+	# Straight up the burrow and out of its mouth, then arcing over to the
+	# head.
+	var lip := start + out * 2.45
 	var pts := PackedVector3Array()
-	var radii := PackedFloat32Array()
-	var tail := _burrow - wall_normal * 2.0
-	var head := pos - facing * 0.6
-	var side := Vector2(-facing.y, facing.x)
-	var n := 12
+	for i in 5:
+		pts.append(start.lerp(lip, i / 5.0))
+	var reach := lip.distance_to(joint)
+	var c1 := lip + out * reach * 0.4
+	var c2 := joint - face * reach * 0.35
+	var n := 30
+	for i in 25:
+		var t := float(i) / 24.0
+		var a := 1.0 - t
+		pts.append(lip * a * a * a + c1 * 3.0 * a * a * t + c2 * 3.0 * a * t * t + joint * t * t * t)
+	# A slow sway runs up the body from the burrow: little when only a short
+	# neck is out, less again when stretched out in a strike.
+	var stretch := clampf(reach / 5.0, 0.0, 1.0)
+	var sway := 0.22 * clampf((reach - 0.8) / 2.5, 0.12, 1.0) * (1.0 - stretch * 0.7)
+	for i in range(6, n - 1):
+		var t := float(i - 5) / (n - 6)
+		var tangent := (pts[i + 1] - pts[i - 1]).normalized()
+		var side := tangent.cross(Vector3.BACK).normalized()
+		pts[i] += side * sin(t * TAU * 1.1 - _t * 2.6) * sway * sin(t * PI)
+	# Its back faces the same way as the head's.
+	var up := model.global_basis.y if is_inside_tree() else Vector3.UP
+	_body_tube(pts, up)
+
+
+## Builds the body along [param pts] (burrow to head), its back turned
+## towards [param up] at the head: dark above, reddish below, and a low fin
+## along the back with a faint glowing seam at its root.
+func _body_tube(pts: PackedVector3Array, up: Vector3) -> void:
+	var n := pts.size()
+	var sides := 12
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	var indices := PackedInt32Array()
+	# Each section's "back" is carried down the body from the head's, turned
+	# only as much as the body bends, so it never flips over in a tight turn.
+	var tangents := PackedVector3Array()
+	tangents.resize(n)
+	for i in n:
+		tangents[i] = (pts[mini(i + 1, n - 1)] - pts[maxi(i - 1, 0)]).normalized()
+	var backs := PackedVector3Array()
+	backs.resize(n)
+	var carried := up
+	for i in range(n - 1, -1, -1):
+		var b := carried - tangents[i] * carried.dot(tangents[i])
+		carried = b.normalized() if b.length_squared() > 1e-6 else carried
+		backs[i] = carried
+	var fin := PackedVector3Array()
+	var fin_tip := PackedVector3Array()
 	for i in n:
 		var t := float(i) / (n - 1)
-		var p := tail.lerp(head, t)
-		p += side * sin(t * PI * 2.0 + _t * 4.0) * 0.35 * sin(t * PI)
-		pts.append(Vector3(p.x, p.y, 0.0))
-		radii.append(lerpf(0.2, 0.42, t))
-	MeshKit.tube(_body_mesh, pts, radii, 8, 1.0)
+		var tangent := tangents[i]
+		var back := backs[i]
+		var side := tangent.cross(back)
+		var r := lerpf(0.11, 0.13, smoothstep(0.0, 1.0, t))
+		for j in sides + 1:
+			var a := TAU * j / sides
+			var dir := back * cos(a) + side * sin(a)
+			verts.append(pts[i] + dir * r)
+			colors.append(Color(0.0, smoothstep(0.1, -0.7, cos(a)), 0.0))
+		# The fin runs from the burrow's mouth (the sixth point) to the nape.
+		var h := 0.09 * sin(PI * clampf((i - 6.0) / (n - 9.0), 0.0, 1.0))
+		fin.append(pts[i] + back * (r * 0.9))
+		fin_tip.append(pts[i] + back * (r + h))
+	var row := sides + 1
+	for i in n - 1:
+		for j in sides:
+			var a := i * row + j
+			indices.append_array([a, a + 1, a + row, a + 1, a + row + 1, a + row])
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in verts.size():
+		st.set_color(colors[i])
+		st.set_uv(Vector2(verts[i].x, 0.0))
+		st.add_vertex(verts[i])
+	for i in indices:
+		st.add_index(i)
+	# The fin, both faces, each with its own normals.
+	var base := verts.size()
+	for side in 2:
+		st.set_smooth_group(side + 1)
+		for i in n:
+			st.set_color(Color(0.06 * smoothstep(0.2, 0.5, float(i) / (n - 1)), 0.1, 0.0))
+			st.add_vertex(fin[i])
+			st.set_color(Color(0.0, 0.1, 1.0))
+			st.add_vertex(fin_tip[i])
+		var b := base + side * n * 2
+		for i in n - 1:
+			var a := b + i * 2
+			if side == 0:
+				st.add_index(a)
+				st.add_index(a + 1)
+				st.add_index(a + 2)
+				st.add_index(a + 1)
+				st.add_index(a + 3)
+				st.add_index(a + 2)
+			else:
+				st.add_index(a)
+				st.add_index(a + 2)
+				st.add_index(a + 1)
+				st.add_index(a + 1)
+				st.add_index(a + 2)
+				st.add_index(a + 3)
+	st.generate_normals()
+	_body_mesh.clear_surfaces()
+	st.commit(_body_mesh)
+
+
+## Finds where the burrow opens in the rock face behind the eel and builds
+## its rim there: the cave rock rises towards the camera below the open
+## water (see terrain.gdshader), so the hole opens a little way into that
+## face, tilted to look out at the viewer.
+func _dig_burrow() -> void:
+	var surface := _rest - wall_normal * level.field.sample(_rest)
+	var into := surface - wall_normal * 0.2
+	# The relief there, as the terrain shader lifts it (detail noise aside).
+	_mouth = Vector3(into.x, into.y, TerrainRenderer.ROCK_HEIGHT * tanh(0.2 / 2.0))
+	_axis = Vector3(wall_normal.x * 1.6, wall_normal.y * 1.6, 1.0).normalized()
+	var rim := MeshInstance3D.new()
+	# Seeded by where it is: drawing from the level's random stream would
+	# change the rest of the world a seed grows.
+	var seed_value := int(floorf(_mouth.x * 7.0)) * 92821 + int(floorf(_mouth.y * 7.0))
+	rim.mesh = _burrow_mesh(seed_value)
+	var rock := ShaderMaterial.new()
+	rock.shader = ROCK_SHADER
+	rock.set_shader_parameter(&"rock_albedo", TerrainRenderer.ROCK_ALBEDO)
+	rock.set_shader_parameter(&"rock_rough", TerrainRenderer.ROCK_ROUGH)
+	rock.set_shader_parameter(&"rock_tint", level.biome.rock_tint)
+	rock.set_shader_parameter(&"throat_glow", Color(0.07, 0.012, 0.025))
+	rim.material_override = rock
+	rim.top_level = true
+	rim.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(rim)
+	var basis := Basis(Quaternion(Vector3.UP, _axis))
+	rim.global_transform = Transform3D(basis, _mouth)
+	var bones := MeshInstance3D.new()
+	bones.mesh = _prey_bones(seed_value)
+	var white := StandardMaterial3D.new()
+	white.albedo_color = Color(0.5, 0.47, 0.42)
+	white.roughness = 0.75
+	bones.material_override = white
+	bones.top_level = true
+	bones.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(bones)
+	bones.global_transform = rim.global_transform
+
+
+## The burrow's rim, built along +Y (out of the hole): a rough ring of rock
+## round a dark throat, its outer slope buried in the cave face.
+static func _burrow_mesh(seed_value: int) -> ArrayMesh:
+	var noise := FastNoiseLite.new()
+	noise.seed = seed_value
+	noise.frequency = 1.6
+	# (radius, height) from the throat's floor (a dark plug, faintly lit by
+	# the eel's glow) up its walls, over the lip and down the outer slope
+	# into the rock.
+	var profile := [Vector2(0.0, -0.55), Vector2(0.2, -0.5), Vector2(0.32, -0.42), Vector2(0.34, -0.15),
+		Vector2(0.38, 0.06), Vector2(0.5, 0.17), Vector2(0.66, 0.15), Vector2(0.85, 0.0), Vector2(1.1, -0.4)]
+	var shade := [0.0, 0.0, 0.05, 0.25, 0.7, 1.0, 1.0, 1.0, 1.0]
+	var sides := 28
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in profile.size():
+		var pr: Vector2 = profile[i]
+		for j in sides + 1:
+			var a := TAU * j / sides
+			var bump := noise.get_noise_2d(cos(a) * 2.0, sin(a) * 2.0 + i * 0.7) * 0.18 * (1.0 if i > 1 else 0.3)
+			var r := pr.x * (1.0 + bump)
+			var sh := float(shade[i])
+			st.set_color(Color(sh, sh, sh, minf(sh * 4.0, 1.0)))
+			st.add_vertex(Vector3(cos(a) * r, pr.y + bump * 0.5, sin(a) * r))
+	var row := sides + 1
+	for i in profile.size() - 1:
+		for j in sides:
+			var a := i * row + j
+			st.add_index(a)
+			st.add_index(a + row)
+			st.add_index(a + 1)
+			st.add_index(a + 1)
+			st.add_index(a + row)
+			st.add_index(a + row + 1)
+	st.generate_normals()
+	return st.commit()
+
+
+## A few pale bones of the eel's last meals, strewn on its rim.
+static func _prey_bones(seed_value: int) -> ArrayMesh:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value
+	var bones := []
+	for k in 4:
+		var a := rng.randf() * TAU
+		var r := rng.randf_range(0.55, 0.8)
+		var bone := ArrayMesh.new()
+		var l := rng.randf_range(0.05, 0.1)
+		MeshKit.tube(bone, PackedVector3Array([Vector3(-l, 0, 0), Vector3(0, 0.01, 0), Vector3(l, 0, 0)]),
+			PackedFloat32Array([0.011, 0.006, 0.011]), 5)
+		bones.append([bone, Transform3D(Basis(Vector3.UP, rng.randf() * TAU),
+			Vector3(cos(a) * r, 0.17 - maxf(r - 0.6, 0.0) * 0.8, sin(a) * r))])
+	return MeshKit.merge(bones)
 
 
 func on_touch_player(sub: Submarine) -> void:

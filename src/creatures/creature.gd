@@ -71,6 +71,7 @@ var _touch_cooldown := 0.0
 var _phase := 0.0
 var _turn_speed := 6.0
 var _roll := 0.0
+var _roll_target := 0.0
 ## Swim stroke so far (see creature.gdshader).
 var _swim_clock := 0.0
 ## How hard it swims: a drifting creature barely beats its tail, a cruising
@@ -197,8 +198,13 @@ func _update_visuals(delta: float) -> void:
 		facing = facing.slerp(vel.normalized(), 1.0 - exp(-_turn_speed * delta)).normalized()
 	# Roll around the body axis first so the dorsal side stays up when
 	# heading left, then turn to the heading.
-	var target_roll := PI if facing.x < 0.0 else 0.0
-	_roll = lerp_angle(_roll, target_roll, 1.0 - exp(-5.0 * delta))
+	# Heading up or down, it keeps the side it was on rather than flipping
+	# back and forth over the vertical.
+	if facing.x < -0.2:
+		_roll_target = PI
+	elif facing.x > 0.2:
+		_roll_target = 0.0
+	_roll = lerp_angle(_roll, _roll_target, 1.0 - exp(-5.0 * delta))
 	model.basis = Basis(Vector3.BACK, facing.angle()) * Basis(Vector3.RIGHT, _roll)
 	_update_bend(delta)
 	_update_instance_params()
