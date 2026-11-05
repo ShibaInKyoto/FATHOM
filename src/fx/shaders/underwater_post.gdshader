@@ -2,7 +2,10 @@
 // chromatic fringing towards the edges, a soft vignette and film grain.
 shader_type canvas_item;
 
-uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap, repeat_disable;
+// Plain linear filtering: the pass only ever reads the full-size image, and
+// asking for mipmaps would make the renderer build a whole mip chain of the
+// screen every frame (costly at 4K) for nothing.
+uniform sampler2D screen_tex : hint_screen_texture, filter_linear, repeat_disable;
 uniform sampler2D noise_tex : repeat_enable, filter_linear;
 uniform float wobble = 0.0012;
 uniform float aberration = 0.0022;

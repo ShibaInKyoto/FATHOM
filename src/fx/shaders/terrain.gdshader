@@ -94,29 +94,48 @@ vec3 unpack_normal(vec4 c) {
 	return c.xyz * 2.0 - 1.0;
 }
 
+// Below this a projection's share of the triplanar blend is invisible, so its
+// three texture reads are skipped (most of the screen faces the camera and
+// needs only one projection). The reads use explicit gradients, taken before
+// the branches, so mip selection stays exact inside them.
+const float PLANE_SKIP = 0.004;
+
 void fragment() {
 	vec3 n = normalize(world_normal);
 	vec3 blend = pow(abs(n), vec3(4.0));
 	blend /= dot(blend, vec3(1.0));
+	blend = blend * step(vec3(PLANE_SKIP), blend);
+	blend /= dot(blend, vec3(1.0));
 	vec2 uv_x = world_pos.zy * tex_scale;
 	vec2 uv_y = world_pos.xz * tex_scale;
 	vec2 uv_z = world_pos.xy * tex_scale;
+	vec2 dx_x = dFdx(uv_x), dy_x = dFdy(uv_x);
+	vec2 dx_y = dFdx(uv_y), dy_y = dFdy(uv_y);
+	vec2 dx_z = dFdx(uv_z), dy_z = dFdy(uv_z);
 
-	vec3 alb = texture(rock_albedo, uv_x).rgb * blend.x
-		+ texture(rock_albedo, uv_y).rgb * blend.y
-		+ texture(rock_albedo, uv_z).rgb * blend.z;
-	float rough = texture(rock_rough, uv_x).r * blend.x
-		+ texture(rock_rough, uv_y).r * blend.y
-		+ texture(rock_rough, uv_z).r * blend.z;
-
-	// Triplanar normal mapping (UDN blend).
-	vec3 tnx = unpack_normal(texture(rock_normal, uv_x));
-	vec3 tny = unpack_normal(texture(rock_normal, uv_y));
-	vec3 tnz = unpack_normal(texture(rock_normal, uv_z));
-	tnx = vec3(tnx.xy + n.zy, n.x);
-	tny = vec3(tny.xy + n.xz, n.y);
-	tnz = vec3(tnz.xy + n.xy, n.z);
-	vec3 rock_n = normalize(tnx.zyx * blend.x + tny.xzy * blend.y + tnz.xyz * blend.z);
+	// Triplanar albedo, roughness and normal mapping (UDN blend).
+	vec3 alb = vec3(0.0);
+	float rough = 0.0;
+	vec3 rock_n = vec3(0.0);
+	if (blend.x > 0.0) {
+		alb += textureGrad(rock_albedo, uv_x, dx_x, dy_x).rgb * blend.x;
+		rough += textureGrad(rock_rough, uv_x, dx_x, dy_x).r * blend.x;
+		vec3 t = unpack_normal(textureGrad(rock_normal, uv_x, dx_x, dy_x));
+		rock_n += vec3(t.xy + n.zy, n.x).zyx * blend.x;
+	}
+	if (blend.y > 0.0) {
+		alb += textureGrad(rock_albedo, uv_y, dx_y, dy_y).rgb * blend.y;
+		rough += textureGrad(rock_rough, uv_y, dx_y, dy_y).r * blend.y;
+		vec3 t = unpack_normal(textureGrad(rock_normal, uv_y, dx_y, dy_y));
+		rock_n += vec3(t.xy + n.xz, n.y).xzy * blend.y;
+	}
+	if (blend.z > 0.0) {
+		alb += textureGrad(rock_albedo, uv_z, dx_z, dy_z).rgb * blend.z;
+		rough += textureGrad(rock_rough, uv_z, dx_z, dy_z).r * blend.z;
+		vec3 t = unpack_normal(textureGrad(rock_normal, uv_z, dx_z, dy_z));
+		rock_n += vec3(t.xy + n.xy, n.z) * blend.z;
+	}
+	rock_n = normalize(rock_n);
 
 	// Desaturate the photo texture and tint it per biome; the back wall uses
 	// the deep tint so the playable layer reads clearly in front of it.
@@ -129,12 +148,15 @@ void fragment() {
 	// Sediment settles on upward-facing slopes.
 	float noise_a = texture(detail_noise, world_pos.xy * 0.05).r;
 	float sediment = smoothstep(0.4, 0.75, n.y + (noise_a - 0.5) * 0.6) * smoothstep(-back_depth, -1.0, world_pos.z);
-	vec3 sand_tex = texture(sand_albedo, uv_y * 1.6).rgb;
-	vec3 sand = mix(vec3(dot(sand_tex, vec3(0.333))), sand_tex, 0.3) * sediment_tint * 1.2;
-	vec3 sand_n = unpack_normal(texture(sand_normal, uv_y * 1.6));
-	sand_n = normalize(vec3(sand_n.xy + n.xz, n.y).xzy);
-	color = mix(color, sand, sediment);
-	vec3 final_n = normalize(mix(rock_n, sand_n, sediment));
+	vec3 final_n = rock_n;
+	if (sediment > 0.0) {
+		vec3 sand_tex = textureGrad(sand_albedo, uv_y * 1.6, dx_y * 1.6, dy_y * 1.6).rgb;
+		vec3 sand = mix(vec3(dot(sand_tex, vec3(0.333))), sand_tex, 0.3) * sediment_tint * 1.2;
+		vec3 sand_n = unpack_normal(textureGrad(sand_normal, uv_y * 1.6, dx_y * 1.6, dy_y * 1.6));
+		sand_n = normalize(vec3(sand_n.xy + n.xz, n.y).xzy);
+		color = mix(color, sand, sediment);
+		final_n = normalize(mix(rock_n, sand_n, sediment));
+	}
 
 	// Cavity darkening on the back wall.
 	float cavity = mix(0.45, 1.0, smoothstep(-back_depth - 2.0, 0.5, world_pos.z));

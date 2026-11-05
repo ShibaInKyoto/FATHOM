@@ -12,6 +12,15 @@ const PATH := "user://settings.cfg"
 ## A binding with this device answers every pad, keyboard and mouse.
 const ALL_DEVICES := -1
 const QUALITY_NAMES: PackedStringArray = ["Low", "Medium", "High", "Ultra"]
+## Per preset: the share of the screen's resolution the 3D view renders at,
+## and the most rows of pixels it renders. Up to that height a screen gets
+## the preset's own scale (so a 1080p or 1440p screen looks as it always
+## has); above it, as on a 4K screen, the 3D view renders at that height and
+## FSR sharpens it up to the screen, with the menus and HUD still drawn at
+## full resolution. A 4K screen has four times the pixels of a 1080p one, and
+## the lighting, fog and post effects cost per pixel.
+const RENDER_SCALE: Array[float] = [0.67, 0.85, 1.0, 1.0]
+const RENDER_HEIGHT: Array[int] = [900, 1080, 1440, 1800]
 ## Actions whose primary keyboard or mouse binding the player can change.
 ## Gamepad bindings, the arrow keys and pause stay fixed.
 const REBINDABLE: Array[StringName] = [&"move_up", &"move_left", &"move_down", &"move_right", &"fire", &"tool",
@@ -46,6 +55,7 @@ func _ready() -> void:
 	_register_inputs()
 	load_settings()
 	apply()
+	get_tree().root.size_changed.connect(_apply_render_scale)
 
 
 func _input(event: InputEvent) -> void:
@@ -106,27 +116,32 @@ func apply() -> void:
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if vsync else DisplayServer.VSYNC_DISABLED)
 	var vp := get_viewport()
 	match quality:
-		Quality.LOW:
+		Quality.LOW, Quality.MEDIUM:
 			vp.msaa_3d = Viewport.MSAA_DISABLED
 			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
-			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR
-			vp.scaling_3d_scale = 0.67
-		Quality.MEDIUM:
-			vp.msaa_3d = Viewport.MSAA_DISABLED
-			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
-			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR
-			vp.scaling_3d_scale = 0.85
 		Quality.HIGH:
 			vp.msaa_3d = Viewport.MSAA_2X
 			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
-			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
-			vp.scaling_3d_scale = 1.0
 		Quality.ULTRA:
 			vp.msaa_3d = Viewport.MSAA_4X
 			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
-			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
-			vp.scaling_3d_scale = 1.0
+	_apply_render_scale()
 	changed.emit()
+
+
+## The 3D view's resolution for the preset and the window's size (see
+## [constant RENDER_HEIGHT]); upscaled with FSR when below the screen's.
+func _apply_render_scale() -> void:
+	var vp := get_viewport()
+	var scale := render_scale(quality, vp.size.y)
+	vp.scaling_3d_scale = scale
+	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR if scale < 0.999 else Viewport.SCALING_3D_MODE_BILINEAR
+
+
+## The share of a screen [param rows] pixels tall that preset [param q]
+## renders the 3D view at.
+static func render_scale(q: Quality, rows: int) -> float:
+	return minf(RENDER_SCALE[q], RENDER_HEIGHT[q] / maxf(float(rows), 1.0))
 
 
 ## Damage multiplier applied to the player's submarine.
