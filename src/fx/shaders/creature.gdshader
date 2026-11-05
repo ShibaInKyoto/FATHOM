@@ -41,6 +41,11 @@ instance uniform float bend = 0.0;
 instance uniform vec3 body_offset = vec3(0.0);
 // The point of the spine that stays put as the body bends.
 uniform float bend_pivot = 0.0;
+// Models built with BodyKit carry, in UV.x, the point of the spine each
+// vertex hangs from: a fin, spine or tooth turns and sways as one rigid
+// piece with the body where it is attached, rather than being bent along
+// its own length.
+uniform bool anchored = false;
 // Fin membranes (vertex color B) ripple at their own pace.
 uniform float flutter_amp = 0.0;
 uniform float flutter_freq = 9.0;
@@ -58,29 +63,34 @@ uniform float spot_size = 0.35;
 varying vec3 world_pos;
 varying vec3 body_pos;
 
-// A spine point s metres from the pivot, h off the spine, bent with
-// curvature k: where it lands, and the angle its section turns through.
-vec3 bent(float s, float h, float k) {
+// A point hanging off the spine at s metres from the pivot, offset by o
+// (along and up from that spine point), with the spine bent to curvature k:
+// where it lands (xy), and the angle its section turns through (z).
+vec3 bent(float s, vec2 o, float k) {
 	float th = k * s;
 	float a = abs(th) < 0.001 ? 1.0 : sin(th) / th;
 	float b = abs(th) < 0.001 ? th * 0.5 : (1.0 - cos(th)) / th;
-	return vec3(s * a - h * sin(th), s * b + h * cos(th), th);
+	float c = cos(th);
+	float sn = sin(th);
+	return vec3(s * a + o.x * c - o.y * sn, s * b + o.x * sn + o.y * c, th);
 }
 
 void vertex() {
 	vec3 p = VERTEX + body_offset;
 	body_pos = p;
-	float x = p.x / max(body_length, 0.01);
+	// The spine point this vertex hangs from.
+	float ax = anchored ? UV.x + body_offset.x : p.x;
+	float x = ax / max(body_length, 0.01);
 	float tail = smoothstep(0.35, -0.55, x);
 	// INSTANCE_CUSTOM.x carries a per-fish phase when drawn through a MultiMesh.
-	float w = sin(swim_clock * swim_freq + phase + INSTANCE_CUSTOM.x * 6.28 - p.x * swim_wave);
+	float w = sin(swim_clock * swim_freq + phase + INSTANCE_CUSTOM.x * 6.28 - ax * swim_wave);
 	p.z += w * swim_amp * tail * (1.0 - swim_vertical);
 	p.y += w * swim_amp * tail * swim_vertical;
 	p.z += sin(swim_clock * flutter_freq + phase * 2.0 - p.x * 3.0 + p.y * 2.0) * flutter_amp * COLOR.b;
 	// INSTANCE_CUSTOM.y carries a schooling fish's bend.
 	float k = bend + INSTANCE_CUSTOM.y;
 	if (abs(k) > 0.0001) {
-		vec3 q = bent(p.x - bend_pivot, p.y, k);
+		vec3 q = bent(ax - bend_pivot, vec2(p.x - ax, p.y), k);
 		p.x = bend_pivot + q.x;
 		p.y = q.y;
 		float c = cos(q.z);
@@ -122,9 +132,10 @@ void fragment() {
 	}
 	if (scale_size > 0.0 && COLOR.b < 0.001 && !enamel) {
 		vec2 sc = scales(body_pos);
-		// Scales smaller than a few pixels on screen fade out rather than shimmer.
-		float px = length(fwidth(body_pos.xy)) / scale_size;
-		float detail = 1.0 - smoothstep(0.12, 0.35, px);
+		// Scales smaller than a few pixels on screen fade out rather than shimmer
+		// (measured the same whichever way the body is turned).
+		float px = 0.5 * (length(dFdx(body_pos)) + length(dFdy(body_pos))) / scale_size;
+		float detail = 1.0 - smoothstep(0.16, 0.42, px);
 		base *= 1.0 - sc.y * scale_shade * detail;
 		// Bump-map the plates' relief into the normal (no tangents needed).
 		float hgt = sc.x * scale_size * scale_depth * detail;

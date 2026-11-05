@@ -2,9 +2,12 @@ class_name BodyKit
 extends RefCounted
 ## Building blocks for creature models, in the creature shader's conventions
 ## (body along +X with the head forward, vertex color R the glow mask, G the
-## belly blend and B how freely a part flutters):
-## a body lofted through cross-sections along the spine, fin membranes with
-## rays, and rows of teeth.
+## belly blend and B how freely a part flutters, UV.x the point of the spine
+## a vertex hangs from): a body lofted through cross-sections along the
+## spine, fin membranes with rays, and rows of teeth.
+## A fin, spine or tooth hangs from the spot where it meets the body, so when
+## the body bends it turns with that section as one rigid piece instead of
+## being bent along its own length (see [method placed]).
 
 
 ## A body lofted through [param stations], each [x, half width, height above
@@ -33,10 +36,12 @@ static func body(stations: Array, rings := 48, sides := 24, glow: Callable = Cal
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var colors := PackedColorArray()
+	var uvs := PackedVector2Array()
 	for i in rings + 1:
 		var t := float(i) / rings
 		for j in sides + 1:
 			var p := grid[i][j]
+			uvs.append(Vector2(p.x, 0.0))
 			var along := grid[mini(i + 1, rings)][j] - grid[maxi(i - 1, 0)][j]
 			var round := grid[i][(j + 1) % sides] - grid[i][(j - 1 + sides) % sides]
 			var n := round.cross(along).normalized()
@@ -53,7 +58,7 @@ static func body(stations: Array, rings := 48, sides := 24, glow: Callable = Cal
 		for j in sides:
 			var a := i * row + j
 			indices.append_array([a, a + row, a + 1, a + 1, a + row, a + row + 1])
-	return _mesh(verts, normals, colors, indices)
+	return _mesh(verts, normals, colors, indices, uvs)
 
 
 ## The body's section at [param x]: half width, height above and depth below
@@ -92,6 +97,7 @@ static func membrane(base: PackedVector2Array, edge: PackedVector2Array, thickne
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var colors := PackedColorArray()
+	var uvs := PackedVector2Array()
 	var indices := PackedInt32Array()
 	for side in 2:
 		var sgn := 1.0 if side == 0 else -1.0
@@ -109,6 +115,8 @@ static func membrane(base: PackedVector2Array, edge: PackedVector2Array, thickne
 				var tilt := cos(PI * rays * c / maxf(cols - 1, 1)) * 0.35 if rays > 0 else 0.0
 				normals.append(Vector3(tilt * sgn, 0.0, sgn).normalized())
 				colors.append(Color(glow * smoothstep(0.6, 1.0, f), 0.3, maxf(f, 0.02)))
+				# Each ray hangs from where it meets the body.
+				uvs.append(Vector2(base[c].x, 0.0))
 		for r in rows:
 			for c in cols - 1:
 				var a := start + r * cols + c
@@ -116,7 +124,7 @@ static func membrane(base: PackedVector2Array, edge: PackedVector2Array, thickne
 					indices.append_array([a, a + cols, a + 1, a + 1, a + cols, a + cols + 1])
 				else:
 					indices.append_array([a, a + 1, a + cols, a + 1, a + cols + 1, a + cols])
-	return _mesh(verts, normals, colors, indices)
+	return _mesh(verts, normals, colors, indices, uvs)
 
 
 ## A curved tooth from its root at the origin, [param length] long, pointing
@@ -151,6 +159,42 @@ static func teeth_row(from: Vector3, to: Vector3, count: int, length: float, dow
 	return parts
 
 
+## [param mesh] moved by [param xf], hanging from the spine at model X
+## [param anchor]: a spine, tooth or bead given one turns as one rigid piece
+## with the body there. Without one, a mesh from [method body] or
+## [method membrane] keeps its own anchors (shifted with it) and any other
+## mesh hangs each vertex from its own spot.
+static func placed(mesh: Mesh, xf := Transform3D.IDENTITY, anchor := NAN) -> ArrayMesh:
+	var out := ArrayMesh.new()
+	var moved := MeshKit.transformed(mesh, xf)
+	for si in moved.get_surface_count():
+		var arrays := moved.surface_get_arrays(si)
+		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var old: Variant = arrays[Mesh.ARRAY_TEX_UV]
+		var uvs := PackedVector2Array()
+		uvs.resize(verts.size())
+		for i in verts.size():
+			if not is_nan(anchor):
+				uvs[i] = Vector2(anchor, 0.0)
+			elif old != null and (old as PackedVector2Array).size() == verts.size():
+				uvs[i] = Vector2((old as PackedVector2Array)[i].x + xf.origin.x, 0.0)
+			else:
+				uvs[i] = Vector2(verts[i].x, 0.0)
+		arrays[Mesh.ARRAY_TEX_UV] = uvs
+		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return out
+
+
+## Bakes [param parts] ([mesh, transform, anchor], the last two optional; see
+## [method placed]) into one mesh.
+static func merged(parts: Array) -> ArrayMesh:
+	var baked := []
+	for part: Array in parts:
+		var xf: Transform3D = part[1] if part.size() > 1 else Transform3D.IDENTITY
+		baked.append([placed(part[0], xf, float(part[2]) if part.size() > 2 else NAN)])
+	return MeshKit.merge(baked)
+
+
 ## [param mesh] painted as enamel (teeth, claws): see creature.gdshader.
 static func enamel(mesh: ArrayMesh) -> ArrayMesh:
 	return MeshKit.painted(mesh, func(_v: Vector3) -> Color: return Color(0.0, 0.0, 0.0, 0.0))
@@ -164,12 +208,14 @@ static func at(stations: Array, x: float, field: int) -> float:
 
 
 static func _mesh(verts: PackedVector3Array, normals: PackedVector3Array, colors: PackedColorArray,
-		indices: PackedInt32Array) -> ArrayMesh:
+		indices: PackedInt32Array, uvs := PackedVector2Array()) -> ArrayMesh:
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	arrays[Mesh.ARRAY_NORMAL] = normals
 	arrays[Mesh.ARRAY_COLOR] = colors
+	if not uvs.is_empty():
+		arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = indices
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)

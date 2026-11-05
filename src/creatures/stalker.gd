@@ -68,19 +68,20 @@ func build_model() -> void:
 		m.set_shader_parameter(&"glow_color", Color(1.0, 0.22, 0.12))
 		m.set_shader_parameter(&"glow_strength", 3.2)
 		m.set_shader_parameter(&"glow_pulse", 0.25)
-		m.set_shader_parameter(&"metallic", 0.3)
-		m.set_shader_parameter(&"roughness", 0.38)
+		m.set_shader_parameter(&"metallic", 0.15)
+		m.set_shader_parameter(&"roughness", 0.52)
 		m.set_shader_parameter(&"rim_strength", 0.35)
 		m.set_shader_parameter(&"body_length", BODY_LENGTH)
 		m.set_shader_parameter(&"swim_amp", 0.3)
 		m.set_shader_parameter(&"swim_freq", 3.2)
 		m.set_shader_parameter(&"swim_wave", 0.9)
 		m.set_shader_parameter(&"bend_pivot", 0.4)
+		m.set_shader_parameter(&"anchored", true)
 		m.set_shader_parameter(&"flutter_amp", 0.07)
 		m.set_shader_parameter(&"flutter_freq", 7.0)
-		m.set_shader_parameter(&"scale_size", 0.13)
-		m.set_shader_parameter(&"scale_depth", 0.18)
-		m.set_shader_parameter(&"scale_shade", 0.14)
+		m.set_shader_parameter(&"scale_size", 0.17)
+		m.set_shader_parameter(&"scale_depth", 0.24)
+		m.set_shader_parameter(&"scale_shade", 0.22)
 		m.set_shader_parameter(&"tooth_color", Color(0.78, 0.72, 0.62)))
 	flex_pivot = 0.4
 	var parts := [[BodyKit.body(BODY, 64, 28)]]
@@ -117,7 +118,7 @@ func build_model() -> void:
 	for i in 9:
 		var tip := edge[i] + (edge[i] - base[i]).normalized() * 0.18
 		parts.append([MeshKit.spike(0.05, base[i].distance_to(tip), 0.8, 5),
-			Transform3D(Basis(Vector3.BACK, (tip - base[i]).angle()), Vector3(base[i].x, base[i].y, 0.0))])
+			Transform3D(Basis(Vector3.BACK, (tip - base[i]).angle()), Vector3(base[i].x, base[i].y, 0.0)), base[i].x])
 	# A deeply forked tail.
 	var tb := PackedVector2Array()
 	var te := PackedVector2Array()
@@ -146,8 +147,8 @@ func build_model() -> void:
 	for sgn: float in [1.0, -1.0]:
 		for t: Array in BodyKit.teeth_row(Vector3(2.35, -0.36, 0.3 * sgn), Vector3(3.32, -0.16, 0.08 * sgn), 7,
 				0.36, Vector3.DOWN, 3 if sgn > 0.0 else 4):
-			parts.append([BodyKit.enamel(t[0]), t[1]])
-	add_visual(MeshKit.merge(parts), mat)
+			parts.append([BodyKit.enamel(t[0]), t[1], (t[1] as Transform3D).origin.x])
+	add_visual(BodyKit.merged(parts), mat)
 	# The lower jaw, hinged under the head, with its own teeth.
 	var jaw_body := BodyKit.body([[0.0, 0.4, 0.14, 0.32, -0.04], [0.6, 0.36, 0.12, 0.27, -0.08],
 		[1.1, 0.25, 0.08, 0.18, -0.05], [JAW_LENGTH, 0.07, 0.04, 0.05, 0.0]], 16, 16)
@@ -155,8 +156,8 @@ func build_model() -> void:
 	for sgn: float in [1.0, -1.0]:
 		for t: Array in BodyKit.teeth_row(Vector3(0.45, 0.1, 0.26 * sgn), Vector3(1.38, 0.03, 0.07 * sgn), 6,
 				0.3, Vector3.UP, 5 if sgn > 0.0 else 6):
-			jaw_parts.append([BodyKit.enamel(t[0]), t[1]])
-	_jaw = add_visual(MeshKit.merge(jaw_parts), mat, Transform3D(Basis(), JAW_HINGE))
+			jaw_parts.append([BodyKit.enamel(t[0]), t[1], (t[1] as Transform3D).origin.x])
+	_jaw = add_visual(BodyKit.merged(jaw_parts), mat, Transform3D(Basis(), JAW_HINGE))
 	add_eyes(Vector3(2.82, 0.3, 0.4), 0.13, Color(1.0, 0.3, 0.15), 4.0)
 
 

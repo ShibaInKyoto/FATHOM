@@ -198,8 +198,8 @@ func _update_bend(delta: float) -> void:
 	if flex <= 0.0:
 		return
 	var span := body_span if body_span > 0.0 else maxf(reach * 2.0, radius * 2.0)
-	# No more than about 40 degrees from the pivot to either end.
-	var limit := 1.4 / maxf(span, 0.5)
+	# No more than about 30 degrees from the pivot to either end.
+	var limit := 1.05 / maxf(span, 0.5)
 	var k := clampf(turn / maxf(vel.length(), 1.5), -limit, limit) * flex
 	_bend = lerpf(_bend, k, 1.0 - exp(-6.0 * delta))
 	# Rolled over to face left, the model's +Y is the other side of the turn.
