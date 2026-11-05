@@ -115,12 +115,6 @@ func _ready() -> void:
 	if _mode == "sheet":
 		_view(_crits[1], 1)
 		_view(_crits[2], 2)
-		# A burrower's body is laid out in the world, not on its model: keep
-		# only the first, or the others' bodies cross its picture.
-		for i in range(1, count):
-			var body: Variant = _crits[i].get(&"_body")
-			if body is Node3D:
-				(body as Node3D).visible = false
 	var key := DirectionalLight3D.new()
 	key.rotation_degrees = Vector3(-35, 30, 0)
 	key.light_energy = 1.5
@@ -167,9 +161,8 @@ func _process(_delta: float) -> void:
 		if _mode == "wallclip" and _frames == 50 and _dweller is Gulper:
 			# Strike out across the cave.
 			var g := _dweller as Gulper
-			g.state = Gulper.State.STRIKE
-			g.set(&"_timer", Gulper.STRIKE_TIME)
-			g.set(&"_strike_from", g.pos)
+			g.state = Gulper.State.WINDUP
+			g.set(&"_timer", Gulper.WINDUP_TIME)
 			g.set(&"_strike_to", g.pos + (g.wall_normal + Vector2(0.5, 0.0)).normalized() * 7.0)
 		_dweller.tick(dt)
 		_dweller.sync_transform()

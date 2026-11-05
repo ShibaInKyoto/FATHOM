@@ -92,6 +92,17 @@ uniform vec4 tooth_color : source_color = vec4(0.84, 0.8, 0.7, 1.0);
 uniform float scale_head_x = 99.0;
 // Fine pitting of bare skin (the head, scaleless bodies), in metres of relief.
 uniform float skin_pits = 0.0;
+// The skin's coordinates: by default along the body (model X) and round it
+// (UV.y); a body that bends and slides as a whole (an eel rebuilt every
+// frame) carries its own in UV, so its skin sticks to it.
+uniform bool skin_on_uv = false;
+// A skin texture (a height pattern: wrinkles, pebbling), repeating this
+// many times a metre over the skin's coordinates (0 for none), its relief
+// in metres and how much darker its hollows are.
+uniform sampler2D skin_tex : hint_default_white, filter_linear_mipmap, repeat_enable;
+uniform float skin_tex_scale = 0.0;
+uniform float skin_tex_depth = 0.004;
+uniform float skin_tex_shade = 0.15;
 // Fin membranes' own color (alpha: how far it replaces the body's), darker
 // towards the body, the edges lighter.
 uniform vec4 fin_color : source_color = vec4(0.0, 0.0, 0.0, 0.0);
@@ -160,7 +171,7 @@ void vertex() {
 		p.yz *= 1.0 - bell_squeeze * 0.3 * f * f;
 		p.x -= bell_squeeze * 0.14 * (bell_top - bell_rim) * f;
 	}
-	skin_uv = vec2(p.x, UV.y);
+	skin_uv = skin_on_uv ? UV : vec2(p.x, UV.y);
 	// The spine point this vertex hangs from.
 	float ax = anchored ? UV.x + body_offset.x : p.x;
 	// Drawn through a MultiMesh (a school), each fish carries its own stroke
@@ -294,12 +305,18 @@ void fragment() {
 	}
 	if (skin_pits > 0.0 && !enamel && COLOR.b < 0.001) {
 		// Bare skin: fine pits and wrinkles, fading out when too small to see.
-		float pits = value_noise(body_pos * 22.0) * 0.6 + value_noise(body_pos * 7.0) * 0.4;
+		vec3 at = skin_on_uv ? vec3(skin_uv, 0.37) : body_pos;
+		float pits = value_noise(at * 22.0) * 0.6 + value_noise(at * 7.0) * 0.4;
 		float seen = 1.0 - smoothstep(0.012, 0.03, px);
 		hgt += pits * skin_pits * bare * seen;
 		base *= 1.0 - (0.5 - pits) * 0.25 * bare * seen;
 	}
-	if (hgt != 0.0 || scale_size > 0.0 || skin_pits > 0.0) {
+	if (skin_tex_scale > 0.0 && !enamel && COLOR.b < 0.001) {
+		float h = texture(skin_tex, skin_uv * skin_tex_scale).r;
+		hgt += (h - 0.5) * skin_tex_depth;
+		base *= 1.0 - (0.5 - h) * skin_tex_shade;
+	}
+	if (hgt != 0.0 || scale_size > 0.0 || skin_pits > 0.0 || skin_tex_scale > 0.0) {
 		NORMAL = bumped(NORMAL, VERTEX, hgt);
 	}
 	ALBEDO = base;
