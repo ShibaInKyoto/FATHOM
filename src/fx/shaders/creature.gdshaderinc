@@ -62,6 +62,12 @@ instance uniform float bend = 0.0;
 // Where this mesh sits along the body (its node's offset in the model), so a
 // separate part (a jaw) bends and swims with the body around it.
 instance uniform vec3 body_offset = vec3(0.0);
+// A jellyfish's bell (model X from its rim to its apex): squeezed (0..1),
+// it narrows towards the rim and draws its rim in and down, and whatever
+// hangs below the rim is carried in with it.
+uniform float bell_top = 0.0;
+uniform float bell_rim = 0.0;
+instance uniform float bell_squeeze = 0.0;
 // The point of the spine that stays put as the body bends.
 uniform float bend_pivot = 0.0;
 // Models built with BodyKit carry, in UV.x, the point of the spine each
@@ -149,6 +155,11 @@ vec3 swim_wave_at(float x, float ph, float power) {
 void vertex() {
 	vec3 p = VERTEX + body_offset;
 	body_pos = p;
+	if (bell_squeeze != 0.0) {
+		float f = clamp((bell_top - p.x) / max(bell_top - bell_rim, 0.01), 0.0, 1.0);
+		p.yz *= 1.0 - bell_squeeze * 0.3 * f * f;
+		p.x -= bell_squeeze * 0.14 * (bell_top - bell_rim) * f;
+	}
 	skin_uv = vec2(p.x, UV.y);
 	// The spine point this vertex hangs from.
 	float ax = anchored ? UV.x + body_offset.x : p.x;

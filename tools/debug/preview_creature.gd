@@ -102,8 +102,8 @@ func _ready() -> void:
 			c.set(&"_swim_clock", i * 0.37)
 		c.sync_transform()
 	if _mode == "sheet":
-		_crits[1].model.rotation_degrees = Vector3(0, -35, 0)
-		_crits[2].model.rotation_degrees = Vector3(80, 0, 0)
+		_view(_crits[1], 1)
+		_view(_crits[2], 2)
 	var key := DirectionalLight3D.new()
 	key.rotation_degrees = Vector3(-35, 30, 0)
 	key.light_energy = 1.5
@@ -120,6 +120,10 @@ func _ready() -> void:
 	var aspect := get_viewport().get_visible_rect().size.aspect()
 	var half_h := atan(tan(deg_to_rad(cam.fov * 0.5)) * aspect)
 	cam.position = Vector3(origin.x, origin.y, width * 0.5 / tan(half_h) + span * 0.3)
+	if not _crits.is_empty() and _crits[0].upright:
+		# A drifter hangs below its bell: frame the whole of it.
+		cam.position.y -= span * 0.3
+		cam.position.z *= 0.8
 	if _mode == "game":
 		cam.fov = 42.0
 		cam.position = Vector3(origin.x, origin.y, DiveCamera.BASE_DISTANCE)
@@ -153,23 +157,28 @@ func _process(_delta: float) -> void:
 		var c := _crits[i]
 		if _mode == "swim":
 			c.facing = c.facing.rotated(_turns[i] * dt)
-		c.vel = c.facing * SPEED
+		c.vel = c.facing * (0.4 if c.upright else SPEED)
 		if _mode == "clip":
 			# Cruise, burst away, cruise again.
 			var t := _frames * dt
 			c.vel = c.facing * (SPEED * 3.0 if t > 1.6 and t < 2.4 else SPEED)
+			if c.upright:
+				# Drifters drift.
+				c.vel = c.facing * (1.2 if t > 1.6 and t < 2.4 else 0.4)
+		if c.get(&"_pulse_t") != null:
+			# A pulsing swimmer's beat runs in its behaviour, which this skips.
+			c.set(&"_pulse_t", float(c.get(&"_pulse_t")) + dt)
 		var clock: float = c.get(&"_swim_clock")
 		c._update_visuals(dt)
 		if _mode == "sheet" and i > 0:
-			c.model.rotation_degrees = [Vector3(0, -35, 0), Vector3(80, 0, 0)][i - 1]
+			_view(c, i)
 		if _mode == "stroke":
-			c.model.rotation_degrees = Vector3(90, 0, 0)
 			c.set(&"_swim_clock", clock)
 			c.set(&"_swim_power", 1.0)
 			c._update_visuals(0.0)
-			c.model.rotation_degrees = Vector3(90, 0, 0)
+			_view(c, 3)
 		if _mode == "clip" and i == 1:
-			c.model.rotation_degrees = Vector3(90, 0, 0)
+			_view(c, 2 if c.upright else 3)
 	if _filming:
 		if _frames > 10:
 			var args := OS.get_cmdline_user_args()
@@ -181,3 +190,12 @@ func _process(_delta: float) -> void:
 		var args := OS.get_cmdline_user_args()
 		get_viewport().get_texture().get_image().save_png(args[0] if args.size() > 0 else "user://creature.png")
 		get_tree().quit()
+
+
+## Turns [param c] to a view: 1 three-quarter, 2 from above (a drifter that
+## hangs upright, from below, into its bell), 3 straight down.
+func _view(c: Creature, view: int) -> void:
+	if c.upright:
+		c.model.basis = Basis(Vector3.RIGHT, [0.0, 0.5, -0.7, 1.2][view]) * Basis(Vector3.BACK, PI * 0.5)
+	else:
+		c.model.rotation_degrees = [Vector3.ZERO, Vector3(0, -35, 0), Vector3(80, 0, 0), Vector3(90, 0, 0)][view]

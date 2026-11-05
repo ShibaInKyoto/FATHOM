@@ -148,8 +148,10 @@ static func tube(target: ArrayMesh, points: PackedVector3Array, radii: PackedFlo
 		else:
 			fwd = points[i + 1] - points[i - 1]
 		fwd = fwd.normalized()
-		var side := fwd.cross(Vector3.BACK).normalized()
-		var up := Vector3.BACK
+		# Ring round the tube, square to it (for a tube in the XY plane, the
+		# ring's up is +Z); a tube heading along Z takes its frame from X.
+		var side := fwd.cross(Vector3.BACK if absf(fwd.z) < 0.9 else Vector3.RIGHT).normalized()
+		var up := side.cross(fwd)
 		var t := float(i) / (n - 1)
 		for j in sides + 1:
 			var a := TAU * j / sides
