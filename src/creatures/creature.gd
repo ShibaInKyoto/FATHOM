@@ -4,6 +4,10 @@ extends Entity
 ## steering and the shared visual material. Subclasses implement [method think]
 ## (perception, a few times a second) and [method behave] (steering, every tick).
 
+## Eye styles for [method add_eyes]: a plain glossy (or glowing) ball, a
+## hunter's glowing ring round a slit, a fish's metallic iris round a pupil.
+enum Eye { PLAIN, HUNTER, FISH }
+
 const SHADER := preload("res://src/fx/shaders/creature.gdshader")
 const THINK_INTERVAL := 0.2
 ## Harpoon damage multiplier against a creature that has not noticed the sub.
@@ -456,11 +460,15 @@ func species_material(config: Callable) -> ShaderMaterial:
 
 ## A pair of eyes on either flank of the head. Glowing eyes read in the dark;
 ## glossy ones catch the lamp.
-## [param hunter] gives glossy black globes with a glowing iris ring of
-## [param color] round a slit pupil instead.
-func add_eyes(at: Vector3, eye_radius: float, color: Color, glow := 0.0, hunter := false) -> void:
-	if hunter:
+## [param style] [constant Eye.HUNTER] gives glossy black globes with a
+## glowing iris ring of [param color] round a slit pupil, [constant Eye.FISH]
+## a metallic iris of [param color] round a round pupil, flush in the globe.
+func add_eyes(at: Vector3, eye_radius: float, color: Color, glow := 0.0, style := Eye.PLAIN) -> void:
+	if style == Eye.HUNTER:
 		_hunter_eyes(at, eye_radius, color, glow)
+		return
+	if style == Eye.FISH:
+		_fish_eyes(at, eye_radius, color)
 		return
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
@@ -527,6 +535,40 @@ func _hunter_eyes(at: Vector3, eye_radius: float, iris: Color, glow: float) -> v
 		pupil.material_override = slit
 		pupil.transform = Transform3D(Basis().scaled(Vector3(0.45, 1.25, 0.3)), Vector3(0.0, 0.0, eye_radius * 0.93 * side))
 		eye.add_child(pupil)
+		_carry(eye)
+
+
+## A fish's eyes (see [method add_eyes]): a dark glossy globe with a
+## metallic iris disc of [param iris] and a round pupil set flush in it.
+func _fish_eyes(at: Vector3, eye_radius: float, iris: Color) -> void:
+	var globe := StandardMaterial3D.new()
+	globe.albedo_color = Color(0.03, 0.035, 0.04)
+	globe.roughness = 0.03
+	globe.metallic = 0.1
+	var ring := StandardMaterial3D.new()
+	ring.albedo_color = iris
+	ring.metallic = 0.85
+	ring.roughness = 0.22
+	var black := StandardMaterial3D.new()
+	black.albedo_color = Color(0.0, 0.0, 0.0)
+	black.roughness = 0.0
+	for side: float in [1.0, -1.0]:
+		var eye := Node3D.new()
+		eye.position = Vector3(at.x, at.y, at.z * side)
+		model.add_child(eye)
+		var ball := MeshInstance3D.new()
+		ball.mesh = MeshKit.sphere(eye_radius, 14, 8)
+		ball.material_override = globe
+		ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		eye.add_child(ball)
+		for disc: Array in [[ring, 0.74, 0.84], [black, 0.4, 0.97]]:
+			var mi := MeshInstance3D.new()
+			mi.mesh = MeshKit.sphere(eye_radius * float(disc[1]), 14, 6)
+			mi.material_override = disc[0]
+			mi.transform = Transform3D(Basis().scaled(Vector3(1.0, 1.0, 0.22)), Vector3(0.0, 0.0,
+				eye_radius * float(disc[2]) * side))
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			eye.add_child(mi)
 		_carry(eye)
 
 

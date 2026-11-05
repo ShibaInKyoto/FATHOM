@@ -196,20 +196,24 @@ static func tooth(radius: float, length: float, curve := 0.25, sides := 5) -> Ar
 
 
 ## A row of [param count] teeth along a jaw line from [param from] to
-## [param to] (model space), [param length] long at the middle of the row and
-## shorter at its ends, each pointing along [param down] (a unit vector) with
-## a little jitter so the row looks grown, not machined.
-static func teeth_row(from: Vector3, to: Vector3, count: int, length: float, down: Vector3, seed_value := 1) -> Array:
+## [param to] (model space), about [param length] long, each pointing along
+## [param down] (a unit vector) with a little jitter so the row looks grown,
+## not machined.
+static func teeth_row(from: Vector3, to: Vector3, count: int, length: float, down: Vector3, seed_value := 1,
+		fangs := true) -> Array:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	var parts := []
 	for i in count:
 		var f := (i + 0.5) / count
 		var at := from.lerp(to, f)
-		# Longest towards the front of the row (its end), a fang or two among them.
-		var l := length * lerpf(0.45, 1.0, f) * rng.randf_range(0.7, 1.1)
-		if rng.randf() < 0.25 and f > 0.4:
-			l *= 1.45
+		# Longest towards the front of the row (its end), a fang or two among
+		# them; or (without [param fangs]) a fine, even comb.
+		var l := length * rng.randf_range(0.8, 1.1)
+		if fangs:
+			l *= lerpf(0.45, 1.0, f) / 0.95
+			if rng.randf() < 0.25 and f > 0.4:
+				l *= 1.45
 		var dir := (down.normalized() + Vector3(rng.randf_range(-0.12, 0.12), 0.0, rng.randf_range(-0.08, 0.08)))
 		var basis := Basis(Quaternion(Vector3.DOWN, dir.normalized()))
 		parts.append([tooth(l * 0.11, l, 0.22), Transform3D(basis, at)])

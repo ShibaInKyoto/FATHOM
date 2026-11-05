@@ -163,7 +163,7 @@ func build_model() -> void:
 				0.42, Vector3(0.0, 1.0, 0.12 * sgn), 5 if sgn > 0.0 else 6):
 			jaw_parts.append([BodyKit.enamel(t[0]), t[1], (t[1] as Transform3D).origin.x])
 	_jaw = add_visual(BodyKit.merged(jaw_parts), mat, Transform3D(Basis(Vector3.BACK, -REST_GAPE), JAW_HINGE))
-	add_eyes(Vector3(2.8, 0.3, 0.39), 0.14, Color(1.0, 0.2, 0.06), 3.0, true)
+	add_eyes(Vector3(2.8, 0.3, 0.39), 0.14, Color(1.0, 0.2, 0.06), 3.0, Eye.HUNTER)
 
 
 ## [param count] fin ray roots evenly along a fin's base from [param a] to [param b].

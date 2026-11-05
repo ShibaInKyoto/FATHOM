@@ -15,6 +15,15 @@ const HUNT_RANGE := 12.0
 const BONK_STUN := 1.8
 ## Seconds spent swallowing a caught fish.
 const FEED_TIME := 3.0
+## The body's sections from tail to beak tip (see [method BodyKit.body]): a
+## long torpedo drawn out into a needle beak.
+const BODY: Array = [[-1.3, 0.03, 0.06, 0.06, 0.0], [-1.12, 0.06, 0.11, 0.1, 0.0], [-0.7, 0.13, 0.21, 0.19, 0.0],
+	[-0.1, 0.165, 0.29, 0.26, 0.0], [0.45, 0.165, 0.29, 0.25, 0.0], [0.8, 0.135, 0.22, 0.17, -0.01],
+	[1.02, 0.085, 0.13, 0.08, -0.03], [1.25, 0.04, 0.06, 0.035, -0.04], [1.46, 0.01, 0.015, 0.01, -0.045]]
+const BODY_LENGTH := 2.76
+## The lower jaw: its hinge (model space) and how far it gapes at rest.
+const JAW_HINGE := Vector3(0.78, -0.1, 0.0)
+const REST_GAPE := 0.05
 
 var state := State.WANDER
 var _timer := 0.0
@@ -24,6 +33,8 @@ var _home := Vector2.ZERO
 ## The shoal it is lunging at, if the dash is a hunt rather than an attack.
 var _prey: Shoal
 var _hunt_cooldown := 0.0
+var _jaw: MeshInstance3D
+var _gape := 0.0
 
 
 func setup() -> void:
@@ -36,6 +47,9 @@ func setup() -> void:
 	salvage_drop = 4
 	glow_color = Color(0.5, 0.9, 1.0)
 	_turn_speed = 8.0
+	flex = 1.0
+	flex_pivot = 0.15
+	body_span = BODY_LENGTH
 	super.setup()
 	_home = pos
 	_target = wander_point(_home, 12.0)
@@ -44,31 +58,100 @@ func setup() -> void:
 
 func build_model() -> void:
 	var mat := species_material(func(m: ShaderMaterial) -> void:
-		m.set_shader_parameter(&"back_color", Color(0.16, 0.22, 0.3))
-		m.set_shader_parameter(&"belly_color", Color(0.72, 0.78, 0.82))
-		m.set_shader_parameter(&"glow_color", Color(0.45, 0.9, 1.0))
+		m.set_shader_parameter(&"back_color", Color(0.1, 0.16, 0.24))
+		m.set_shader_parameter(&"belly_color", Color(0.66, 0.72, 0.76))
+		m.set_shader_parameter(&"glow_color", Color(0.4, 0.9, 1.0))
 		m.set_shader_parameter(&"glow_strength", 2.2)
-		m.set_shader_parameter(&"metallic", 0.55)
-		m.set_shader_parameter(&"roughness", 0.3)
-		m.set_shader_parameter(&"body_length", 2.6)
-		m.set_shader_parameter(&"swim_amp", 0.16)
-		m.set_shader_parameter(&"swim_freq", 9.0))
-	var body := MeshKit.lathe(PackedVector2Array([
-			Vector2(0.0, 0.04), Vector2(0.12, 0.12), Vector2(0.45, 0.3), Vector2(0.75, 0.27),
-			Vector2(0.92, 0.12), Vector2(1.0, 0.0)]), 2.6, 12, 16, 1.0, 0.62,
-		func(t: float, a: float) -> float:
-			var stripe := 1.0 - smoothstep(0.08, 0.2, absf(cos(a)))
-			var eye := 1.0 if (t > 0.86 and t < 0.9 and cos(a) > 0.3) else 0.0
-			return maxf(stripe * smoothstep(0.1, 0.3, t) * 0.8, eye))
-	var tail := MeshKit.fin(PackedVector2Array([Vector2(0, 0), Vector2(-0.55, 0.42), Vector2(-0.35, 0.0),
-			Vector2(-0.55, -0.42)]), 0.03, 0.4)
-	var dorsal := MeshKit.fin(PackedVector2Array([Vector2(0.3, 0), Vector2(-0.25, 0.32), Vector2(-0.35, 0.0)]), 0.03, 0.0)
-	var mesh := MeshKit.merge([
-		[body], [tail, Transform3D(Basis(), Vector3(-1.25, 0, 0))],
-		[dorsal, Transform3D(Basis(), Vector3(-0.2, 0.26, 0))],
-		[dorsal, Transform3D(Basis().scaled(Vector3(0.7, -0.7, 1)), Vector3(-0.5, -0.22, 0))]])
-	add_visual(mesh, mat)
-	add_eyes(Vector3(0.95, 0.07, 0.13), 0.07, Color(0.95, 0.9, 0.6))
+		m.set_shader_parameter(&"metallic", 0.45)
+		m.set_shader_parameter(&"roughness", 0.34)
+		m.set_shader_parameter(&"rim_strength", 0.35)
+		m.set_shader_parameter(&"body_length", BODY_LENGTH)
+		m.set_shader_parameter(&"swim_amp", 0.13)
+		m.set_shader_parameter(&"swim_freq", 9.0)
+		m.set_shader_parameter(&"swim_wave", 2.2)
+		m.set_shader_parameter(&"bend_pivot", 0.15)
+		m.set_shader_parameter(&"anchored", true)
+		m.set_shader_parameter(&"flutter_amp", 0.025)
+		m.set_shader_parameter(&"flutter_freq", 11.0)
+		m.set_shader_parameter(&"scale_size", 0.06)
+		m.set_shader_parameter(&"scale_depth", 0.15)
+		m.set_shader_parameter(&"scale_shade", 0.24)
+		m.set_shader_parameter(&"scale_head_x", 0.86)
+		m.set_shader_parameter(&"skin_pits", 0.002)
+		m.set_shader_parameter(&"tooth_color", Color(0.86, 0.84, 0.78))
+		m.set_shader_parameter(&"fin_color", Color(0.07, 0.1, 0.14, 0.9))
+		m.set_shader_parameter(&"bars", 0.5)
+		m.set_shader_parameter(&"bar_freq", 2.4))
+	var parts := [[BodyKit.body(BODY, 56, 22)]]
+	# The tell: a glowing stripe down each flank that flares as it winds up.
+	for sgn: float in [1.0, -1.0]:
+		var line := PackedVector3Array()
+		var radii := PackedFloat32Array()
+		for i in 15:
+			var x := lerpf(-1.05, 0.82, i / 14.0)
+			line.append(Vector3(x, BodyKit.at(BODY, x, 4) + 0.01, (BodyKit.at(BODY, x, 1) - 0.004) * sgn))
+			radii.append(0.017 * sin(PI * clampf(i / 14.0 * 1.15, 0.05, 1.0)))
+		var stripe := ArrayMesh.new()
+		MeshKit.tube(stripe, line, radii, 6)
+		parts.append([MeshKit.painted(stripe, func(_v: Vector3) -> Color: return Color(1.0, 0.0, 0.0))])
+	# Two dorsals (the first spiny), an anal fin under the second, a deep
+	# stiff fork of a tail, small pectorals and pelvics.
+	var roots := PackedVector2Array()
+	var tips := PackedVector2Array()
+	for i in 5:
+		var x := lerpf(0.3, -0.02, i / 4.0)
+		var top := BodyKit.at(BODY, x, 2) + BodyKit.at(BODY, x, 4)
+		roots.append(Vector2(x, top - 0.03))
+		tips.append(Vector2(x - 0.14, top + lerpf(0.3, 0.12, i / 4.0)))
+	parts.append([BodyKit.ray_fin(roots, tips, 0.22, 0.06, 0.012, 0.012, 0.0)])
+	roots = PackedVector2Array()
+	tips = PackedVector2Array()
+	for i in 5:
+		var x := lerpf(-0.42, -0.72, i / 4.0)
+		var top := BodyKit.at(BODY, x, 2) + BodyKit.at(BODY, x, 4)
+		roots.append(Vector2(x, top - 0.03))
+		tips.append(Vector2(x - 0.16, top + lerpf(0.24, 0.09, i / 4.0)))
+	parts.append([BodyKit.ray_fin(roots, tips, 0.08, 0.02, 0.01, 0.012)])
+	roots = PackedVector2Array()
+	tips = PackedVector2Array()
+	for i in 5:
+		var x := lerpf(-0.4, -0.72, i / 4.0)
+		var low := BodyKit.at(BODY, x, 4) - BodyKit.at(BODY, x, 3)
+		roots.append(Vector2(x, low + 0.03))
+		tips.append(Vector2(x - 0.16, low - lerpf(0.2, 0.08, i / 4.0)))
+	parts.append([BodyKit.ray_fin(roots, tips, 0.08, 0.02, 0.01, 0.012)])
+	roots = PackedVector2Array()
+	tips = PackedVector2Array()
+	for i in 9:
+		var f := i / 8.0
+		var lobe := absf(f - 0.5) * 2.0
+		roots.append(Vector2(-1.22 + lobe * 0.04, lerpf(0.06, -0.06, f)))
+		tips.append(Vector2(lerpf(-1.42, -1.8, pow(lobe, 0.8)), lerpf(0.5, -0.47, f) * lerpf(0.15, 1.0, lobe)))
+	parts.append([BodyKit.ray_fin(roots, tips, 0.04, 0.02, 0.014, 0.014, 0.35)])
+	var pec := BodyKit.ray_fin(PackedVector2Array([Vector2(0.72, 0.0), Vector2(0.67, 0.01), Vector2(0.62, 0.02),
+		Vector2(0.57, 0.02)]), PackedVector2Array([Vector2(0.52, -0.14), Vector2(0.4, -0.2), Vector2(0.3, -0.2),
+		Vector2(0.24, -0.15)]), 0.1, 0.02, 0.008, 0.01)
+	for sgn: float in [1.0, -1.0]:
+		parts.append([pec, Transform3D(Basis(Vector3.RIGHT, sgn * 1.1), Vector3(0.0, -0.08, 0.13 * sgn))])
+	var pelvic := BodyKit.ray_fin(PackedVector2Array([Vector2(0.1, 0.0), Vector2(0.04, 0.0), Vector2(-0.02, 0.0)]),
+		PackedVector2Array([Vector2(-0.04, -0.12), Vector2(-0.1, -0.13), Vector2(-0.14, -0.1)]), 0.1, 0.02, 0.007, 0.01)
+	for sgn: float in [1.0, -1.0]:
+		parts.append([pelvic, Transform3D(Basis(Vector3.RIGHT, sgn * 0.6), Vector3(0.0, -0.24, 0.06 * sgn))])
+	# Fine teeth along the upper beak.
+	for sgn: float in [1.0, -1.0]:
+		for t: Array in BodyKit.teeth_row(Vector3(0.9, -0.06, 0.055 * sgn), Vector3(1.38, -0.035, 0.012 * sgn), 16,
+				0.04, Vector3(0.0, -1.0, 0.08 * sgn), 7 if sgn > 0.0 else 8, false):
+			parts.append([BodyKit.enamel(t[0]), t[1], (t[1] as Transform3D).origin.x])
+	add_visual(BodyKit.merged(parts), mat)
+	# The lower jaw: a needle reaching just past the beak, gaping as it strikes.
+	var jaw_parts := [[BodyKit.body([[0.0, 0.07, 0.03, 0.06, 0.0], [0.3, 0.05, 0.022, 0.04, 0.005],
+		[0.6, 0.025, 0.013, 0.02, 0.01], [0.74, 0.006, 0.005, 0.006, 0.012]], 18, 12)]]
+	for sgn: float in [1.0, -1.0]:
+		for t: Array in BodyKit.teeth_row(Vector3(0.14, 0.02, 0.04 * sgn), Vector3(0.66, 0.016, 0.01 * sgn), 16,
+				0.035, Vector3(0.0, 1.0, 0.08 * sgn), 9 if sgn > 0.0 else 10, false):
+			jaw_parts.append([BodyKit.enamel(t[0]), t[1], (t[1] as Transform3D).origin.x])
+	_jaw = add_visual(BodyKit.merged(jaw_parts), mat, Transform3D(Basis(Vector3.BACK, -REST_GAPE), JAW_HINGE))
+	add_eyes(Vector3(0.83, 0.045, 0.095), 0.06, Color(0.85, 0.72, 0.42), 0.0, Eye.FISH)
 
 
 func think() -> void:
@@ -202,6 +285,14 @@ func on_touch_player(sub: Submarine) -> void:
 func on_damaged(_amount: float, from: Vector2) -> void:
 	if state == State.WANDER or state == State.INVESTIGATE:
 		_begin_windup(from)
+
+
+func _update_visuals(delta: float) -> void:
+	super._update_visuals(delta)
+	if _jaw:
+		var want := 0.32 if state == State.WINDUP else (0.5 if state == State.DASH else 0.0)
+		_gape = lerpf(_gape, want, 1.0 - exp(-10.0 * delta))
+		_jaw.rotation.z = -(REST_GAPE + _gape)
 
 
 func _set_glow(boost: float) -> void:

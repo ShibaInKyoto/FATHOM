@@ -63,6 +63,12 @@ uniform vec4 tooth_color : source_color = vec4(0.84, 0.8, 0.7, 1.0);
 uniform float scale_head_x = 99.0;
 // Fine pitting of bare skin (the head, scaleless bodies), in metres of relief.
 uniform float skin_pits = 0.0;
+// Fin membranes' own color (alpha: how far it replaces the body's), darker
+// towards the body, the edges lighter.
+uniform vec4 fin_color : source_color = vec4(0.0, 0.0, 0.0, 0.0);
+// Dark bars across the back (0 for none), so many per metre.
+uniform float bars = 0.0;
+uniform float bar_freq = 2.0;
 // Dark spots dappling the back (0 for none), their size in metres.
 uniform float spots = 0.0;
 uniform float spot_size = 0.35;
@@ -179,7 +185,13 @@ void fragment() {
 	vec3 base = mix(back_color.rgb, belly_color.rgb, COLOR.g);
 	if (enamel) {
 		base = tooth_color.rgb;
-	} else if (spots > 0.0) {
+	} else if (COLOR.b > 0.001 && fin_color.a > 0.0) {
+		base = mix(base, fin_color.rgb * mix(0.7, 1.4, COLOR.b), fin_color.a);
+	} else if (bars > 0.0 && COLOR.b < 0.001) {
+		float bar = smoothstep(0.35, 0.6, abs(fract(body_pos.x * bar_freq + body_pos.y * 0.6) - 0.5) * 2.0);
+		base *= 1.0 - bars * (1.0 - bar) * smoothstep(0.0, 0.6, 1.0 - COLOR.g);
+	}
+	if (spots > 0.0 && !enamel) {
 		vec2 cell = floor(body_pos.xy / spot_size);
 		vec2 f = fract(body_pos.xy / spot_size) - 0.5;
 		vec2 o = vec2(hash2(cell), hash2(cell + 7.3)) - 0.5;
@@ -212,8 +224,10 @@ void fragment() {
 		NORMAL = bumped(NORMAL, VERTEX, hgt);
 	}
 	ALBEDO = base;
-	ROUGHNESS = enamel ? 0.3 : roughness;
-	METALLIC = metallic;
+	// Fin membranes are skin, not scale: never metallic, a little rougher.
+	bool fin = COLOR.b > 0.001;
+	ROUGHNESS = enamel ? 0.3 : (fin ? max(roughness, 0.55) : roughness);
+	METALLIC = fin || enamel ? 0.0 : metallic;
 	RIM = rim_strength;
 	RIM_TINT = 0.5;
 	float pulse = 1.0 + glow_pulse * sin(TIME * 2.3 + phase * 3.0);
