@@ -49,6 +49,43 @@ func test_each_species_engages() -> void:
 		level.free()
 
 
+## Swimming: the tail swings far wider than the head, the eyes ride the
+## stroke, and a burst of speed kicks the stroke harder before it settles.
+func test_swim_stroke() -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	var layout := LevelGenerator.new().generate(BiomeLibrary.get_biome(2), 5, 4)
+	var level := Level.new()
+	tree.root.add_child(level)
+	level.build(layout, 0)
+	var c := Stalker.new()
+	c.pos = Vector2(layout.size().x * 0.5, -60.0)
+	level.add_entity(c)
+	c.lock_facing = true
+	var head := 0.0
+	var tail := 0.0
+	var eye_off := 0.0
+	var eye: Node3D = c._riders[0][0]
+	var eye_rest: Transform3D = c._riders[0][1]
+	for i in 120:
+		c.vel = Vector2.RIGHT * 4.0
+		c._update_visuals(DT)
+		head = maxf(head, absf(c._swum_transform(Transform3D(Basis(), Vector3(3.3, 0, 0))).origin.z))
+		tail = maxf(tail, absf(c._swum_transform(Transform3D(Basis(), Vector3(-3.3, 0, 0))).origin.z))
+		eye_off = maxf(eye_off, eye.transform.origin.distance_to(eye_rest.origin))
+	check(tail > head * 3.0, "tail swings wider than head (%.2f vs %.2f)" % [tail, head])
+	check(eye_off > 0.005 and eye_off < 0.3, "eyes ride the stroke (%.3f)" % eye_off)
+	var cruise: float = c._swim_power
+	for i in 12:
+		c.vel = Vector2.RIGHT * 16.0
+		c._update_visuals(DT)
+	check(c._swim_power > cruise + 0.15, "a burst kicks the stroke (%.2f > %.2f)" % [c._swim_power, cruise])
+	for i in 240:
+		c.vel = Vector2.RIGHT * 4.0
+		c._update_visuals(DT)
+	check(absf(c._swim_power - cruise) < 0.1, "the kick dies away (%.2f)" % c._swim_power)
+	level.free()
+
+
 func _nearest_anchor(layout: LevelLayout, p: Vector2) -> LevelLayout.Anchor:
 	var best: LevelLayout.Anchor = layout.anchors[0]
 	for a in layout.anchors:

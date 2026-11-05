@@ -4,12 +4,15 @@ extends Node3D
 ## four of it mid-stroke: swimming straight (two moments of the stroke), and
 ## turning up and turning down, so the spine's bend shows.
 ## "game" shows one at the distance and lens of the dive camera; "stroke"
-## shows four moments of one swim stroke from above.
-## Usage: xvfb-run godot --path . res://tools/debug/preview_creature.tscn -- <out.png> <species> [sheet|swim|game]
-## [biome index]
+## shows four moments of one swim stroke from above. "clip" films one side on
+## and one from above for four seconds (cruising, a burst, cruising again)
+## and saves every frame as <out>_NNN.png.
+## Usage: xvfb-run godot --path . res://tools/debug/preview_creature.tscn -- <out.png> <species>
+## [sheet|swim|game|stroke|clip] [biome index]
 
 const TURN := 1.6
 const SPEED := 4.0
+const CLIP_FRAMES := 120
 
 var _frames := 0
 var _level: Level
@@ -36,7 +39,7 @@ func _ready() -> void:
 	if script == null:
 		script = {&"mimic": Mimic, &"mother": BlindMother, &"lamplighter": Lamplighter,
 			&"ironclad": Ironclad}.get(id, Stalker)
-	var count := 3 if _mode == "sheet" else (1 if _mode == "game" else 4)
+	var count := 3 if _mode == "sheet" else (1 if _mode == "game" else (2 if _mode == "clip" else 4))
 	var span := 0.0
 	for i in count:
 		var c: Creature = script.new()
@@ -51,7 +54,7 @@ func _ready() -> void:
 	for i in count:
 		var c := _crits[i]
 		c.pos = origin + Vector2((i - (count - 1) * 0.5) * gap, 0.0)
-		if _mode == "sheet" or _mode == "game" or _mode == "stroke":
+		if _mode == "sheet" or _mode == "game" or _mode == "stroke" or _mode == "clip":
 			_turns.append(0.0)
 			if _mode == "stroke":
 				c.set(&"_swim_clock", i / 4.0 * TAU / maxf(float(c.visuals[0].material_override.get_shader_parameter(
@@ -98,12 +101,29 @@ func _process(_delta: float) -> void:
 		if _mode == "swim":
 			c.facing = c.facing.rotated(_turns[i] * dt)
 		c.vel = c.facing * SPEED
+		if _mode == "clip":
+			# Cruise, burst away, cruise again.
+			var t := _frames * dt
+			c.vel = c.facing * (SPEED * 3.0 if t > 1.6 and t < 2.4 else SPEED)
+		var clock: float = c.get(&"_swim_clock")
 		c._update_visuals(dt)
 		if _mode == "sheet" and i > 0:
 			c.model.rotation_degrees = [Vector3(0, -35, 0), Vector3(80, 0, 0)][i - 1]
 		if _mode == "stroke":
 			c.model.rotation_degrees = Vector3(90, 0, 0)
-			c.set(&"_swim_clock", float(c.get(&"_swim_clock")) - dt * (0.6 + c.vel.length() * 0.15))
+			c.set(&"_swim_clock", clock)
+			c.set(&"_swim_power", 1.0)
+			c._update_visuals(0.0)
+			c.model.rotation_degrees = Vector3(90, 0, 0)
+		if _mode == "clip" and i == 1:
+			c.model.rotation_degrees = Vector3(90, 0, 0)
+	if _mode == "clip":
+		if _frames > 10:
+			var args := OS.get_cmdline_user_args()
+			get_viewport().get_texture().get_image().save_png("%s_%03d.png" % [args[0].get_basename(), _frames - 11])
+		if _frames == 10 + CLIP_FRAMES:
+			get_tree().quit()
+		return
 	if _frames == 24:
 		var args := OS.get_cmdline_user_args()
 		get_viewport().get_texture().get_image().save_png(args[0] if args.size() > 0 else "user://creature.png")

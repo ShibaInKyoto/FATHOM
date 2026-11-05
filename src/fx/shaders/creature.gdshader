@@ -1,9 +1,14 @@
 // Shared creature material. Bodies are modelled along +X (head) with vertex
 // color R as a bioluminescence mask, G as a belly/back blend and B as how
-// freely a part flutters (fin membranes). The vertex stage adds a travelling
-// swim wave, fin flutter and a bend of the whole spine into the curve the
-// creature is turning along; instance uniforms carry per-creature state
-// (sonar mark, hit flash, swim phase, bend) so one material serves a species.
+// freely a part flutters (fin membranes). The vertex stage swims the body:
+// a wave of side-to-side bending runs down the spine from head to tail,
+// growing as it goes, and every section of the body turns with the spine
+// where it hangs, so the tail and its fin sweep through the water like a
+// paddle while the head barely yaws against it. On top of that come fin
+// flutter, a slight roll with each beat and a bend of the whole spine into
+// the curve the creature is turning along; instance uniforms carry
+// per-creature state (sonar mark, hit flash, swim phase and strength, bend)
+// so one material serves a species.
 // The fragment stage can add scales, laid over the skin like roof tiles:
 // each lies over the front of the one behind it, so what shows is a field of
 // crescent free edges facing the tail, in slightly oblique rows, every scale
@@ -23,11 +28,25 @@ uniform float roughness : hint_range(0.0, 1.0) = 0.45;
 uniform float metallic : hint_range(0.0, 1.0) = 0.1;
 uniform float rim_strength = 0.3;
 uniform float body_length = 2.0;
+// How far the tail swings to either side at full stroke (metres).
 uniform float swim_amp = 0.12;
 uniform float swim_freq = 7.0;
+// Radians of wave per metre of body: 2 pi / body_length puts one whole wave
+// on the body, as in most fish; eels carry more.
 uniform float swim_wave = 2.5;
-// 0 = wag laterally (fish), 1 = undulate vertically (rays, eels seen side-on).
+// 0 = sideways, like a fish; 1 = up and down, like a whale's flukes.
 uniform float swim_vertical = 0.25;
+// How the stroke spreads along the body: the head's swing as a share of the
+// tail's, and where (0 at the head, 1 at the tail) the body swings least.
+// Tail-driven fish move little ahead of their rear third (0.2, 0.25); eels
+// swim with all of themselves (0.5, 0.0).
+uniform float swim_head = 0.2;
+uniform float swim_still = 0.25;
+// Roll with each beat (radians at full stroke).
+uniform float swim_roll = 0.0;
+// How far fin membranes (vertex color B) trail behind the stroke, as a share
+// of the swing where they are fixed.
+uniform float fin_lag = 0.0;
 
 instance uniform float marked = 0.0;
 instance uniform float hit_flash = 0.0;
@@ -36,6 +55,9 @@ instance uniform float phase = 0.0;
 // (accumulated on the CPU so a change of pace never makes the stroke jump).
 instance uniform float swim_clock = 0.0;
 instance uniform float glow_boost = 1.0;
+// Strength of the stroke: a drifting creature barely swims, one cruising
+// swims fully, one bursting away swims harder still.
+instance uniform float swim_power = 1.0;
 // Curvature of the spine (radians per metre of body; + curls the nose and
 // tail towards the model's +Y), so the body follows the arc it turns along.
 instance uniform float bend = 0.0;
@@ -91,28 +113,65 @@ vec3 bent(float s, vec2 o, float k) {
 	return vec3(s * a + o.x * c - o.y * sn, s * b + o.x * sn + o.y * c, th);
 }
 
+// Rotates v by angle a (radians, from its first axis towards its second).
+vec2 turned(vec2 v, float a) {
+	float c = cos(a);
+	float sn = sin(a);
+	return vec2(v.x * c - v.y * sn, v.x * sn + v.y * c);
+}
+
+// The swim wave at spine point x: how far the spine stands off its line
+// there (x), its slope (y) and how fast it is swinging across (z). The swing grows along the body as a parabola
+// through the head's share, a quiet point and the tail; past the head and
+// the tail the body carries straight on.
+vec3 swim_wave_at(float x, float ph) {
+	float l = max(body_length, 0.01);
+	float xc = clamp(x, -0.65 * l, 0.5 * l);
+	float u = 0.5 - xc / l;
+	float um = min(swim_still, 0.4);
+	float ea = (1.0 - swim_head) / (1.0 - 2.0 * um);
+	float env = ea * (u - um) * (u - um) + swim_head - ea * um * um;
+	float denv = -2.0 * ea * (u - um) / l;
+	float w = ph - xc * swim_wave;
+	float amp = swim_amp * swim_power;
+	float d = amp * env * sin(w);
+	float slope = amp * (denv * sin(w) - env * swim_wave * cos(w));
+	return vec3(d + slope * (x - xc), slope, amp * env * cos(w));
+}
+
 void vertex() {
 	vec3 p = VERTEX + body_offset;
 	body_pos = p;
 	skin_uv = vec2(p.x, UV.y);
 	// The spine point this vertex hangs from.
 	float ax = anchored ? UV.x + body_offset.x : p.x;
-	float x = ax / max(body_length, 0.01);
-	float tail = smoothstep(0.35, -0.55, x);
 	// INSTANCE_CUSTOM.x carries a per-fish phase when drawn through a MultiMesh.
-	float w = sin(swim_clock * swim_freq + phase + INSTANCE_CUSTOM.x * 6.28 - ax * swim_wave);
-	p.z += w * swim_amp * tail * (1.0 - swim_vertical);
-	p.y += w * swim_amp * tail * swim_vertical;
+	float ph = swim_clock * swim_freq + phase + INSTANCE_CUSTOM.x * 6.28;
 	p.z += sin(swim_clock * flutter_freq + phase * 2.0 - p.x * 3.0 + p.y * 2.0) * flutter_amp * COLOR.b;
+	vec3 sw = swim_wave_at(ax, ph);
+	// Fins trail behind the way their root is moving.
+	p.z -= fin_lag * COLOR.b * sw.z;
+	// A little roll with each beat, about the spine.
+	float r = swim_roll * swim_power * sin(ph);
+	p.yz = turned(p.yz, r);
+	NORMAL.yz = turned(NORMAL.yz, r);
+	// Each section turns with the spine where it hangs: sideways, then up
+	// and down.
+	vec3 o = p - vec3(ax, 0.0, 0.0);
+	float yaw = atan(sw.y * (1.0 - swim_vertical));
+	o.xz = turned(o.xz, yaw);
+	NORMAL.xz = turned(NORMAL.xz, yaw);
+	float pitch = atan(sw.y * swim_vertical);
+	o.xy = turned(o.xy, pitch);
+	NORMAL.xy = turned(NORMAL.xy, pitch);
+	p = vec3(ax, sw.x * swim_vertical, sw.x * (1.0 - swim_vertical)) + o;
 	// INSTANCE_CUSTOM.y carries a schooling fish's bend.
 	float k = bend + INSTANCE_CUSTOM.y;
 	if (abs(k) > 0.0001) {
 		vec3 q = bent(ax - bend_pivot, vec2(p.x - ax, p.y), k);
 		p.x = bend_pivot + q.x;
 		p.y = q.y;
-		float c = cos(q.z);
-		float sn = sin(q.z);
-		NORMAL.xy = vec2(NORMAL.x * c - NORMAL.y * sn, NORMAL.x * sn + NORMAL.y * c);
+		NORMAL.xy = turned(NORMAL.xy, q.z);
 	}
 	VERTEX = p - body_offset;
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;

@@ -71,11 +71,20 @@ var _turn_speed := 6.0
 var _roll := 0.0
 ## Swim stroke so far (see creature.gdshader).
 var _swim_clock := 0.0
+## How hard it swims: a drifting creature barely beats its tail, a cruising
+## one swims fully, and a burst (a dash, a hard turn) kicks harder still.
+var _swim_power := 0.5
+var _kick := 0.0
+var _last_speed := 0.0
+## The body's swim settings, read once from its material so rigid riders
+## swim with the skin (see [method _swum_transform]).
+var _stroke := PackedFloat32Array()
 ## Hurt once, it knows the sub is there for good: no second ambush.
 var _wary := false
 ## The spine's current curvature (see [member flex]) and the heading it was
 ## measured from.
 var _bend := 0.0
+var _local_bend := 0.0
 var _last_heading := 0.0
 ## Rigid parts carried by the bending body (eyes, lures): each node and its
 ## resting transform.
@@ -173,13 +182,14 @@ func on_touch_player(sub: Submarine) -> void:
 
 
 func _update_visuals(delta: float) -> void:
-	_swim_clock += delta * (0.6 + vel.length() * 0.15)
+	_update_stroke(delta)
 	if upright:
 		# Leans gently into its drift (smoothed: a pulsing swimmer's speed
 		# changes every frame).
 		_roll = lerpf(_roll, clampf(vel.x * 0.06, -0.4, 0.4), 1.0 - exp(-2.5 * delta))
 		model.basis = Basis(Vector3.BACK, PI * 0.5 - _roll)
 		_update_instance_params()
+		_pose_riders()
 		return
 	if not lock_facing and vel.length_squared() > 0.04:
 		facing = facing.slerp(vel.normalized(), 1.0 - exp(-_turn_speed * delta)).normalized()
@@ -190,6 +200,28 @@ func _update_visuals(delta: float) -> void:
 	model.basis = Basis(Vector3.BACK, facing.angle()) * Basis(Vector3.RIGHT, _roll)
 	_update_bend(delta)
 	_update_instance_params()
+	_pose_riders()
+
+
+## Paces the swim stroke. Fish beat faster the faster they go; their swing
+## grows from a lazy flick at a hover to a full stroke at about a body length
+## a second, and a sudden burst of speed or a hard turn adds a kick that dies
+## away over a second or so.
+func _update_stroke(delta: float) -> void:
+	var speed := vel.length()
+	var span := _span()
+	var surge := (speed - _last_speed) / maxf(delta, 0.001) / span
+	_last_speed = speed
+	_kick = maxf(_kick * exp(-2.0 * delta), clampf(surge * 0.05, 0.0, 0.6))
+	var want := clampf(0.3 + speed / span * 0.6, 0.3, 1.0) + _kick
+	var rate := 8.0 if want > _swim_power else 2.5
+	_swim_power = lerpf(_swim_power, want, 1.0 - exp(-rate * delta))
+	_swim_clock += delta * (0.6 + speed * 0.15) * (1.0 + _kick)
+
+
+## The body's length along model X (see [member body_span]).
+func _span() -> float:
+	return body_span if body_span > 0.0 else maxf(maxf(reach * 2.0, radius * 2.0), 0.5)
 
 
 ## Bends the spine into the arc the creature is turning along: its heading
@@ -199,19 +231,59 @@ func _update_bend(delta: float) -> void:
 	var heading := facing.angle()
 	var turn := wrapf(heading - _last_heading, -PI, PI) / maxf(delta, 0.001)
 	_last_heading = heading
+	# A hard turn is a burst of swimming too.
+	_kick = maxf(_kick, clampf(absf(turn) * 0.12 - 0.15, 0.0, 0.5))
 	if flex <= 0.0:
 		return
-	var span := body_span if body_span > 0.0 else maxf(reach * 2.0, radius * 2.0)
 	# No more than about 30 degrees from the pivot to either end.
-	var limit := 1.05 / maxf(span, 0.5)
+	var limit := 1.05 / _span()
 	var k := clampf(turn / maxf(vel.length(), 1.5), -limit, limit) * flex
 	_bend = lerpf(_bend, k, 1.0 - exp(-6.0 * delta))
 	# Rolled over to face left, the model's +Y is the other side of the turn.
-	var local := _bend * cos(_roll)
+	_local_bend = _bend * cos(_roll)
 	for v in visuals:
-		v.set_instance_shader_parameter(&"bend", local)
+		v.set_instance_shader_parameter(&"bend", _local_bend)
+
+
+## Moves the rigid riders (eyes) with the swimming, bending body.
+func _pose_riders() -> void:
 	for r: Array in _riders:
-		(r[0] as Node3D).transform = _bent_transform(r[1], local, flex_pivot)
+		(r[0] as Node3D).transform = _bent_transform(_swum_transform(r[1]), _local_bend, flex_pivot)
+
+
+## Where a rigid part resting at [param rest] lands on the swimming body:
+## rolled with the beat and carried off the line and turned with the spine
+## section it rides on, as creature.gdshader moves the skin around it.
+func _swum_transform(rest: Transform3D) -> Transform3D:
+	if _stroke.is_empty():
+		# The shader's own defaults, then whatever the body's material sets.
+		_stroke = PackedFloat32Array([0.12, 7.0, 2.5, 2.0, 0.2, 0.25, 0.25, 0.0])
+		var mat := visuals[0].material_override as ShaderMaterial if not visuals.is_empty() else null
+		if mat:
+			var names := [&"swim_amp", &"swim_freq", &"swim_wave", &"body_length", &"swim_head", &"swim_still",
+				&"swim_vertical", &"swim_roll"]
+			for i in names.size():
+				var val: Variant = mat.get_shader_parameter(names[i])
+				if val != null:
+					_stroke[i] = float(val)
+	var st := _stroke
+	var ph := _swim_clock * st[1] + _phase
+	var x := rest.origin.x
+	var l := maxf(st[3], 0.01)
+	var xc := clampf(x, -0.65 * l, 0.5 * l)
+	var u := 0.5 - xc / l
+	var um := minf(st[5], 0.4)
+	var ea := (1.0 - st[4]) / (1.0 - 2.0 * um)
+	var env := ea * (u - um) * (u - um) + st[4] - ea * um * um
+	var w := ph - xc * st[2]
+	var amp := st[0] * _swim_power
+	var slope := amp * (-2.0 * ea * (u - um) / l * sin(w) - env * st[2] * cos(w))
+	var d := amp * env * sin(w) + slope * (x - xc)
+	var v := st[6]
+	var roll := Basis(Vector3.RIGHT, st[7] * _swim_power * sin(ph))
+	var turn := Basis(Vector3.BACK, atan(slope * v)) * Basis(Vector3.UP, -atan(slope * (1.0 - v)))
+	var o := turn * (roll * rest.origin - Vector3(x, 0.0, 0.0))
+	return Transform3D(turn * roll * rest.basis, Vector3(x, d * v, d * (1.0 - v)) + o)
 
 
 ## Where a rigid part resting at [param rest] (model space) lands when the
@@ -240,6 +312,7 @@ func _update_instance_params() -> void:
 		v.set_instance_shader_parameter(&"marked", _marked / _mark_total if _marked > 0.0 else 0.0)
 		v.set_instance_shader_parameter(&"hit_flash", _flash)
 		v.set_instance_shader_parameter(&"swim_clock", _swim_clock)
+		v.set_instance_shader_parameter(&"swim_power", _swim_power)
 
 
 # --- Damage and status -------------------------------------------------------
