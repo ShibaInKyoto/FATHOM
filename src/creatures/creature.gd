@@ -46,6 +46,12 @@ var ambushable := true
 ## something hurts or bumps it.
 var entranced := false
 var entranced_facing := Vector2(0.0, -1.0)  # World +y is up: facing the floor.
+## How far the spine bends into the curve the creature turns along (0 rigid,
+## 1 all the way), and the point of the body (model X) that stays put.
+var flex := 0.0
+var flex_pivot := 0.0
+## The body's length along model X, which limits how far it can curl.
+var body_span := 0.0
 
 var _stun := 0.0
 var _blind := 0.0
@@ -63,6 +69,13 @@ var _roll := 0.0
 var _swim_clock := 0.0
 ## Hurt once, it knows the sub is there for good: no second ambush.
 var _wary := false
+## The spine's current curvature (see [member flex]) and the heading it was
+## measured from.
+var _bend := 0.0
+var _last_heading := 0.0
+## Rigid parts carried by the bending body (eyes, lures): each node and its
+## resting transform.
+var _riders: Array = []
 
 
 func setup() -> void:
@@ -171,7 +184,51 @@ func _update_visuals(delta: float) -> void:
 	var target_roll := PI if facing.x < 0.0 else 0.0
 	_roll = lerp_angle(_roll, target_roll, 1.0 - exp(-5.0 * delta))
 	model.basis = Basis(Vector3.BACK, facing.angle()) * Basis(Vector3.RIGHT, _roll)
+	_update_bend(delta)
 	_update_instance_params()
+
+
+## Bends the spine into the arc the creature is turning along: its heading
+## turning at w radians a second while it swims at v is a path of curvature
+## w / v, which a body lying along that path follows nose to tail.
+func _update_bend(delta: float) -> void:
+	var heading := facing.angle()
+	var turn := wrapf(heading - _last_heading, -PI, PI) / maxf(delta, 0.001)
+	_last_heading = heading
+	if flex <= 0.0:
+		return
+	var span := body_span if body_span > 0.0 else maxf(reach * 2.0, radius * 2.0)
+	# No more than about 40 degrees from the pivot to either end.
+	var limit := 1.4 / maxf(span, 0.5)
+	var k := clampf(turn / maxf(vel.length(), 1.5), -limit, limit) * flex
+	_bend = lerpf(_bend, k, 1.0 - exp(-6.0 * delta))
+	# Rolled over to face left, the model's +Y is the other side of the turn.
+	var local := _bend * cos(_roll)
+	for v in visuals:
+		v.set_instance_shader_parameter(&"bend", local)
+	for r: Array in _riders:
+		(r[0] as Node3D).transform = _bent_transform(r[1], local, flex_pivot)
+
+
+## Where a rigid part resting at [param rest] (model space) lands when the
+## spine has curvature [param k] about model X [param pivot]: carried along
+## the same arc as creature.gdshader, turned with the body's section there.
+static func _bent_transform(rest: Transform3D, k: float, pivot: float) -> Transform3D:
+	if absf(k) < 0.0001:
+		return rest
+	var s := rest.origin.x - pivot
+	var h := rest.origin.y
+	var th := k * s
+	var a := sin(th) / th if absf(th) > 0.001 else 1.0
+	var b := (1.0 - cos(th)) / th if absf(th) > 0.001 else th * 0.5
+	var o := Vector3(pivot + s * a - h * sin(th), s * b + h * cos(th), rest.origin.z)
+	return Transform3D(Basis(Vector3.BACK, th) * rest.basis, o)
+
+
+## Carries [param node] (a rigid part on the model) along with the body as
+## it bends.
+func _carry(node: Node3D) -> void:
+	_riders.append([node, node.transform])
 
 
 func _update_instance_params() -> void:
@@ -418,6 +475,7 @@ func add_eyes(at: Vector3, eye_radius: float, color: Color, glow := 0.0) -> void
 		eye.position = Vector3(at.x, at.y, at.z * side)
 		eye.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		model.add_child(eye)
+		_carry(eye)
 		if glow <= 0.0:
 			var pupil := MeshInstance3D.new()
 			pupil.mesh = MeshKit.sphere(eye_radius * 0.55, 8, 4)
@@ -434,4 +492,6 @@ func add_visual(mesh: Mesh, mat: Material, xf := Transform3D.IDENTITY) -> MeshIn
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	model.add_child(mi)
 	visuals.append(mi)
+	if mat is ShaderMaterial and (mat as ShaderMaterial).shader == SHADER:
+		mi.set_instance_shader_parameter(&"body_offset", xf.origin)
 	return mi
