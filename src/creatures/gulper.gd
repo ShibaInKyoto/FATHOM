@@ -17,9 +17,11 @@ const STRIKE_TIME := 0.32
 const SENSE_RANGE := 10.0
 ## Model space: the head, x from where the body joins it to the snout.
 ## Stations as in [method BodyKit.body].
-const HEAD := [[-0.7, 0.13, 0.13, 0.12, 0.0], [-0.5, 0.17, 0.17, 0.1, 0.01], [-0.32, 0.18, 0.17, 0.06, 0.02],
-	[-0.1, 0.13, 0.12, 0.04, 0.04], [0.3, 0.08, 0.07, 0.03, 0.045], [0.7, 0.045, 0.045, 0.02, 0.045],
-	[0.92, 0.012, 0.016, 0.01, 0.04]]
+## The back of the skull runs down into a neck as thick as the body, which
+## slides into it from behind.
+const HEAD := [[-1.05, 0.105, 0.105, 0.105, 0.0], [-0.85, 0.125, 0.13, 0.12, 0.0],
+	[-0.62, 0.16, 0.165, 0.1, 0.01], [-0.4, 0.18, 0.17, 0.06, 0.02], [-0.1, 0.13, 0.12, 0.04, 0.04],
+	[0.3, 0.08, 0.07, 0.03, 0.045], [0.7, 0.045, 0.045, 0.02, 0.045], [0.92, 0.012, 0.016, 0.01, 0.04]]
 const HINGE := Vector3(-0.42, -0.05, 0.0)
 const JAW_LEN := 1.32
 ## Sections down the jaw and points across each, for the pouch.
@@ -84,7 +86,7 @@ func build_model() -> void:
 		m.set_shader_parameter(&"flutter_freq", 6.0)
 		m.set_shader_parameter(&"flutter_wave", 4.0)
 		m.set_shader_parameter(&"tooth_color", Color(0.82, 0.78, 0.72)))
-	var parts := [[BodyKit.body(HEAD, 30, 16)]]
+	var parts := [[BodyKit.body(HEAD, 36, 16)]]
 	# Glowing lips along the upper jaw, and needle teeth inside them.
 	for sgn: float in [1.0, -1.0]:
 		var lip := PackedVector3Array()
@@ -302,7 +304,8 @@ func _rebuild_pouch() -> void:
 func _rebuild_body() -> void:
 	if _mouth == Vector3.INF and level and level.field.sample(_rest) < 2.0:
 		_dig_burrow()
-	var head := pos - facing * 0.3
+	# The body's end lies inside the neck, along the head's own line.
+	var head := pos - facing * 0.75
 	var joint := Vector3(head.x, head.y, 0.0)
 	var face := Vector3(facing.x, facing.y, 0.0)
 	var start: Vector3
@@ -314,29 +317,38 @@ func _rebuild_body() -> void:
 		# No rock to burrow in (a specimen shown in open water): it trails away.
 		start = joint - Vector3(wall_normal.x, wall_normal.y, 0.0) * 3.0
 		out = Vector3(wall_normal.x, wall_normal.y, 0.0)
-	# Straight up the burrow and out of its mouth, then arcing over to the
-	# head.
-	var lip := start + out * 2.45
+	# The last stretch runs dead straight along the head's line into the
+	# neck, so the body enters it square; before that, a smooth curve from
+	# the burrow's line to the head's, and before that, straight up the
+	# burrow (stopping short of the neck when the head sits close by).
+	var neck := joint - face * 0.5
+	var run := clampf((neck - start).dot(out) - 0.4, 0.3, 2.45)
+	var lip := start + out * run
 	var pts := PackedVector3Array()
 	for i in 5:
 		pts.append(start.lerp(lip, i / 5.0))
-	var reach := lip.distance_to(joint)
-	var c1 := lip + out * reach * 0.4
-	var c2 := joint - face * reach * 0.35
-	var n := 30
-	for i in 25:
-		var t := float(i) / 24.0
-		var a := 1.0 - t
-		pts.append(lip * a * a * a + c1 * 3.0 * a * a * t + c2 * 3.0 * a * t * t + joint * t * t * t)
+	var gap := lip.distance_to(neck)
+	var t0 := out * gap * 0.8
+	var t1 := face * gap * 0.8
+	for i in 22:
+		var t := float(i) / 21.0
+		var t2 := t * t
+		var t3 := t2 * t
+		pts.append(lip * (2.0 * t3 - 3.0 * t2 + 1.0) + t0 * (t3 - 2.0 * t2 + t) + neck * (-2.0 * t3 + 3.0 * t2)
+			+ t1 * (t3 - t2))
+	for i in range(1, 4):
+		pts.append(neck.lerp(joint, i / 3.0))
+	var n := pts.size()
 	# A slow sway runs up the body from the burrow: little when only a short
-	# neck is out, less again when stretched out in a strike.
-	var stretch := clampf(reach / 5.0, 0.0, 1.0)
-	var sway := 0.22 * clampf((reach - 0.8) / 2.5, 0.12, 1.0) * (1.0 - stretch * 0.7)
-	for i in range(6, n - 1):
-		var t := float(i - 5) / (n - 6)
+	# neck is out, less again when stretched out in a strike; none on the
+	# last stretch into the head.
+	var stretch := clampf(gap / 5.0, 0.0, 1.0)
+	var sway := 0.22 * clampf((gap - 0.8) / 2.5, 0.12, 1.0) * (1.0 - stretch * 0.7)
+	for i in range(6, 26):
+		var t := float(i - 5) / 21.0
 		var tangent := (pts[i + 1] - pts[i - 1]).normalized()
 		var side := tangent.cross(Vector3.BACK).normalized()
-		pts[i] += side * sin(t * TAU * 1.1 - _t * 2.6) * sway * sin(t * PI)
+		pts[i] += side * sin(t * TAU * 1.1 - _t * 2.6) * sway * sin(t * PI) * (1.0 - smoothstep(0.6, 0.95, t))
 	# Its back faces the same way as the head's.
 	var up := model.global_basis.y if is_inside_tree() else Vector3.UP
 	_body_tube(pts, up)
@@ -371,14 +383,19 @@ func _body_tube(pts: PackedVector3Array, up: Vector3) -> void:
 		var tangent := tangents[i]
 		var back := backs[i]
 		var side := tangent.cross(back)
-		var r := lerpf(0.11, 0.13, smoothstep(0.0, 1.0, t))
+		# Thickening a little up the body; its last stretch, inside the neck, a
+		# touch slimmer than the neck so it never shows through.
+		var r := lerpf(0.1, 0.118, smoothstep(0.0, 0.8, t))
 		for j in sides + 1:
 			var a := TAU * j / sides
 			var dir := back * cos(a) + side * sin(a)
 			verts.append(pts[i] + dir * r)
 			colors.append(Color(0.0, smoothstep(0.1, -0.7, cos(a)), 0.0))
 		# The fin runs from the burrow's mouth (the sixth point) to the nape.
-		var h := 0.09 * sin(PI * clampf((i - 6.0) / (n - 9.0), 0.0, 1.0))
+		var h := 0.09 * sin(PI * clampf((i - 6.0) / 18.0, 0.0, 1.0))
+		if _mouth != Vector3.INF:
+			# None of it until the body is clear of the burrow's mouth.
+			h *= smoothstep(0.1, 0.5, (pts[i] - _mouth).dot(_axis))
 		fin.append(pts[i] + back * (r * 0.9))
 		fin_tip.append(pts[i] + back * (r + h))
 	var row := sides + 1
