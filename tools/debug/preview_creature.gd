@@ -6,9 +6,10 @@ extends Node3D
 ## "game" shows one at the distance and lens of the dive camera; "stroke"
 ## shows four moments of one swim stroke from above. "clip" films one side on
 ## and one from above for four seconds (cruising, a burst, cruising again)
-## and saves every frame as <out>_NNN.png.
+## and saves every frame as <out>_NNN.png; "gameclip" films the "game" view
+## the same way (a school is startled half way through).
 ## Usage: xvfb-run godot --path . res://tools/debug/preview_creature.tscn -- <out.png> <species>
-## [sheet|swim|game|stroke|clip] [biome index] [backdrop]
+## [sheet|swim|game|gameclip|stroke|clip] [biome index] [backdrop]
 ## "backdrop" hangs a lit rock-grey wall behind them, to judge see-through
 ## flesh.
 
@@ -21,12 +22,36 @@ var _level: Level
 var _crits: Array[Creature] = []
 var _turns: Array[float] = []
 var _mode := "sheet"
+var _school: Creature
+var _filming := false
+
+
+## One fish of a school, posed and swum like any creature so it can be seen
+## up close ("shoal" in any mode but "game", which shows a whole school).
+class SchoolFish:
+	extends Creature
+
+	func setup() -> void:
+		species = &"shoal"
+		glow_color = level.biome.glow_color
+		body_span = Shoal.BODY_LENGTH
+		radius = 0.2
+		flex = 1.0
+		super.setup()
+
+	func build_model() -> void:
+		var glow := glow_color
+		add_visual(Shoal.fish_mesh(), species_material(func(m: ShaderMaterial) -> void:
+			Shoal.configure_material(m, glow)))
 
 
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	var id := StringName(args[1]) if args.size() > 1 else &"stalker"
 	_mode = args[2] if args.size() > 2 else "sheet"
+	_filming = _mode == "clip" or _mode == "gameclip"
+	if _mode == "gameclip":
+		_mode = "game"
 	var biome := int(args[3]) if args.size() > 3 else 2
 	var backdrop := args.size() > 4 and args[4] == "backdrop"
 	var layout := LevelGenerator.new().generate(BiomeLibrary.get_biome(biome), 5, biome * 2)
@@ -39,11 +64,18 @@ func _ready() -> void:
 	_level.environment_rig.environment.fog_enabled = false
 	var origin := Vector2(layout.size().x * 0.5, -60)
 	var script: Script = LevelPopulator.SPECIES.get(id, null)
+	if id == &"shoal" and _mode != "game":
+		script = SchoolFish
 	if script == null:
 		script = {&"mimic": Mimic, &"mother": BlindMother, &"lamplighter": Lamplighter,
 			&"ironclad": Ironclad}.get(id, Stalker)
 	var count := 3 if _mode == "sheet" else (1 if _mode == "game" else (2 if _mode == "clip" else 4))
 	var span := 0.0
+	if id == &"shoal" and _mode == "game":
+		_school = script.new()
+		_school.pos = origin
+		_level.add_entity(_school)
+		count = 0
 	for i in count:
 		var c: Creature = script.new()
 		c.pos = origin
@@ -53,7 +85,7 @@ func _ready() -> void:
 		span = maxf(c.body_span, maxf(c.reach * 2.0, c.radius * 2.0))
 		_crits.append(c)
 	# Lay them out in a row, and turn each to its view.
-	var gap := span * 1.35 + 1.0
+	var gap := span * 1.35 + minf(1.0, span * 0.4)
 	for i in count:
 		var c := _crits[i]
 		c.pos = origin + Vector2((i - (count - 1) * 0.5) * gap, 0.0)
@@ -110,6 +142,13 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	var dt := 1.0 / 30.0
 	_frames += 1
+	if _school:
+		if _frames == 55:
+			(_school as Shoal).scare(_school.pos + Vector2(-4.0, -1.0))
+		_school.behave(dt)
+		_school._update_visuals(dt)
+		var cam := get_viewport().get_camera_3d()
+		cam.position = Vector3(_school.pos.x, _school.pos.y, cam.position.z)
 	for i in _crits.size():
 		var c := _crits[i]
 		if _mode == "swim":
@@ -131,7 +170,7 @@ func _process(_delta: float) -> void:
 			c.model.rotation_degrees = Vector3(90, 0, 0)
 		if _mode == "clip" and i == 1:
 			c.model.rotation_degrees = Vector3(90, 0, 0)
-	if _mode == "clip":
+	if _filming:
 		if _frames > 10:
 			var args := OS.get_cmdline_user_args()
 			get_viewport().get_texture().get_image().save_png("%s_%03d.png" % [args[0].get_basename(), _frames - 11])

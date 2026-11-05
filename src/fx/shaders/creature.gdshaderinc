@@ -130,7 +130,7 @@ vec2 turned(vec2 v, float a) {
 // there (x), its slope (y) and how fast it is swinging across (z). The swing grows along the body as a parabola
 // through the head's share, a quiet point and the tail; past the head and
 // the tail the body carries straight on.
-vec3 swim_wave_at(float x, float ph) {
+vec3 swim_wave_at(float x, float ph, float power) {
 	float l = max(body_length, 0.01);
 	float xc = clamp(x, -0.65 * l, 0.5 * l);
 	float u = 0.5 - xc / l;
@@ -140,7 +140,7 @@ vec3 swim_wave_at(float x, float ph) {
 	float denv = -2.0 * ea * (u - um) / l;
 	// + x: the wave runs from the head (+X) back to the tail.
 	float w = ph + xc * swim_wave;
-	float amp = swim_amp * swim_power;
+	float amp = swim_amp * power;
 	float d = amp * env * sin(w);
 	float slope = amp * (denv * sin(w) + env * swim_wave * cos(w));
 	return vec3(d + slope * (x - xc), slope, amp * env * cos(w));
@@ -152,14 +152,17 @@ void vertex() {
 	skin_uv = vec2(p.x, UV.y);
 	// The spine point this vertex hangs from.
 	float ax = anchored ? UV.x + body_offset.x : p.x;
-	// INSTANCE_CUSTOM.x carries a per-fish phase when drawn through a MultiMesh.
-	float ph = swim_clock * swim_freq + phase + INSTANCE_CUSTOM.x * 6.28;
+	// Drawn through a MultiMesh (a school), each fish carries its own stroke
+	// in INSTANCE_CUSTOM: x its phase (in cycles), y its bend, z how much
+	// harder than [member swim_power] it swims.
+	float ph = swim_clock * swim_freq + phase + INSTANCE_CUSTOM.x * 6.28318;
+	float power = swim_power * (1.0 + INSTANCE_CUSTOM.z);
 	p.z += sin(swim_clock * flutter_freq + phase * 2.0 + p.x * flutter_wave + p.y * 2.0) * flutter_amp * COLOR.b;
-	vec3 sw = swim_wave_at(ax, ph);
+	vec3 sw = swim_wave_at(ax, ph, power);
 	// Fins trail behind the way their root is moving.
 	p.z -= fin_lag * COLOR.b * sw.z;
 	// A little roll with each beat, about the spine.
-	float r = swim_roll * swim_power * sin(ph);
+	float r = swim_roll * power * sin(ph);
 	p.yz = turned(p.yz, r);
 	NORMAL.yz = turned(NORMAL.yz, r);
 	// Each section turns with the spine where it hangs: sideways, then up
@@ -172,7 +175,6 @@ void vertex() {
 	o.xy = turned(o.xy, pitch);
 	NORMAL.xy = turned(NORMAL.xy, pitch);
 	p = vec3(ax, sw.x * swim_vertical, sw.x * (1.0 - swim_vertical)) + o;
-	// INSTANCE_CUSTOM.y carries a schooling fish's bend.
 	float k = bend + INSTANCE_CUSTOM.y;
 	if (abs(k) > 0.0001) {
 		vec3 q = bent(ax - bend_pivot, vec2(p.x - ax, p.y), k);
