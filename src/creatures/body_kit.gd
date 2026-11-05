@@ -39,9 +39,15 @@ static func body(stations: Array, rings := 48, sides := 24, glow: Callable = Cal
 	var uvs := PackedVector2Array()
 	for i in rings + 1:
 		var t := float(i) / rings
+		# UV.y: the distance round the section from the back's midline, the same
+		# on both flanks, so the skin's scales keep their size all round.
+		var arcs := PackedFloat32Array([0.0])
+		for j in sides:
+			arcs.append(arcs[j] + grid[i][j].distance_to(grid[i][j + 1]))
+		var full := arcs[sides]
 		for j in sides + 1:
 			var p := grid[i][j]
-			uvs.append(Vector2(p.x, 0.0))
+			uvs.append(Vector2(p.x, minf(arcs[j], full - arcs[j])))
 			var along := grid[mini(i + 1, rings)][j] - grid[maxi(i - 1, 0)][j]
 			var round := grid[i][(j + 1) % sides] - grid[i][(j - 1 + sides) % sides]
 			var n := round.cross(along).normalized()
@@ -127,6 +133,54 @@ static func membrane(base: PackedVector2Array, edge: PackedVector2Array, thickne
 	return _mesh(verts, normals, colors, indices, uvs)
 
 
+## A spiny fin in the XY plane: rays from [param roots] to [param tips] (one
+## each), with a membrane stretched between them that dips between each pair
+## of rays by [param notch] of their length, ray tips standing
+## [param tip_out] of their length beyond it. Rays and membrane are one mesh:
+## they ripple together (vertex color B), and every part of a ray hangs from
+## its root (UV.x), so nothing pokes through anything as the fin flutters or
+## the body bends. [param glow] lights the rays towards their tips.
+static func ray_fin(roots: PackedVector2Array, tips: PackedVector2Array, notch := 0.2, tip_out := 0.08,
+		ray_radius := 0.035, thickness := 0.03, glow := 0.0, between := 3, rows := 7) -> ArrayMesh:
+	var n := roots.size()
+	var base := PackedVector2Array()
+	var edge := PackedVector2Array()
+	for i in n:
+		var reach_i := (tips[i] - roots[i]) / (1.0 + tip_out)
+		base.append(roots[i])
+		edge.append(roots[i] + reach_i)
+		if i == n - 1:
+			break
+		var reach_j := (tips[i + 1] - roots[i + 1]) / (1.0 + tip_out)
+		for k in range(1, between + 1):
+			var u := float(k) / (between + 1)
+			var root := roots[i].lerp(roots[i + 1], u)
+			var reach := reach_i.lerp(reach_j, u) * (1.0 - notch * sin(PI * u))
+			base.append(root)
+			edge.append(root + reach)
+	var parts := [[membrane(base, edge, thickness, 0, 0.0, rows)]]
+	for i in n:
+		var dir := tips[i] - roots[i]
+		var reach := dir.length() / (1.0 + tip_out)
+		var pts := PackedVector3Array()
+		var radii := PackedFloat32Array()
+		for k in 7:
+			var f := k / 6.0
+			var p := roots[i] + dir * f
+			pts.append(Vector3(p.x, p.y, 0.0))
+			radii.append(ray_radius * lerpf(1.0, 0.18, f))
+		var tube := ArrayMesh.new()
+		MeshKit.tube(tube, pts, radii, 5)
+		var root := roots[i]
+		var unit := dir / maxf(dir.length(), 0.0001)
+		tube = MeshKit.painted(tube, func(v: Vector3) -> Color:
+			# How far out along the ray, as the membrane counts it (1 at its edge).
+			var f := (Vector2(v.x, v.y) - root).dot(unit) / maxf(reach, 0.0001)
+			return Color(glow * smoothstep(0.35, 1.0, f), 0.3, maxf(f, 0.02)))
+		parts.append([tube, Transform3D.IDENTITY, root.x])
+	return merged(parts)
+
+
 ## A curved tooth from its root at the origin, [param length] long, pointing
 ## down -Y and curving back (-X) towards its tip.
 static func tooth(radius: float, length: float, curve := 0.25, sides := 5) -> ArrayMesh:
@@ -152,10 +206,13 @@ static func teeth_row(from: Vector3, to: Vector3, count: int, length: float, dow
 	for i in count:
 		var f := (i + 0.5) / count
 		var at := from.lerp(to, f)
-		var l := length * (0.55 + 0.45 * sin(PI * f)) * rng.randf_range(0.75, 1.15)
-		var dir := (down + Vector3(rng.randf_range(-0.15, 0.15), 0.0, rng.randf_range(-0.1, 0.1))).normalized()
-		var basis := Basis(Quaternion(Vector3.DOWN, dir))
-		parts.append([tooth(l * 0.16, l, 0.2), Transform3D(basis, at)])
+		# Longest towards the front of the row (its end), a fang or two among them.
+		var l := length * lerpf(0.45, 1.0, f) * rng.randf_range(0.7, 1.1)
+		if rng.randf() < 0.25 and f > 0.4:
+			l *= 1.45
+		var dir := (down.normalized() + Vector3(rng.randf_range(-0.12, 0.12), 0.0, rng.randf_range(-0.08, 0.08)))
+		var basis := Basis(Quaternion(Vector3.DOWN, dir.normalized()))
+		parts.append([tooth(l * 0.11, l, 0.22), Transform3D(basis, at)])
 	return parts
 
 
@@ -177,7 +234,8 @@ static func placed(mesh: Mesh, xf := Transform3D.IDENTITY, anchor := NAN) -> Arr
 			if not is_nan(anchor):
 				uvs[i] = Vector2(anchor, 0.0)
 			elif old != null and (old as PackedVector2Array).size() == verts.size():
-				uvs[i] = Vector2((old as PackedVector2Array)[i].x + xf.origin.x, 0.0)
+				var o: Vector2 = (old as PackedVector2Array)[i]
+				uvs[i] = Vector2(o.x + xf.origin.x, o.y)
 			else:
 				uvs[i] = Vector2(verts[i].x, 0.0)
 		arrays[Mesh.ARRAY_TEX_UV] = uvs

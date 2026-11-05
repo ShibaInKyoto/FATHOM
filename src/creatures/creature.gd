@@ -456,7 +456,12 @@ func species_material(config: Callable) -> ShaderMaterial:
 
 ## A pair of eyes on either flank of the head. Glowing eyes read in the dark;
 ## glossy ones catch the lamp.
-func add_eyes(at: Vector3, eye_radius: float, color: Color, glow := 0.0) -> void:
+## [param hunter] gives glossy black globes with a glowing iris ring of
+## [param color] round a slit pupil instead.
+func add_eyes(at: Vector3, eye_radius: float, color: Color, glow := 0.0, hunter := false) -> void:
+	if hunter:
+		_hunter_eyes(at, eye_radius, color, glow)
+		return
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
 	mat.roughness = 0.05
@@ -482,6 +487,47 @@ func add_eyes(at: Vector3, eye_radius: float, color: Color, glow := 0.0) -> void
 			pupil.material_override = pupil_mat
 			pupil.position = Vector3(eye_radius * 0.35, 0, eye_radius * 0.55 * side)
 			eye.add_child(pupil)
+
+
+## A hunter's eyes (see [method add_eyes]) at [param at]: glossy
+## black globes with a glowing iris ring of [param iris] round a slit pupil,
+## under a heavy brow. They ride the bending body like [method add_eyes].
+func _hunter_eyes(at: Vector3, eye_radius: float, iris: Color, glow: float) -> void:
+	var globe := StandardMaterial3D.new()
+	globe.albedo_color = Color(0.02, 0.02, 0.025)
+	globe.roughness = 0.04
+	globe.metallic = 0.2
+	var ring := StandardMaterial3D.new()
+	ring.albedo_color = iris
+	ring.emission_enabled = true
+	ring.emission = iris
+	ring.emission_energy_multiplier = glow
+	ring.roughness = 0.3
+	var slit := StandardMaterial3D.new()
+	slit.albedo_color = Color(0.0, 0.0, 0.0)
+	slit.roughness = 0.0
+	for side: float in [1.0, -1.0]:
+		var eye := Node3D.new()
+		eye.position = Vector3(at.x, at.y, at.z * side)
+		model.add_child(eye)
+		var ball := MeshInstance3D.new()
+		ball.mesh = MeshKit.sphere(eye_radius, 14, 8)
+		ball.material_override = globe
+		ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		eye.add_child(ball)
+		# The iris: a glowing ring just under the globe's surface, facing out.
+		var iris_ring := MeshInstance3D.new()
+		iris_ring.mesh = MeshKit.lathe(PackedVector2Array([Vector2(0.0, eye_radius * 0.3),
+			Vector2(0.5, eye_radius * 0.72), Vector2(1.0, eye_radius * 0.3)]), eye_radius * 0.08, 20, 2)
+		iris_ring.material_override = ring
+		iris_ring.transform = Transform3D(Basis(Vector3.UP, -PI * 0.5 * side), Vector3(0.0, 0.0, eye_radius * 0.9 * side))
+		eye.add_child(iris_ring)
+		var pupil := MeshInstance3D.new()
+		pupil.mesh = MeshKit.sphere(eye_radius * 0.3, 8, 6)
+		pupil.material_override = slit
+		pupil.transform = Transform3D(Basis().scaled(Vector3(0.45, 1.25, 0.3)), Vector3(0.0, 0.0, eye_radius * 0.93 * side))
+		eye.add_child(pupil)
+		_carry(eye)
 
 
 func add_visual(mesh: Mesh, mat: Material, xf := Transform3D.IDENTITY) -> MeshInstance3D:

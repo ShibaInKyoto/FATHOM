@@ -4,8 +4,11 @@
 // swim wave, fin flutter and a bend of the whole spine into the curve the
 // creature is turning along; instance uniforms carry per-creature state
 // (sonar mark, hit flash, swim phase, bend) so one material serves a species.
-// The fragment stage can add scales: a staggered, overlapping pattern laid in
-// the body's own space, with its relief bump-mapped into the normal.
+// The fragment stage can add scales, laid over the skin like roof tiles:
+// each lies over the front of the one behind it, so what shows is a field of
+// crescent free edges facing the tail, in slightly oblique rows, every scale
+// a little different in size, place and sheen; their relief is bump-mapped
+// into the normal.
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 
@@ -56,12 +59,19 @@ uniform float scale_depth = 0.35;
 uniform float scale_shade = 0.25;
 // Teeth and claws (vertex alpha below a half) are enamel, not skin.
 uniform vec4 tooth_color : source_color = vec4(0.84, 0.8, 0.7, 1.0);
+// Where the scaleless head begins (model X).
+uniform float scale_head_x = 99.0;
+// Fine pitting of bare skin (the head, scaleless bodies), in metres of relief.
+uniform float skin_pits = 0.0;
 // Dark spots dappling the back (0 for none), their size in metres.
 uniform float spots = 0.0;
 uniform float spot_size = 0.35;
 
 varying vec3 world_pos;
 varying vec3 body_pos;
+// The skin's own coordinates: along the body, and round it from the back's
+// midline (BodyKit's UV.y), so scales keep their size all round.
+varying vec2 skin_uv;
 
 // A point hanging off the spine at s metres from the pivot, offset by o
 // (along and up from that spine point), with the spine bent to curvature k:
@@ -78,6 +88,7 @@ vec3 bent(float s, vec2 o, float k) {
 void vertex() {
 	vec3 p = VERTEX + body_offset;
 	body_pos = p;
+	skin_uv = vec2(p.x, UV.y);
 	// The spine point this vertex hangs from.
 	float ax = anchored ? UV.x + body_offset.x : p.x;
 	float x = ax / max(body_length, 0.01);
@@ -101,21 +112,66 @@ void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
-// Overlapping scales in rows along the body, each a rounded plate rising
-// from the one behind it (the head is +X): relief 0..1 and the edge mask.
-vec2 scales(vec3 bp) {
-	vec2 g = vec2(bp.x, bp.y + bp.z * 0.35) / scale_size;
-	float row = floor(g.y);
-	g.x += mod(row, 2.0) * 0.5;
-	vec2 f = fract(g) - vec2(1.0, 0.5);
-	float d = length(f * vec2(0.85, 1.0));
-	float plate = 1.0 - smoothstep(0.55, 1.0, d);
-	float edge = smoothstep(0.75, 1.0, d) * (1.0 - smoothstep(1.0, 1.15, d));
-	return vec2(plate, edge);
-}
-
 float hash2(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float value_noise(vec3 p) {
+	vec3 i = floor(p);
+	vec3 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	float n = i.x + i.y * 57.0 + i.z * 113.0;
+	vec4 a = fract(sin(vec4(n, n + 1.0, n + 57.0, n + 58.0)) * 43758.5453);
+	vec4 b = fract(sin(vec4(n + 113.0, n + 114.0, n + 170.0, n + 171.0)) * 43758.5453);
+	vec4 z = mix(a, b, f.z);
+	vec2 y = mix(z.xy, z.zw, f.y);
+	return mix(y.x, y.y, f.x);
+}
+
+// Bends the normal by the screen-space slope of a height field [param h]
+// (metres) over the surface: bump mapping with no tangents.
+vec3 bumped(vec3 n, vec3 view_pos, float h) {
+	vec3 dpx = dFdx(view_pos);
+	vec3 dpy = dFdy(view_pos);
+	vec3 r1 = cross(dpy, n);
+	vec3 r2 = cross(n, dpx);
+	float det = dot(dpx, r1);
+	if (abs(det) < 1e-8) {
+		return n;
+	}
+	return normalize(n - (dFdx(h) * r1 + dFdy(h) * r2) / det);
+}
+
+// The scale lying on top at skin point [param uv] (the head is +X): of the
+// scales covering it, the one rooted furthest forward lies over the others.
+// Returns its relief (rising from its root to its free rear edge), how close
+// the point is to that free edge, and a random value for the scale.
+vec3 scales(vec2 uv) {
+	vec2 g = uv / scale_size;
+	// Rows run a little obliquely, as they do on a fish.
+	g.x += g.y * 0.3;
+	vec2 cell = floor(g);
+	float best = -1e9;
+	vec3 res = vec3(0.0, 1.0, 0.5);
+	for (int j = -1; j <= 1; j++) {
+		for (int i = -1; i <= 1; i++) {
+			vec2 c = cell + vec2(float(i), float(j));
+			float h = hash2(c);
+			vec2 centre = c + vec2(0.5 + mod(c.y, 2.0) * 0.5, 0.5)
+				+ (vec2(hash2(c + 1.7), hash2(c + 4.3)) - 0.5) * 0.3;
+			float rad = 0.74 + h * 0.18;
+			vec2 d = (g - centre) * vec2(1.0, 1.12);
+			float dist = length(d);
+			if (dist < rad && centre.x > best) {
+				best = centre.x;
+				// 0 at the root (front) .. 1 at the free edge (back).
+				float lift = clamp(0.5 - d.x / (2.0 * rad), 0.0, 1.0);
+				float rim = smoothstep(rad * 0.72, rad, dist) * step(d.x, 0.15);
+				res = vec3(lift * lift * (1.0 - smoothstep(rad * 0.72, rad, dist)), rim, h);
+			}
+		}
+	}
+	return res;
 }
 
 void fragment() {
@@ -130,24 +186,30 @@ void fragment() {
 		float spot = 1.0 - smoothstep(0.18, 0.3, length(f - o * 0.4));
 		base *= 1.0 - spot * spots * step(hash2(cell + 3.1), 0.55) * (1.0 - COLOR.g);
 	}
+	float hgt = 0.0;
+	float bare = 1.0;
+	float px = 0.5 * (length(dFdx(body_pos)) + length(dFdy(body_pos)));
 	if (scale_size > 0.0 && COLOR.b < 0.001 && !enamel) {
-		vec2 sc = scales(body_pos);
+		vec3 sc = scales(skin_uv);
 		// Scales smaller than a few pixels on screen fade out rather than shimmer
-		// (measured the same whichever way the body is turned).
-		float px = 0.5 * (length(dFdx(body_pos)) + length(dFdy(body_pos))) / scale_size;
-		float detail = 1.0 - smoothstep(0.16, 0.42, px);
-		base *= 1.0 - sc.y * scale_shade * detail;
-		// Bump-map the plates' relief into the normal (no tangents needed).
-		float hgt = sc.x * scale_size * scale_depth * detail;
-		vec3 dpx = dFdx(VERTEX);
-		vec3 dpy = dFdy(VERTEX);
-		vec3 r1 = cross(dpy, NORMAL);
-		vec3 r2 = cross(NORMAL, dpx);
-		float det = dot(dpx, r1);
-		if (abs(det) > 1e-8) {
-			vec3 grad = (dFdx(hgt) * r1 + dFdy(hgt) * r2) / det;
-			NORMAL = normalize(NORMAL - grad);
-		}
+		// (measured the same whichever way the body is turned), and they give
+		// way to bare skin at the head along a ragged line.
+		float ragged = (value_noise(body_pos * 3.0) - 0.5) * 0.4;
+		bare = smoothstep(scale_head_x - 0.45, scale_head_x, body_pos.x + ragged);
+		float detail = (1.0 - smoothstep(0.16, 0.42, px / scale_size)) * (1.0 - bare);
+		// Each scale a shade different, its free edge darkest.
+		base *= 1.0 - (sc.y * scale_shade + (sc.z - 0.5) * 0.12) * detail;
+		hgt += sc.x * scale_size * scale_depth * detail;
+	}
+	if (skin_pits > 0.0 && !enamel && COLOR.b < 0.001) {
+		// Bare skin: fine pits and wrinkles, fading out when too small to see.
+		float pits = value_noise(body_pos * 22.0) * 0.6 + value_noise(body_pos * 7.0) * 0.4;
+		float seen = 1.0 - smoothstep(0.012, 0.03, px);
+		hgt += pits * skin_pits * bare * seen;
+		base *= 1.0 - (0.5 - pits) * 0.25 * bare * seen;
+	}
+	if (hgt != 0.0 || scale_size > 0.0 || skin_pits > 0.0) {
+		NORMAL = bumped(NORMAL, VERTEX, hgt);
 	}
 	ALBEDO = base;
 	ROUGHNESS = enamel ? 0.3 : roughness;

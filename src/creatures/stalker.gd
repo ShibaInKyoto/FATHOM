@@ -16,8 +16,10 @@ const BODY: Array = [[-3.5, 0.05, 0.1, 0.1, 0.0], [-3.05, 0.16, 0.28, 0.26, 0.0]
 	[-0.9, 0.56, 0.9, 0.76, 0.05], [0.35, 0.64, 1.0, 0.8, 0.08], [1.5, 0.6, 0.9, 0.7, 0.05],
 	[2.35, 0.52, 0.74, 0.44, 0.0], [3.0, 0.38, 0.54, 0.3, -0.06], [3.55, 0.1, 0.16, 0.1, -0.14]]
 ## Where the lower jaw hinges (model space), and how long it is.
-const JAW_HINGE := Vector3(1.95, -0.4, 0.0)
+const JAW_HINGE := Vector3(1.95, -0.34, 0.0)
 const JAW_LENGTH := 1.5
+## How far the jaw hangs open at rest (radians).
+const REST_GAPE := 0.13
 const BODY_LENGTH := 7.0
 
 var state := State.PATROL
@@ -79,9 +81,11 @@ func build_model() -> void:
 		m.set_shader_parameter(&"anchored", true)
 		m.set_shader_parameter(&"flutter_amp", 0.07)
 		m.set_shader_parameter(&"flutter_freq", 7.0)
-		m.set_shader_parameter(&"scale_size", 0.17)
-		m.set_shader_parameter(&"scale_depth", 0.24)
-		m.set_shader_parameter(&"scale_shade", 0.22)
+		m.set_shader_parameter(&"scale_size", 0.15)
+		m.set_shader_parameter(&"scale_head_x", 2.05)
+		m.set_shader_parameter(&"skin_pits", 0.006)
+		m.set_shader_parameter(&"scale_depth", 0.15)
+		m.set_shader_parameter(&"scale_shade", 0.28)
 		m.set_shader_parameter(&"tooth_color", Color(0.78, 0.72, 0.62)))
 	flex_pivot = 0.4
 	var parts := [[BodyKit.body(BODY, 64, 28)]]
@@ -104,49 +108,50 @@ func build_model() -> void:
 			var arc := ArrayMesh.new()
 			MeshKit.tube(arc, slit, PackedFloat32Array([0.012, 0.022, 0.012]), 5)
 			parts.append([MeshKit.painted(arc, func(_v: Vector3) -> Color: return Color(0.55, 0.0, 0.0))])
-	# The dorsal sail: a membrane on raked spines, their tips glowing.
-	var base := PackedVector2Array()
-	var edge := PackedVector2Array()
+	# The dorsal sail: raked spines glowing towards their tips, the membrane
+	# notched between them.
+	var roots := PackedVector2Array()
+	var tips := PackedVector2Array()
 	for i in 9:
 		var f := i / 8.0
 		var x := lerpf(1.55, -1.9, f)
 		var top := BodyKit.at(BODY, x, 2) + BodyKit.at(BODY, x, 4)
-		base.append(Vector2(x, top - 0.12))
-		var h := lerpf(0.5, 1.25, sin(PI * pow(f, 0.8))) * (1.0 - f * 0.25)
-		edge.append(Vector2(x - 0.55 - h * 0.35, top + h))
-	parts.append([BodyKit.membrane(base, edge, 0.05, 8, 0.0, 6)])
-	for i in 9:
-		var tip := edge[i] + (edge[i] - base[i]).normalized() * 0.18
-		parts.append([MeshKit.spike(0.05, base[i].distance_to(tip), 0.8, 5),
-			Transform3D(Basis(Vector3.BACK, (tip - base[i]).angle()), Vector3(base[i].x, base[i].y, 0.0)), base[i].x])
-	# A deeply forked tail.
-	var tb := PackedVector2Array()
-	var te := PackedVector2Array()
-	for i in 9:
-		var f := i / 8.0
-		tb.append(Vector2(-3.25 + absf(f - 0.5) * 0.25, lerpf(0.26, -0.24, f)))
+		var h := lerpf(0.55, 1.35, sin(PI * pow(f, 0.8))) * (1.0 - f * 0.25)
+		roots.append(Vector2(x, top - 0.1))
+		tips.append(Vector2(x - 0.5 - h * 0.4, top + h))
+	parts.append([BodyKit.ray_fin(roots, tips, 0.24, 0.1, 0.045, 0.03, 0.85)])
+	# A deeply forked tail, its rays fanning from the root.
+	roots = PackedVector2Array()
+	tips = PackedVector2Array()
+	for i in 11:
+		var f := i / 10.0
 		var lobe := absf(f - 0.5) * 2.0
-		te.append(Vector2(lerpf(-4.05, -5.15, pow(lobe, 0.7)), lerpf(1.75, -1.6, f) * lerpf(0.35, 1.0, lobe)))
-	parts.append([BodyKit.membrane(tb, te, 0.06, 9, 0.12, 7)])
-	# Long swept pectorals, and small pelvic and anal fins.
-	var pb := PackedVector2Array([Vector2(1.45, 0.0), Vector2(1.2, 0.02), Vector2(0.95, 0.04), Vector2(0.7, 0.05)])
-	var pe := PackedVector2Array([Vector2(0.75, -0.35), Vector2(0.0, -0.62), Vector2(-0.7, -0.75), Vector2(-1.15,
-		-0.6)])
-	var pec := BodyKit.membrane(pb, pe, 0.05, 5, 0.0, 6)
+		roots.append(Vector2(-3.22 + lobe * 0.12, lerpf(0.24, -0.22, f)))
+		tips.append(Vector2(lerpf(-4.1, -5.15, pow(lobe, 0.75)), lerpf(1.75, -1.6, f) * lerpf(0.3, 1.0, lobe)))
+	parts.append([BodyKit.ray_fin(roots, tips, 0.05, 0.03, 0.04, 0.04, 0.45)])
+	# Swept pectorals, pelvics and an anal fin: small fans of soft rays.
+	var pec := BodyKit.ray_fin(_fan(Vector2(1.45, 0.02), Vector2(1.0, 0.06), 6),
+		PackedVector2Array([Vector2(0.9, -0.42), Vector2(0.35, -0.74), Vector2(-0.2, -0.88), Vector2(-0.68, -0.84),
+		Vector2(-1.02, -0.62), Vector2(-1.18, -0.34)]), 0.12, 0.02, 0.028, 0.03)
 	for sgn: float in [1.0, -1.0]:
-		parts.append([pec, Transform3D(Basis(Vector3.RIGHT, sgn * 1.05), Vector3(0.15, -0.3, 0.5 * sgn))])
-	var vb := PackedVector2Array([Vector2(-0.4, 0.0), Vector2(-0.7, 0.0), Vector2(-1.0, 0.0)])
-	var ve := PackedVector2Array([Vector2(-0.75, -0.45), Vector2(-1.05, -0.55), Vector2(-1.25, -0.4)])
+		parts.append([pec, Transform3D(Basis(Vector3.RIGHT, sgn * 1.12), Vector3(0.15, -0.3, 0.52 * sgn))])
+	var pelvic := BodyKit.ray_fin(_fan(Vector2(-0.35, 0.0), Vector2(-0.6, 0.0), 4),
+		PackedVector2Array([Vector2(-0.7, -0.42), Vector2(-0.95, -0.5), Vector2(-1.15, -0.45), Vector2(-1.25, -0.3)]),
+		0.12, 0.02, 0.024, 0.025)
 	for sgn: float in [1.0, -1.0]:
-		parts.append([BodyKit.membrane(vb, ve, 0.04, 3, 0.0, 4), Transform3D(Basis(Vector3.RIGHT, sgn * 0.5),
-			Vector3(0.0, -0.78, 0.25 * sgn))])
-	var ab := PackedVector2Array([Vector2(-1.7, -0.5), Vector2(-2.1, -0.38), Vector2(-2.5, -0.26)])
-	var ae := PackedVector2Array([Vector2(-2.05, -1.05), Vector2(-2.45, -0.9), Vector2(-2.75, -0.6)])
-	parts.append([BodyKit.membrane(ab, ae, 0.04, 4, 0.0, 4)])
+		parts.append([pelvic, Transform3D(Basis(Vector3.RIGHT, sgn * 0.55), Vector3(0.0, -0.76, 0.22 * sgn))])
+	parts.append([BodyKit.ray_fin(_fan(Vector2(-1.7, -0.52), Vector2(-2.55, -0.26), 5),
+		PackedVector2Array([Vector2(-2.0, -1.0), Vector2(-2.3, -0.98), Vector2(-2.55, -0.86), Vector2(-2.8, -0.68),
+		Vector2(-2.98, -0.48)]), 0.15, 0.02, 0.026, 0.025)])
+	# A heavy brow ridge over each eye.
+	for sgn: float in [1.0, -1.0]:
+		parts.append([MeshKit.ball(0.16, 0.0, 10, 6), Transform3D(Basis(Vector3.BACK, -0.25).scaled(Vector3(2.0, 0.55,
+			0.7)), Vector3(2.72, 0.47, 0.33 * sgn))])
 	# The upper teeth, fixed in the skull.
 	for sgn: float in [1.0, -1.0]:
-		for t: Array in BodyKit.teeth_row(Vector3(2.35, -0.36, 0.3 * sgn), Vector3(3.32, -0.16, 0.08 * sgn), 7,
-				0.36, Vector3.DOWN, 3 if sgn > 0.0 else 4):
+		# Along the outside of the lower jaw, an overbite of needles.
+		for t: Array in BodyKit.teeth_row(Vector3(2.4, -0.3, 0.43 * sgn), Vector3(3.36, -0.12, 0.13 * sgn), 8,
+				0.36, Vector3(0.0, -1.0, 0.06 * sgn), 3 if sgn > 0.0 else 4):
 			parts.append([BodyKit.enamel(t[0]), t[1], (t[1] as Transform3D).origin.x])
 	add_visual(BodyKit.merged(parts), mat)
 	# The lower jaw, hinged under the head, with its own teeth.
@@ -154,11 +159,19 @@ func build_model() -> void:
 		[1.1, 0.25, 0.08, 0.18, -0.05], [JAW_LENGTH, 0.07, 0.04, 0.05, 0.0]], 16, 16)
 	var jaw_parts := [[jaw_body]]
 	for sgn: float in [1.0, -1.0]:
-		for t: Array in BodyKit.teeth_row(Vector3(0.45, 0.1, 0.26 * sgn), Vector3(1.38, 0.03, 0.07 * sgn), 6,
-				0.3, Vector3.UP, 5 if sgn > 0.0 else 6):
+		for t: Array in BodyKit.teeth_row(Vector3(0.4, 0.1, 0.27 * sgn), Vector3(1.4, 0.03, 0.08 * sgn), 7,
+				0.42, Vector3(0.0, 1.0, 0.12 * sgn), 5 if sgn > 0.0 else 6):
 			jaw_parts.append([BodyKit.enamel(t[0]), t[1], (t[1] as Transform3D).origin.x])
-	_jaw = add_visual(BodyKit.merged(jaw_parts), mat, Transform3D(Basis(), JAW_HINGE))
-	add_eyes(Vector3(2.82, 0.3, 0.4), 0.13, Color(1.0, 0.3, 0.15), 4.0)
+	_jaw = add_visual(BodyKit.merged(jaw_parts), mat, Transform3D(Basis(Vector3.BACK, -REST_GAPE), JAW_HINGE))
+	add_eyes(Vector3(2.8, 0.3, 0.39), 0.14, Color(1.0, 0.2, 0.06), 3.0, true)
+
+
+## [param count] fin ray roots evenly along a fin's base from [param a] to [param b].
+static func _fan(a: Vector2, b: Vector2, count: int) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for i in count:
+		out.append(a.lerp(b, i / maxf(count - 1.0, 1.0)))
+	return out
 
 
 func _patrol_point() -> Vector2:
@@ -238,7 +251,8 @@ func behave(delta: float) -> void:
 			if _timer <= 0.0:
 				state = State.PATROL
 				_target = _patrol_point()
-	_jaw.rotation.z = lerpf(_jaw.rotation.z, -jaw_open, 1.0 - exp(-8.0 * delta))
+	# Even at rest the mouth hangs a little open, the teeth showing.
+	_jaw.rotation.z = lerpf(_jaw.rotation.z, -(jaw_open + REST_GAPE), 1.0 - exp(-8.0 * delta))
 
 
 func on_touch_player(sub: Submarine) -> void:
