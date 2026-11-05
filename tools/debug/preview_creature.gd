@@ -8,7 +8,9 @@ extends Node3D
 ## and one from above for four seconds (cruising, a burst, cruising again)
 ## and saves every frame as <out>_NNN.png.
 ## Usage: xvfb-run godot --path . res://tools/debug/preview_creature.tscn -- <out.png> <species>
-## [sheet|swim|game|stroke|clip] [biome index]
+## [sheet|swim|game|stroke|clip] [biome index] [backdrop]
+## "backdrop" hangs a lit rock-grey wall behind them, to judge see-through
+## flesh.
 
 const TURN := 1.6
 const SPEED := 4.0
@@ -26,6 +28,7 @@ func _ready() -> void:
 	var id := StringName(args[1]) if args.size() > 1 else &"stalker"
 	_mode = args[2] if args.size() > 2 else "sheet"
 	var biome := int(args[3]) if args.size() > 3 else 2
+	var backdrop := args.size() > 4 and args[4] == "backdrop"
 	var layout := LevelGenerator.new().generate(BiomeLibrary.get_biome(biome), 5, biome * 2)
 	_level = Level.new()
 	add_child(_level)
@@ -91,6 +94,17 @@ func _ready() -> void:
 		_level.environment_rig.environment.ambient_light_energy = 0.8
 	add_child(cam)
 	cam.current = true
+	if backdrop:
+		var wall := MeshInstance3D.new()
+		var quad := QuadMesh.new()
+		quad.size = Vector2(width * 3.0, width * 3.0)
+		wall.mesh = quad
+		var rock := StandardMaterial3D.new()
+		rock.albedo_color = Color(0.32, 0.36, 0.38)
+		rock.roughness = 0.9
+		wall.material_override = rock
+		wall.position = Vector3(origin.x, origin.y, -span * 0.6)
+		add_child(wall)
 
 
 func _process(_delta: float) -> void:

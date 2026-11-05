@@ -9,6 +9,8 @@ extends Entity
 enum Eye { PLAIN, HUNTER, FISH }
 
 const SHADER := preload("res://src/fx/shaders/creature.gdshader")
+## The same material, see-through (see creature_glass.gdshader).
+const GLASS_SHADER := preload("res://src/fx/shaders/creature_glass.gdshader")
 const THINK_INTERVAL := 0.2
 ## Harpoon damage multiplier against a creature that has not noticed the sub.
 const AMBUSH_MULT := 2.0
@@ -275,9 +277,9 @@ func _swum_transform(rest: Transform3D) -> Transform3D:
 	var um := minf(st[5], 0.4)
 	var ea := (1.0 - st[4]) / (1.0 - 2.0 * um)
 	var env := ea * (u - um) * (u - um) + st[4] - ea * um * um
-	var w := ph - xc * st[2]
+	var w := ph + xc * st[2]
 	var amp := st[0] * _swim_power
-	var slope := amp * (-2.0 * ea * (u - um) / l * sin(w) - env * st[2] * cos(w))
+	var slope := amp * (-2.0 * ea * (u - um) / l * sin(w) + env * st[2] * cos(w))
 	var d := amp * env * sin(w) + slope * (x - xc)
 	var v := st[6]
 	var roll := Basis(Vector3.RIGHT, st[7] * _swim_power * sin(ph))
@@ -519,13 +521,15 @@ func wander_point(center: Vector2, spread: float) -> Vector2:
 
 # --- Visual helpers ------------------------------------------------------------
 
-## Shared material per species and biome, configured once.
-func species_material(config: Callable) -> ShaderMaterial:
-	var key := StringName("%s/%s" % [species, level.biome.id])
+## Shared material per species and biome, configured once; a species drawn
+## with more than one (see-through flesh over solid bones) names each
+## [param part] and may draw it with another [param shader].
+func species_material(config: Callable, part := &"", shader: Shader = SHADER) -> ShaderMaterial:
+	var key := StringName("%s/%s/%s" % [species, level.biome.id, part])
 	if _materials.has(key):
 		return _materials[key]
 	var mat := ShaderMaterial.new()
-	mat.shader = SHADER
+	mat.shader = shader
 	config.call(mat)
 	_materials[key] = mat
 	return mat
@@ -541,7 +545,7 @@ func add_eyes(at: Vector3, eye_radius: float, color: Color, glow := 0.0, style :
 		_hunter_eyes(at, eye_radius, color, glow)
 		return
 	if style == Eye.FISH:
-		_fish_eyes(at, eye_radius, color)
+		_fish_eyes(at, eye_radius, color, glow)
 		return
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
@@ -612,16 +616,21 @@ func _hunter_eyes(at: Vector3, eye_radius: float, iris: Color, glow: float) -> v
 
 
 ## A fish's eyes (see [method add_eyes]): a dark glossy globe with a
-## metallic iris disc of [param iris] and a round pupil set flush in it.
-func _fish_eyes(at: Vector3, eye_radius: float, iris: Color) -> void:
+## metallic iris disc of [param iris] (glowing, given [param glow]) and a
+## round pupil set flush in it.
+func _fish_eyes(at: Vector3, eye_radius: float, iris: Color, glow := 0.0) -> void:
 	var globe := StandardMaterial3D.new()
 	globe.albedo_color = Color(0.03, 0.035, 0.04)
 	globe.roughness = 0.03
 	globe.metallic = 0.1
 	var ring := StandardMaterial3D.new()
 	ring.albedo_color = iris
-	ring.metallic = 0.85
+	ring.metallic = 0.85 if glow <= 0.0 else 0.0
 	ring.roughness = 0.22
+	if glow > 0.0:
+		ring.emission_enabled = true
+		ring.emission = iris
+		ring.emission_energy_multiplier = glow
 	var black := StandardMaterial3D.new()
 	black.albedo_color = Color(0.0, 0.0, 0.0)
 	black.roughness = 0.0
@@ -653,6 +662,6 @@ func add_visual(mesh: Mesh, mat: Material, xf := Transform3D.IDENTITY) -> MeshIn
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	model.add_child(mi)
 	visuals.append(mi)
-	if mat is ShaderMaterial and (mat as ShaderMaterial).shader == SHADER:
+	if mat is ShaderMaterial and (mat as ShaderMaterial).shader in [SHADER, GLASS_SHADER]:
 		mi.set_instance_shader_parameter(&"body_offset", xf.origin)
 	return mi
