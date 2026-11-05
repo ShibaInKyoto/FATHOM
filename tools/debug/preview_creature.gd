@@ -3,7 +3,8 @@ extends Node3D
 ## swims. "sheet" shows it side on, three-quarter and from above; "swim" shows
 ## four of it mid-stroke: swimming straight (two moments of the stroke), and
 ## turning up and turning down, so the spine's bend shows.
-## "game" shows one at the distance and lens of the dive camera.
+## "game" shows one at the distance and lens of the dive camera; "stroke"
+## shows four moments of one swim stroke from above.
 ## Usage: xvfb-run godot --path . res://tools/debug/preview_creature.tscn -- <out.png> <species> [sheet|swim|game]
 ## [biome index]
 
@@ -50,8 +51,11 @@ func _ready() -> void:
 	for i in count:
 		var c := _crits[i]
 		c.pos = origin + Vector2((i - (count - 1) * 0.5) * gap, 0.0)
-		if _mode == "sheet" or _mode == "game":
+		if _mode == "sheet" or _mode == "game" or _mode == "stroke":
 			_turns.append(0.0)
+			if _mode == "stroke":
+				c.set(&"_swim_clock", i / 4.0 * TAU / maxf(float(c.visuals[0].material_override.get_shader_parameter(
+					&"swim_freq")), 0.1) if not c.visuals.is_empty() else 0.0)
 		else:
 			_turns.append([0.0, 0.0, TURN, -TURN][i])
 			# Start a quarter of the way into a turn, so it heads right at the shot.
@@ -97,6 +101,9 @@ func _process(_delta: float) -> void:
 		c._update_visuals(dt)
 		if _mode == "sheet" and i > 0:
 			c.model.rotation_degrees = [Vector3(0, -35, 0), Vector3(80, 0, 0)][i - 1]
+		if _mode == "stroke":
+			c.model.rotation_degrees = Vector3(90, 0, 0)
+			c.set(&"_swim_clock", float(c.get(&"_swim_clock")) - dt * (0.6 + c.vel.length() * 0.15))
 	if _frames == 24:
 		var args := OS.get_cmdline_user_args()
 		get_viewport().get_texture().get_image().save_png(args[0] if args.size() > 0 else "user://creature.png")
