@@ -53,6 +53,8 @@ var _cheek_mesh := ArrayMesh.new()
 var _tip := ESCA_REST
 var _tip_v := Vector3.ZERO
 var _twitch_wait := 2.0
+## How far through its swallow after a snap.
+var _gulp := 1.0
 ## Which way it faces while it waits, holding its lure out, and which way
 ## it lunges.
 var _rest_facing := Vector2.RIGHT
@@ -98,7 +100,7 @@ func build_model() -> void:
 		m.set_shader_parameter(&"skin_tex_shade", 0.25)
 		m.set_shader_parameter(&"body_length", BODY_LENGTH)
 		# A poor swimmer: a lazy beat of the tail end, the big head steady.
-		m.set_shader_parameter(&"swim_amp", 0.16)
+		m.set_shader_parameter(&"swim_amp", 0.42)
 		m.set_shader_parameter(&"swim_freq", 2.6)
 		m.set_shader_parameter(&"swim_wave", 2.0)
 		m.set_shader_parameter(&"swim_vertical", 0.0)
@@ -107,8 +109,9 @@ func build_model() -> void:
 		m.set_shader_parameter(&"fin_lag", 0.4)
 		m.set_shader_parameter(&"bend_pivot", 0.3)
 		m.set_shader_parameter(&"anchored", true)
-		m.set_shader_parameter(&"flutter_amp", 0.05)
-		m.set_shader_parameter(&"flutter_freq", 7.0)
+		# Fins sculling slowly to hold it in place.
+		m.set_shader_parameter(&"flutter_amp", 0.1)
+		m.set_shader_parameter(&"flutter_freq", 4.5)
 		m.set_shader_parameter(&"flutter_wave", 5.0)
 		m.set_shader_parameter(&"fin_color", Color(0.025, 0.02, 0.022, 1.0))
 		m.set_shader_parameter(&"tooth_color", Color(0.62, 0.68, 0.7)))
@@ -292,44 +295,53 @@ func think() -> void:
 
 func behave(delta: float) -> void:
 	_t += delta
-	var want := 0.06 + sin(_t * 0.7) * 0.03
+	# Breathing: the mouth pumps slowly open and shut.
+	var want := 0.05 + 0.16 * pow(0.5 + 0.5 * sin(_t * 1.5), 2.0)
 	var light := 1.4 + sin(_t * 2.1) * 0.25
-	# Where the bulb wants to be: dangling in front of the mouth, bobbing.
-	var tip_rest := ESCA_REST + Vector3(sin(_t * 0.9) * 0.06, sin(_t * 1.3) * 0.08, 0.0)
+	# Where the bulb wants to be: dangling in front of the mouth, swaying in
+	# slow loops (towards the camera and away too) and bobbing.
+	var tip_rest := ESCA_REST + Vector3(sin(_t * 0.61) * 0.2, sin(_t * 1.1) * 0.12 + sin(_t * 0.37) * 0.08,
+		sin(_t * 0.83 + 0.6) * 0.25)
 	match state:
 		State.LURE:
-			# Holds still, sculling, its lure held out the same way.
-			seek(_home, 1.0, 1.5, delta)
+			# Hangs in the water sculling, never quite still: it drifts about
+			# its spot in slow loops and nods, its lure held out the same way.
+			var drift := Vector2(sin(_t * 0.31) * 0.7 + sin(_t * 0.77) * 0.2, sin(_t * 0.47 + 1.0) * 0.45)
+			seek(_home + drift, 0.9, 1.2, delta)
 			lock_facing = true
-			facing = facing.slerp(_rest_facing, 1.0 - exp(-1.5 * delta)).normalized()
+			_turn_towards(_rest_facing.rotated(sin(_t * 0.43) * 0.14 + sin(_t * 1.07) * 0.04), 2.0, delta)
 			# Now and then a twitch: the bulb darts and wobbles back.
 			_twitch_wait -= delta
 			if _twitch_wait <= 0.0:
 				_twitch_wait = 1.2 + fposmod(sin(_t * 7.31) * 43758.5, 2.6)
 				var r := fposmod(sin(_t * 3.17) * 12345.6, 1.0)
-				_tip_v += Vector3(lerpf(-2.2, 2.6, r), lerpf(1.8, -1.6, fposmod(r * 7.0, 1.0)), 0.0)
+				_tip_v += Vector3(lerpf(-3.0, 3.4, r), lerpf(2.4, -2.0, fposmod(r * 7.0, 1.0)),
+					lerpf(-2.0, 2.0, fposmod(r * 13.0, 1.0)))
 		State.SNAP:
 			_timer -= delta
 			# Whips round to its prey as it lunges.
 			if _snap_dir != Vector2.ZERO:
-				facing = facing.slerp(_snap_dir, 1.0 - exp(-30.0 * delta)).normalized()
+				_turn_towards(_snap_dir, 30.0, delta)
 			vel = facing * SNAP_SPEED
 			# Gapes in an instant, and snaps shut at the end of the lunge; the
 			# lure flicks up out of the way.
-			want = 1.0 if _timer > 0.08 else 0.05
+			want = 1.0 if _timer > 0.08 else 0.0
 			tip_rest = Vector3(1.75, 1.75, 0.0)
 			if _timer <= 0.0:
 				state = State.RETURN
 				_timer = 2.5
 				lock_facing = false
+				_gulp = 0.0
 		State.RETURN:
 			_timer -= delta
 			seek(_home, 3.0, 2.0, delta)
+			# Swallows hard twice after the snap.
+			_gulp = minf(_gulp + delta / 0.9, 1.0)
 			# Swims home facing its way, turning back to wait as it arrives.
 			lock_facing = pos.distance_to(_home) < 2.0
 			if lock_facing:
-				facing = facing.slerp(_rest_facing, 1.0 - exp(-2.5 * delta)).normalized()
-			want = 0.12
+				_turn_towards(_rest_facing, 2.5, delta)
+			want = 0.08 + 0.3 * absf(sin(_gulp * TAU)) * (1.0 - _gulp)
 			if _timer <= 0.0 or pos.distance_to(_home) < 1.0:
 				state = State.LURE
 		State.HIDE:

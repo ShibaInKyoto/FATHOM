@@ -59,6 +59,9 @@ instance uniform float swim_power = 1.0;
 // Curvature of the spine (radians per metre of body; + curls the nose and
 // tail towards the model's +Y), so the body follows the arc it turns along.
 instance uniform float bend = 0.0;
+// Curvature sideways, curling the nose and tail towards the model's +Z: the
+// C the body makes as the creature turns round through the depth.
+instance uniform float bend_side = 0.0;
 // Where this mesh sits along the body (its node's offset in the model), so a
 // separate part (a jaw) bends and swims with the body around it.
 instance uniform vec3 body_offset = vec3(0.0);
@@ -197,6 +200,14 @@ void vertex() {
 	o.xy = turned(o.xy, pitch);
 	NORMAL.xy = turned(NORMAL.xy, pitch);
 	p = vec3(ax, sw.x * swim_vertical, sw.x * (1.0 - swim_vertical)) + o;
+	// Drawn through a MultiMesh, INSTANCE_CUSTOM.w carries the sideways curl.
+	float ks = bend_side + INSTANCE_CUSTOM.w;
+	if (abs(ks) > 0.0001) {
+		vec3 q = bent(ax - bend_pivot, vec2(p.x - ax, p.z), ks);
+		p.x = bend_pivot + q.x;
+		p.z = q.y;
+		NORMAL.xz = turned(NORMAL.xz, q.z);
+	}
 	float k = bend + INSTANCE_CUSTOM.y;
 	if (abs(k) > 0.0001) {
 		vec3 q = bent(ax - bend_pivot, vec2(p.x - ax, p.y), k);

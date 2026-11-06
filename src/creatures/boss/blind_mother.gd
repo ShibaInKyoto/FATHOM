@@ -44,6 +44,8 @@ var _gills: MeshInstance3D
 func setup() -> void:
 	species = &"mother"
 	title = "THE BLIND MOTHER"
+	# Her coils are laid out from her facing: her head turns with it at once.
+	turn_rate = -1.0
 	max_hp = 280.0
 	radius = 2.3
 	mass = 60.0

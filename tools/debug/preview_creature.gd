@@ -9,7 +9,9 @@ extends Node3D
 ## and saves every frame as <out>_NNN.png; "gameclip" films the "game" view
 ## the same way (a school is startled half way through).
 ## Usage: xvfb-run godot --path . res://tools/debug/preview_creature.tscn -- <out.png> <species>
-## [sheet|swim|game|gameclip|stroke|clip|wall|wallclip|wallgame] [biome index] [backdrop]
+## [sheet|swim|game|gameclip|stroke|clip|turnclip|wall|wallclip|wallgame] [biome index] [backdrop]
+## "turnclip" films one swimming right, turning back left and back right
+## again, side on, to judge how it turns.
 ## "wall", "wallclip" and "wallgame" set a wall dweller on a real floor of
 ## the cave, rock and all: close, filmed (it strikes part way through), or
 ## at the game camera's distance.
@@ -53,7 +55,7 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	var id := StringName(args[1]) if args.size() > 1 else &"stalker"
 	_mode = args[2] if args.size() > 2 else "sheet"
-	_filming = _mode == "clip" or _mode == "gameclip" or _mode == "wallclip"
+	_filming = _mode == "clip" or _mode == "gameclip" or _mode == "wallclip" or _mode == "turnclip"
 	if _mode == "gameclip":
 		_mode = "game"
 	var biome := int(args[3]) if args.size() > 3 else 2
@@ -76,7 +78,13 @@ func _ready() -> void:
 	if script == null:
 		script = {&"mimic": Mimic, &"mother": BlindMother, &"lamplighter": Lamplighter,
 			&"ironclad": Ironclad}.get(id, Stalker)
-	var count := 3 if _mode == "sheet" else (1 if _mode == "game" else (2 if _mode == "clip" else 4))
+	var count := 4
+	if _mode == "sheet":
+		count = 3
+	elif _mode == "game" or _mode == "turnclip":
+		count = 1
+	elif _mode == "clip":
+		count = 2
 	var span := 0.0
 	if id == &"shoal" and _mode == "game":
 		_school = script.new()
@@ -97,7 +105,7 @@ func _ready() -> void:
 	for i in count:
 		var c := _crits[i]
 		c.pos = origin + Vector2((i - (count - 1) * 0.5) * gap, 0.0)
-		if _mode == "sheet" or _mode == "game" or _mode == "stroke" or _mode == "clip":
+		if _mode in ["sheet", "game", "stroke", "clip", "turnclip"]:
 			_turns.append(0.0)
 			if _mode == "stroke":
 				c.set(&"_swim_clock", i / 4.0 * TAU / maxf(float(c.visuals[0].material_override.get_shader_parameter(
@@ -106,7 +114,6 @@ func _ready() -> void:
 			_turns.append([0.0, 0.0, TURN, -TURN][i])
 			# Start a quarter of the way into a turn, so it heads right at the shot.
 			c.facing = Vector2.RIGHT.rotated(-_turns[i] * 0.4)
-			c._last_heading = c.facing.angle()
 			c.set(&"_swim_clock", i * 0.37)
 		c.sync_transform()
 		if c.has_method(&"_rebuild_body"):
@@ -168,12 +175,14 @@ func _process(_delta: float) -> void:
 			var args := OS.get_cmdline_user_args()
 			var turn := deg_to_rad(float(args[4])) if args.size() > 4 and args[4].is_valid_float() else 0.46
 			g.set(&"_strike_to", g.pos + g.wall_normal.rotated(turn) * 7.0)
-		if _mode == "wallclip" and _frames == 50 and _dweller is Lurelight:
+		if _mode == "wallclip" and _frames == 120 and _dweller is Lurelight:
 			# Snap at something swimming up to the lure.
 			var a := _dweller as Lurelight
 			a.state = Lurelight.State.SNAP
 			a.set(&"_timer", 0.4)
 			a.lock_facing = true
+			# At something behind it and above: it whips round to bite.
+			a.set(&"_snap_dir", Vector2(-signf(a.facing.x), 0.5).normalized())
 		_dweller.tick(dt)
 		_dweller.sync_transform()
 	if _school:
@@ -188,6 +197,16 @@ func _process(_delta: float) -> void:
 		if _mode == "swim":
 			c.facing = c.facing.rotated(_turns[i] * dt)
 		c.vel = c.facing * (0.4 if c.upright else SPEED)
+		if _mode == "turnclip":
+			# Right, back left (with a climb), then right again (with a dive).
+			var t := _frames * dt
+			c.lock_facing = false
+			var heading := Vector2.RIGHT
+			if t > 1.0 and t < 2.6:
+				heading = Vector2(-1.0, 0.25)
+			elif t >= 2.6:
+				heading = Vector2(1.0, -0.3)
+			c.vel = heading.normalized() * SPEED
 		if _mode == "clip":
 			# Cruise, burst away, cruise again.
 			var t := _frames * dt
@@ -213,7 +232,7 @@ func _process(_delta: float) -> void:
 		if _frames > 10:
 			var args := OS.get_cmdline_user_args()
 			get_viewport().get_texture().get_image().save_png("%s_%03d.png" % [args[0].get_basename(), _frames - 11])
-		if _frames == 10 + CLIP_FRAMES:
+		if _frames == 10 + (CLIP_FRAMES * 2 if _dweller is Lurelight else CLIP_FRAMES):
 			get_tree().quit()
 		return
 	if _frames == 24:
@@ -260,6 +279,10 @@ func _wall_scene(script: Script, layout: LevelLayout) -> void:
 	var args := OS.get_cmdline_user_args()
 	var yaw := float(args[4]) if _mode == "wall" and args.size() > 4 and args[4].is_valid_float() else NAN
 	var distance: float = {"wall": 8.0, "wallclip": 13.0}.get(_mode, DiveCamera.BASE_DISTANCE)
+	if _mode == "wallclip" and _dweller is Lurelight:
+		# Room for its lunge.
+		lift = 4.5
+		distance = 22.0
 	var look := best.pos + best.normal * lift
 	cam.position = Vector3(look.x, look.y, distance)
 	add_child(cam)

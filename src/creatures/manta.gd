@@ -129,9 +129,9 @@ func behave(delta: float) -> void:
 	var beat := sin(_t * (1.1 if _flee <= 0.0 else 3.2)) * 0.38
 	for i in _wings.size():
 		_wings[i].rotation.x = beat * (1.0 if i == 0 else -1.0)
-	# Its dark back held towards the camera whichever way it heads (the base
-	# rolls the model half a turn when it faces left).
-	_tilt.rotation.x = TILT * cos(_roll)
+	# Its dark back held towards the camera whichever way it heads (turned
+	# round to face left, the model's sides swap).
+	_tilt.rotation.x = TILT * _side()
 
 
 ## Somewhere roomy in clear sight to glide to next, a good way off.

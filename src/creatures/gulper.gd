@@ -118,7 +118,7 @@ func setup() -> void:
 	facing = wall_normal
 	# Turned to face out of the wall before the body is laid out in its space
 	# (a specimen on show is never ticked).
-	model.basis = Basis(Vector3.BACK, facing.angle())
+	_turn_body(0.0)
 	_rebuild_body()
 
 
@@ -395,6 +395,25 @@ func tick(delta: float) -> void:
 	_rebuild_body()
 
 
+## Anchored in its hole, it turns its head in the plane of the cave, and
+## swinging past upright rolls it over about its long axis, easing round,
+## to keep its jaw below (it never turns round through the depth as a free
+## swimmer does).
+func _turn_body(delta: float) -> void:
+	if facing.x < -0.2:
+		_yaw_target = PI
+	elif facing.x > 0.2:
+		_yaw_target = 0.0
+	if is_nan(_elev):
+		_elev = 0.0
+		_yaw_target = PI if facing.x < 0.0 else 0.0
+		_yaw = _yaw_target
+	var r := _spring(_yaw, _yaw_v, _yaw_target, 14.0, delta)
+	_yaw = r.x
+	_yaw_v = r.y
+	model.basis = Basis(Vector3.BACK, facing.angle()) * Basis(Vector3.RIGHT, _yaw)
+
+
 ## Where the burrow opens, on the play plane.
 func _hole() -> Vector2:
 	return Vector2(_mouth.x, _mouth.y) if _mouth != Vector3.INF else _burrow + wall_normal * 1.2
@@ -515,7 +534,9 @@ func _cheeks(st: SurfaceTool, rot: Basis, base: int) -> void:
 func _rebuild_body() -> void:
 	if _mouth == Vector3.INF and level and level.field.sample(_rest) < 2.0:
 		_dig_burrow()
-	var face := Vector3(facing.x, facing.y, 0.0)
+	# Which way the head points, as the model is turned (turning round it
+	# may point into the depth for a moment).
+	var face := model.basis.x.normalized()
 	# The neck: where the body meets the head, on the head's own line; the
 	# body runs straight back along that line a little way.
 	var joint := Vector3(pos.x, pos.y, 0.0) + face * NECK_X

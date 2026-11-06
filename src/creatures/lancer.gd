@@ -226,7 +226,7 @@ func behave(delta: float) -> void:
 			elif level.player and level.player.alive:
 				_target = level.player.pos
 			var to := (_target - pos).normalized()
-			facing = facing.slerp(to, 1.0 - exp(-10.0 * delta)).normalized()
+			_turn_towards(to, 10.0, delta)
 			vel = vel.lerp(-to * 1.5, 1.0 - exp(-4.0 * delta))
 			_set_glow(1.0 + (1.0 - _timer / WINDUP_TIME) * 3.0)
 			if _timer <= 0.0:

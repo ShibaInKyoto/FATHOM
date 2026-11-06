@@ -36,11 +36,17 @@ var _home := Vector2.ZERO
 ## Where the last hunter lunged from (Vector2.INF if none).
 var _scare_from := Vector2.INF
 var _leg_step := 1
-## Each fish's own stroke (cycles), its phase offset, bend and last heading.
+## Each fish's own stroke (cycles), its phase offset, bend, climb or dive,
+## and how it is turned round (as Creature turns: through the depth, eased
+## on a spring) with its sideways curl.
 var _fish_clock := PackedFloat32Array()
 var _fish_phase := PackedFloat32Array()
 var _fish_bend := PackedFloat32Array()
 var _fish_heading := PackedFloat32Array()
+var _fish_yaw := PackedFloat32Array()
+var _fish_yaw_v := PackedFloat32Array()
+var _fish_side := PackedFloat32Array()
+var _fish_curl := PackedFloat32Array()
 var _age := 0.0
 
 
@@ -65,7 +71,11 @@ func setup() -> void:
 		_fish_phase.append(level.rng.randf())
 		_fish_clock.append(0.0)
 		_fish_bend.append(0.0)
-		_fish_heading.append(fish_vel[i].angle())
+		_fish_heading.append(atan2(fish_vel[i].y, absf(fish_vel[i].x)))
+		_fish_side.append(-PI if fish_vel[i].x < 0.0 else 0.0)
+		_fish_yaw.append(_fish_side[i])
+		_fish_yaw_v.append(0.0)
+		_fish_curl.append(0.0)
 		_multimesh.set_instance_custom_data(i, Color(_fish_phase[i], 0, 0, 0))
 
 
@@ -224,6 +234,10 @@ func lose_fish() -> void:
 	_fish_phase.remove_at(i)
 	_fish_bend.remove_at(i)
 	_fish_heading.remove_at(i)
+	_fish_yaw.remove_at(i)
+	_fish_yaw_v.remove_at(i)
+	_fish_side.remove_at(i)
+	_fish_curl.remove_at(i)
 	_multimesh.visible_instance_count = fish_pos.size()
 	if fish_pos.is_empty():
 		despawn()
@@ -285,34 +299,41 @@ func behave(delta: float) -> void:
 			p = field.resolve_circle(p, 0.3)
 		fish_pos[i] = p
 		fish_vel[i] = v
-		var dir := v.normalized() if v.length_squared() > 0.01 else Vector2.RIGHT
-		var basis := Basis(Vector3.BACK, dir.angle())
-		if dir.x < 0.0:
-			basis = basis * Basis(Vector3.RIGHT, PI)
 		var depth := sin(i * 1.7) * 0.8 + sin(_age * 0.5 + _fish_phase[i] * TAU) * 0.25
-		_multimesh.set_instance_transform(i, Transform3D(basis, Vector3(p.x, p.y, depth)))
-		_swim_fish(i, v, dir, delta)
+		_multimesh.set_instance_transform(i, Transform3D(_swim_fish(i, v, delta), Vector3(p.x, p.y, depth)))
 	vel = Vector2.ZERO
 	for v in visuals:
 		v.set_instance_shader_parameter(&"glow_boost", 1.0 + _panic * 2.0)
 
 
 ## Paces fish [param i]'s own stroke: faster the faster it goes, harder
-## when the school bolts, its body curled into the turn it is swimming
-## (see creature.gdshader).
-func _swim_fish(i: int, v: Vector2, dir: Vector2, delta: float) -> void:
+## when the school bolts, its body curled into the turn it is swimming; and
+## turns it, round through the depth when it turns back (see creature.gd).
+## Returns how it is turned.
+func _swim_fish(i: int, v: Vector2, delta: float) -> Basis:
 	var speed := v.length()
-	var heading := dir.angle()
-	var turn := wrapf(heading - _fish_heading[i], -PI, PI) / maxf(delta, 0.001)
-	_fish_heading[i] = heading
-	var k := clampf(turn / maxf(speed, 1.0), -BEND_LIMIT, BEND_LIMIT)
+	var elev := _fish_heading[i]
+	if speed > 0.1:
+		elev = atan2(v.y, absf(v.x))
+		if v.x < -0.2 * speed:
+			_fish_side[i] = -PI
+		elif v.x > 0.2 * speed:
+			_fish_side[i] = 0.0
+	var climb := (elev - _fish_heading[i]) / maxf(delta, 0.001)
+	_fish_heading[i] = elev
+	var turned := _spring(_fish_yaw[i], _fish_yaw_v[i], _fish_side[i], 18.0, delta)
+	_fish_yaw[i] = turned.x
+	_fish_yaw_v[i] = turned.y
+	var k := clampf(climb / maxf(speed, 1.0), -BEND_LIMIT, BEND_LIMIT)
 	_fish_bend[i] = lerpf(_fish_bend[i], k, 1.0 - exp(-8.0 * delta))
+	var ks := clampf(-turned.y / maxf(speed, 1.0), -BEND_LIMIT, BEND_LIMIT) * cos(elev)
+	_fish_curl[i] = lerpf(_fish_curl[i], ks, 1.0 - exp(-10.0 * delta))
 	var bolt := 1.0 if _panic > 0.0 else 0.0
 	_fish_clock[i] = fposmod(_fish_clock[i] + delta * (0.6 + speed * 0.15) * (1.0 + 0.4 * bolt) * SWIM_FREQ / TAU, 1.0)
 	var power := clampf(0.35 + speed / FISH_SPEED * 0.65, 0.35, 1.0) + 0.35 * bolt
-	# Turned over to head left, the model's +Y is the other side of the turn.
-	var local := _fish_bend[i] * (-1.0 if dir.x < 0.0 else 1.0)
-	_multimesh.set_instance_custom_data(i, Color(_fish_clock[i] + _fish_phase[i], local, power - 1.0, 0.0))
+	_multimesh.set_instance_custom_data(i, Color(_fish_clock[i] + _fish_phase[i], _fish_bend[i], power - 1.0,
+		_fish_curl[i]))
+	return Basis(Vector3.UP, _fish_yaw[i]) * Basis(Vector3.BACK, elev)
 
 
 func _update_visuals(_delta: float) -> void:

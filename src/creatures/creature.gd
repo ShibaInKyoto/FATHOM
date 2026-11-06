@@ -58,6 +58,9 @@ var flex := 0.0
 var flex_pivot := 0.0
 ## The body's length along model X, which limits how far it can curl.
 var body_span := 0.0
+## How briskly the body turns to its facing (the spring's rate, per second);
+## 0 picks one from [member _turn_speed]; below 0, it turns at once.
+var turn_rate := 0.0
 
 var _stun := 0.0
 var _blind := 0.0
@@ -70,8 +73,18 @@ var _think_timer := 0.0
 var _touch_cooldown := 0.0
 var _phase := 0.0
 var _turn_speed := 6.0
+## An upright drifter's lean into its drift.
 var _roll := 0.0
-var _roll_target := 0.0
+## How it is turned: its climb or dive in the plane, and which way round it
+## faces (0 to the right, -PI to the left: turning back the way it came, it
+## turns round through the depth, face to the camera, back kept up, rather
+## than flipping over). Each eases to where [member facing] points on a
+## stiff spring, so even a facing set in an instant is a quick, smooth turn.
+var _elev := NAN
+var _elev_v := 0.0
+var _yaw := 0.0
+var _yaw_v := 0.0
+var _yaw_target := 0.0
 ## Swim stroke so far (see creature.gdshader).
 var _swim_clock := 0.0
 ## How hard it swims: a drifting creature barely beats its tail, a cruising
@@ -88,7 +101,8 @@ var _wary := false
 ## measured from.
 var _bend := 0.0
 var _local_bend := 0.0
-var _last_heading := 0.0
+## The sideways curl of a turn through the depth (see bend_side).
+var _side_bend := 0.0
 ## Rigid parts carried by the bending body (eyes, lures): each node and its
 ## resting transform.
 var _riders: Array = []
@@ -195,17 +209,8 @@ func _update_visuals(delta: float) -> void:
 		_pose_riders()
 		return
 	if not lock_facing and vel.length_squared() > 0.04:
-		facing = facing.slerp(vel.normalized(), 1.0 - exp(-_turn_speed * delta)).normalized()
-	# Roll around the body axis first so the dorsal side stays up when
-	# heading left, then turn to the heading.
-	# Heading up or down, it keeps the side it was on rather than flipping
-	# back and forth over the vertical.
-	if facing.x < -0.2:
-		_roll_target = PI
-	elif facing.x > 0.2:
-		_roll_target = 0.0
-	_roll = lerp_angle(_roll, _roll_target, 1.0 - exp(-5.0 * delta))
-	model.basis = Basis(Vector3.BACK, facing.angle()) * Basis(Vector3.RIGHT, _roll)
+		_turn_towards(vel.normalized(), _turn_speed, delta)
+	_turn_body(delta)
 	_update_bend(delta)
 	_update_instance_params()
 	_pose_riders()
@@ -232,31 +237,87 @@ func _span() -> float:
 	return body_span if body_span > 0.0 else maxf(maxf(reach * 2.0, radius * 2.0), 0.5)
 
 
-## Bends the spine into the arc the creature is turning along: its heading
-## turning at w radians a second while it swims at v is a path of curvature
-## w / v, which a body lying along that path follows nose to tail.
+## Turns [member facing] towards [param dir] at [param rate]: up and down
+## in the plane, but turning back the way it came its side flips at once,
+## its climb or dive kept, so the body turns round through the depth (see
+## _turn_body) instead of looping over the top.
+func _turn_towards(dir: Vector2, rate: float, delta: float) -> void:
+	if dir.x * facing.x < 0.0 and absf(dir.x) > 0.3:
+		facing = Vector2(-facing.x, facing.y)
+	facing = facing.slerp(dir, 1.0 - exp(-rate * delta)).normalized()
+
+
+## Eases the body round to [member facing] and poses the model.
+func _turn_body(delta: float) -> void:
+	var elev := atan2(facing.y, absf(facing.x))
+	# Heading up or down, it keeps the side it was on.
+	if facing.x < -0.2:
+		_yaw_target = -PI
+	elif facing.x > 0.2:
+		_yaw_target = 0.0
+	if is_nan(_elev) or turn_rate < 0.0:
+		_yaw_target = -PI if facing.x < 0.0 and is_nan(_elev) else _yaw_target
+		_elev = elev
+		_yaw = _yaw_target
+		_elev_v = 0.0
+		_yaw_v = 0.0
+	else:
+		var w := turn_rate if turn_rate > 0.0 else clampf(_turn_speed * 2.5, 9.0, 22.0)
+		var e := _spring(_elev, _elev_v, elev, w, delta)
+		_elev = e.x
+		_elev_v = e.y
+		var y := _spring(_yaw, _yaw_v, _yaw_target, w * 0.85, delta)
+		_yaw = y.x
+		_yaw_v = y.y
+	model.basis = Basis(Vector3.UP, _yaw) * Basis(Vector3.BACK, _elev)
+
+
+## One step of a critically damped spring from [param x] (moving at
+## [param v]) towards [param target] at rate [param w]: exact for any step,
+## so it never overshoots or jitters. Returns the new place and speed.
+static func _spring(x: float, v: float, target: float, w: float, dt: float) -> Vector2:
+	var e := exp(-w * dt)
+	var x0 := x - target
+	var temp := (v + w * x0) * dt
+	return Vector2(target + (x0 + temp) * e, (v - w * temp) * e)
+
+
+## Which way round the creature faces: 1 facing right, -1 facing left,
+## between while it turns.
+func _side() -> float:
+	return cos(_yaw)
+
+
+## Bends the spine into the turn: climbing or diving at w radians a second
+## while it swims at v is a path of curvature w / v, which a body lying
+## along that path follows nose to tail; turning round through the depth it
+## curls sideways into a C the same way.
 func _update_bend(delta: float) -> void:
-	var heading := facing.angle()
-	var turn := wrapf(heading - _last_heading, -PI, PI) / maxf(delta, 0.001)
-	_last_heading = heading
 	# A hard turn is a burst of swimming too.
-	_kick = maxf(_kick, clampf(absf(turn) * 0.12 - 0.15, 0.0, 0.5))
+	_kick = maxf(_kick, clampf((absf(_elev_v) + absf(_yaw_v) * 0.5) * 0.12 - 0.15, 0.0, 0.5))
 	if flex <= 0.0:
 		return
 	# No more than about 30 degrees from the pivot to either end.
 	var limit := 1.05 / _span()
-	var k := clampf(turn / maxf(vel.length(), 1.5), -limit, limit) * flex
+	var speed := maxf(vel.length(), 1.5)
+	var k := clampf(_elev_v / speed, -limit, limit) * flex
 	_bend = lerpf(_bend, k, 1.0 - exp(-6.0 * delta))
-	# Rolled over to face left, the model's +Y is the other side of the turn.
-	_local_bend = _bend * cos(_roll)
+	# Turning round towards the camera (yaw falling), the nose swings to the
+	# model's +Z: it curls that way. Pointing straight up or down, yawing is
+	# only a roll about the spine, and bends nothing.
+	var ks := clampf(-_yaw_v / speed, -limit, limit) * flex * cos(_elev)
+	_side_bend = lerpf(_side_bend, ks, 1.0 - exp(-10.0 * delta))
+	_local_bend = _bend
 	for v in visuals:
 		v.set_instance_shader_parameter(&"bend", _local_bend)
+		v.set_instance_shader_parameter(&"bend_side", _side_bend)
 
 
 ## Moves the rigid riders (eyes) with the swimming, bending body.
 func _pose_riders() -> void:
 	for r: Array in _riders:
-		(r[0] as Node3D).transform = _bent_transform(_swum_transform(r[1]), _local_bend, flex_pivot)
+		var swum := _bent_side(_swum_transform(r[1]), _side_bend, flex_pivot)
+		(r[0] as Node3D).transform = _bent_transform(swum, _local_bend, flex_pivot)
 
 
 ## Where a rigid part resting at [param rest] lands on the swimming body:
@@ -307,6 +368,19 @@ static func _bent_transform(rest: Transform3D, k: float, pivot: float) -> Transf
 	var b := (1.0 - cos(th)) / th if absf(th) > 0.001 else th * 0.5
 	var o := Vector3(pivot + s * a - h * sin(th), s * b + h * cos(th), rest.origin.z)
 	return Transform3D(Basis(Vector3.BACK, th) * rest.basis, o)
+
+
+## As [method _bent_transform], for the sideways curl (towards +Z).
+static func _bent_side(rest: Transform3D, k: float, pivot: float) -> Transform3D:
+	if absf(k) < 0.0001:
+		return rest
+	var s := rest.origin.x - pivot
+	var h := rest.origin.z
+	var th := k * s
+	var a := sin(th) / th if absf(th) > 0.001 else 1.0
+	var b := (1.0 - cos(th)) / th if absf(th) > 0.001 else th * 0.5
+	var o := Vector3(pivot + s * a - h * sin(th), rest.origin.y, s * b + h * cos(th))
+	return Transform3D(Basis(Vector3.UP, -th) * rest.basis, o)
 
 
 ## Carries [param node] (a rigid part on the model) along with the body as
