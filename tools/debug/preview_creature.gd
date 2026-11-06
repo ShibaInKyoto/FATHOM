@@ -175,6 +175,12 @@ func _process(_delta: float) -> void:
 			var args := OS.get_cmdline_user_args()
 			var turn := deg_to_rad(float(args[4])) if args.size() > 4 and args[4].is_valid_float() else 0.46
 			g.set(&"_strike_to", g.pos + g.wall_normal.rotated(turn) * 7.0)
+		if _mode == "wallclip" and _frames == 60 and _dweller is Isopod:
+			# Leap off the wall at something passing.
+			var iso := _dweller as Isopod
+			iso.state = Isopod.State.LEAP
+			iso.set(&"_timer", 0.9)
+			iso.vel = (iso.wall_normal + Vector2(0.6, 0.0)).normalized() * Isopod.LEAP_SPEED
 		if _mode == "wallclip" and _frames == 120 and _dweller is Lurelight:
 			# Snap at something swimming up to the lure.
 			var a := _dweller as Lurelight
@@ -185,6 +191,11 @@ func _process(_delta: float) -> void:
 			a.set(&"_snap_dir", Vector2(-signf(a.facing.x), 0.5).normalized())
 		_dweller.tick(dt)
 		_dweller.sync_transform()
+		if _dweller is Isopod:
+			# Keep it in shot as it walks.
+			var cam := get_viewport().get_camera_3d()
+			var want := Vector3(_dweller.pos.x, _dweller.pos.y + 0.6, cam.position.z)
+			cam.position = cam.position.lerp(want, 1.0 - exp(-3.0 * dt))
 	if _school:
 		if _frames == 55:
 			(_school as Shoal).scare(_school.pos + Vector2(-4.0, -1.0))
@@ -285,6 +296,9 @@ func _wall_scene(script: Script, layout: LevelLayout) -> void:
 	var args := OS.get_cmdline_user_args()
 	var yaw := float(args[4]) if _mode == "wall" and args.size() > 4 and args[4].is_valid_float() else NAN
 	var distance: float = {"wall": 8.0, "wallclip": 13.0}.get(_mode, DiveCamera.BASE_DISTANCE)
+	if _mode == "wallclip" and _dweller is Isopod:
+		lift = 1.0
+		distance = 7.5
 	if _mode == "wallclip" and _dweller is Lurelight:
 		# Room for its lunge.
 		lift = 4.5

@@ -284,6 +284,26 @@ static func morph(from: ArrayMesh, to: ArrayMesh) -> ArrayMesh:
 	return out
 
 
+## [param mesh] (a leg, in model space) marked as a walking leg for
+## creature.gdshader: hinged at [param hip], on side [param side] (+1 or -1)
+## at [param phase] (radians) in the gait. It hangs from its hip's place on
+## the spine.
+static func legged(mesh: ArrayMesh, hip: Vector3, phase: float, side: float) -> ArrayMesh:
+	var arrays := mesh.surface_get_arrays(0)
+	var n := (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+	var uv := PackedVector2Array()
+	var uv2 := PackedVector2Array()
+	uv.resize(n)
+	uv2.resize(n)
+	uv.fill(Vector2(hip.x, hip.y))
+	uv2.fill(Vector2(hip.z, side * (1.0 + fposmod(phase, TAU))))
+	arrays[Mesh.ARRAY_TEX_UV] = uv
+	arrays[Mesh.ARRAY_TEX_UV2] = uv2
+	var out := ArrayMesh.new()
+	out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return out
+
+
 ## The point on the skin of a body built from [param stations] at model x
 ## [param x], [param a] radians round from the back's midline (as
 ## [method body] lofts it).

@@ -75,6 +75,18 @@ instance uniform float bell_squeeze = 0.0;
 // CUSTOM0 (positions) and CUSTOM1 (normals): see BodyKit.morph. How far it
 // has morphed towards it (may overshoot a little as it wobbles).
 instance uniform float puff = 0.0;
+// Walking legs (BodyKit.legged): each leg's vertices carry its hip (UV.x,
+// UV.y, UV2.x) and its place in the gait (UV2.y: side times one plus its
+// phase; 0 for anything not a leg). The gait clock turns them over: each
+// swings fore and aft about its hip and lifts its foot as it swings
+// forward, so a wave of steps runs down each side. [member stride] is the
+// swing (radians; 0 for a creature with no legs), [member leg_lift] the
+// lift; gait_amp scales both (0 standing), leg_tuck folds every leg in.
+uniform float stride = 0.0;
+uniform float leg_lift = 0.35;
+instance uniform float gait = 0.0;
+instance uniform float gait_amp = 0.0;
+instance uniform float leg_tuck = 0.0;
 // The point of the spine that stays put as the body bends.
 uniform float bend_pivot = 0.0;
 // Models built with BodyKit carry, in UV.x, the point of the spine each
@@ -186,6 +198,19 @@ void vertex() {
 		NORMAL = normalize(mix(NORMAL, CUSTOM1.xyz, puff));
 	}
 	vec3 p = VERTEX + body_offset;
+	if (stride > 0.0 && UV2.y != 0.0) {
+		float side = sign(UV2.y);
+		float ph = gait + abs(UV2.y);
+		vec3 hip = vec3(UV.x, UV.y, UV2.x);
+		vec3 r = p - hip;
+		float swing = sin(ph) * stride * gait_amp;
+		float lift = max(cos(ph), 0.0) * leg_lift * gait_amp - leg_tuck * 1.1;
+		r.zy = turned(r.zy, lift * side);
+		NORMAL.zy = turned(NORMAL.zy, lift * side);
+		r.xz = turned(r.xz, -swing * side);
+		NORMAL.xz = turned(NORMAL.xz, -swing * side);
+		p = hip + r;
+	}
 	if (bell_squeeze != 0.0) {
 		float f = clamp((bell_top - p.x) / max(bell_top - bell_rim, 0.01), 0.0, 1.0);
 		p.yz *= 1.0 - bell_squeeze * 0.3 * f * f;
