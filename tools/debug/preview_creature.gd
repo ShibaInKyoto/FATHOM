@@ -207,6 +207,12 @@ func _process(_delta: float) -> void:
 			elif t >= 2.6:
 				heading = Vector2(1.0, -0.3)
 			c.vel = heading.normalized() * SPEED
+		if _mode == "clip" and c is Puffer:
+			# Startled: it swells, holds, and sags back.
+			if _frames == 40:
+				(c as Puffer).puff()
+			elif _frames == 100:
+				(c as Puffer).state = Puffer.State.CALM
 		if _mode == "clip":
 			# Cruise, burst away, cruise again.
 			var t := _frames * dt

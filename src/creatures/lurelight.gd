@@ -105,7 +105,7 @@ func build_model() -> void:
 		m.set_shader_parameter(&"swim_wave", 2.0)
 		m.set_shader_parameter(&"swim_vertical", 0.0)
 		m.set_shader_parameter(&"swim_head", 0.05)
-		m.set_shader_parameter(&"swim_still", 0.3)
+		m.set_shader_parameter(&"swim_still", 0.12)
 		m.set_shader_parameter(&"fin_lag", 0.4)
 		m.set_shader_parameter(&"bend_pivot", 0.3)
 		m.set_shader_parameter(&"anchored", true)

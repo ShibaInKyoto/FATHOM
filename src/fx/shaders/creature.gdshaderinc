@@ -71,6 +71,10 @@ instance uniform vec3 body_offset = vec3(0.0);
 uniform float bell_top = 0.0;
 uniform float bell_rim = 0.0;
 instance uniform float bell_squeeze = 0.0;
+// A body that changes shape (a puffer swelling) carries its second shape in
+// CUSTOM0 (positions) and CUSTOM1 (normals): see BodyKit.morph. How far it
+// has morphed towards it (may overshoot a little as it wobbles).
+instance uniform float puff = 0.0;
 // The point of the spine that stays put as the body bends.
 uniform float bend_pivot = 0.0;
 // Models built with BodyKit carry, in UV.x, the point of the spine each
@@ -167,8 +171,13 @@ vec3 swim_wave_at(float x, float ph, float power) {
 }
 
 void vertex() {
+	// The skin's pattern stays put on the skin as it swells.
+	body_pos = VERTEX + body_offset;
+	if (puff != 0.0) {
+		VERTEX = mix(VERTEX, CUSTOM0.xyz, puff);
+		NORMAL = normalize(mix(NORMAL, CUSTOM1.xyz, puff));
+	}
 	vec3 p = VERTEX + body_offset;
-	body_pos = p;
 	if (bell_squeeze != 0.0) {
 		float f = clamp((bell_top - p.x) / max(bell_top - bell_rim, 0.01), 0.0, 1.0);
 		p.yz *= 1.0 - bell_squeeze * 0.3 * f * f;
@@ -293,11 +302,15 @@ void fragment() {
 		base *= 1.0 - bars * (1.0 - bar) * smoothstep(0.0, 0.6, 1.0 - COLOR.g);
 	}
 	if (spots > 0.0 && !enamel) {
-		vec2 cell = floor(body_pos.xy / spot_size);
-		vec2 f = fract(body_pos.xy / spot_size) - 0.5;
-		vec2 o = vec2(hash2(cell), hash2(cell + 7.3)) - 0.5;
-		float spot = 1.0 - smoothstep(0.18, 0.3, length(f - o * 0.4));
-		base *= 1.0 - spot * spots * step(hash2(cell + 3.1), 0.55) * (1.0 - COLOR.g);
+		// Round spots wherever on the body (cells in 3D, so they never smear
+		// into stripes across the back or belly).
+		vec3 g = body_pos / spot_size;
+		vec3 cell = floor(g);
+		vec3 f = fract(g) - 0.5;
+		vec2 key = cell.xy + cell.z * vec2(7.13, 3.71);
+		vec3 o = vec3(hash2(key), hash2(key + 7.3), hash2(key + 1.9)) - 0.5;
+		float spot = 1.0 - smoothstep(0.2, 0.32, length(f - o * 0.35));
+		base *= 1.0 - spot * spots * step(hash2(key + 3.1), 0.55) * (1.0 - COLOR.g);
 	}
 	float hgt = 0.0;
 	float bare = 1.0;

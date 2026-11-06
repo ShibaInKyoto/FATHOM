@@ -257,6 +257,45 @@ static func merged(parts: Array) -> ArrayMesh:
 	return MeshKit.merge(baked)
 
 
+## A mesh that changes shape: [param from] as it stands, carrying the
+## positions and normals of [param to] (built from the same parts in the same
+## order, so vertex for vertex the same) for creature.gdshader to blend
+## towards by its puff.
+static func morph(from: ArrayMesh, to: ArrayMesh) -> ArrayMesh:
+	var a := from.surface_get_arrays(0)
+	var b := to.surface_get_arrays(0)
+	var vb: PackedVector3Array = b[Mesh.ARRAY_VERTEX]
+	var nb: PackedVector3Array = b[Mesh.ARRAY_NORMAL]
+	assert((a[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() == vb.size(), "morph targets differ")
+	var c0 := PackedFloat32Array()
+	var c1 := PackedFloat32Array()
+	c0.resize(vb.size() * 4)
+	c1.resize(vb.size() * 4)
+	for i in vb.size():
+		for k in 3:
+			c0[i * 4 + k] = vb[i][k]
+			c1[i * 4 + k] = nb[i][k]
+	a[Mesh.ARRAY_CUSTOM0] = c0
+	a[Mesh.ARRAY_CUSTOM1] = c1
+	var flags := (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT) \
+		| (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM1_SHIFT)
+	var out := ArrayMesh.new()
+	out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a, [], {}, flags)
+	return out
+
+
+## The point on the skin of a body built from [param stations] at model x
+## [param x], [param a] radians round from the back's midline (as
+## [method body] lofts it).
+static func surface(stations: Array, x: float, a: float) -> Vector3:
+	var st := _station(stations, x)
+	var c := cos(a)
+	var r := st[1] if c >= 0.0 else st[2]
+	var sc := signf(c) * pow(absf(c), 0.85)
+	var ss := signf(sin(a)) * pow(absf(sin(a)), 0.85)
+	return Vector3(x, st[3] + sc * r, ss * st[0])
+
+
 ## [param mesh] painted as enamel (teeth, claws): see creature.gdshader.
 static func enamel(mesh: ArrayMesh) -> ArrayMesh:
 	return MeshKit.painted(mesh, func(_v: Vector3) -> Color: return Color(0.0, 0.0, 0.0, 0.0))
