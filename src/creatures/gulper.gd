@@ -28,13 +28,18 @@ const SENSE_RANGE := 10.0
 const HEAD := [[-1.05, NECK_R, NECK_R, NECK_R, 0.0], [-0.85, 0.125, 0.13, 0.12, 0.0],
 	[-0.62, 0.16, 0.165, 0.1, 0.01], [-0.4, 0.18, 0.17, 0.06, 0.02], [-0.1, 0.13, 0.12, 0.04, 0.04],
 	[0.3, 0.08, 0.07, 0.03, 0.045], [0.7, 0.045, 0.045, 0.02, 0.045], [0.92, 0.012, 0.016, 0.01, 0.04]]
-const HINGE := Vector3(-0.42, -0.05, 0.0)
+## The jaw's hinge, inside the back of the skull: the jaw bones grow out of
+## the head's underside and swing down from within it.
+const HINGE := Vector3(-0.5, -0.02, 0.0)
 const NECK_X := -1.05
 const NECK_R := 0.115
 ## Sides round the body, as round the head (BodyKit.body), so the two meet
 ## vertex to vertex.
 const BODY_SIDES := 16
-const JAW_LEN := 1.32
+const JAW_LEN := 1.4
+## How far along the jaw (0 hinge .. 1 chin) the corner of the mouth lies:
+## behind it, cheek skin joins the upper jaw to the lower.
+const CORNER_U := 0.26
 ## Sections down the jaw and points across each, for the pouch.
 const POUCH_ROWS := 20
 const POUCH_COLS := 12
@@ -131,18 +136,9 @@ func build_model() -> void:
 		m.set_shader_parameter(&"tooth_color", Color(0.82, 0.78, 0.72)))
 	# The skull and neck are lofted with the body (see _body_tube).
 	var parts := []
-	# Glowing lips along the upper jaw, and needle teeth inside them.
+	# Needle teeth along the upper jaw.
 	for sgn: float in [1.0, -1.0]:
-		var lip := PackedVector3Array()
-		var radii := PackedFloat32Array()
-		for i in 12:
-			var x := lerpf(HINGE.x + 0.08, 0.9, i / 11.0)
-			lip.append(_upper_lip(x, sgn))
-			radii.append(0.009)
-		var tube := ArrayMesh.new()
-		MeshKit.tube(tube, lip, radii, 5)
-		parts.append([MeshKit.painted(tube, func(_v: Vector3) -> Color: return Color(0.0, 0.5, 0.0))])
-		for t: Array in BodyKit.teeth_row(_upper_lip(-0.2, sgn) - Vector3(0.0, 0.0, 0.025 * sgn),
+		for t: Array in BodyKit.teeth_row(_upper_lip(-0.12, sgn) - Vector3(0.0, 0.0, 0.025 * sgn),
 				_upper_lip(0.84, sgn) - Vector3(0.0, 0.0, 0.01 * sgn), 14, 0.06, Vector3(0.0, -1.0, -0.15 * sgn),
 				3 if sgn > 0.0 else 4, false):
 			parts.append([BodyKit.enamel(t[0]), t[1]])
@@ -152,7 +148,7 @@ func build_model() -> void:
 	var jaw_parts := []
 	for sgn: float in [1.0, -1.0]:
 		jaw_parts.append([_jaw_blade(sgn)])
-		for t: Array in BodyKit.teeth_row(_mandible(0.12, sgn) + Vector3(0.0, 0.02, -0.005 * sgn),
+		for t: Array in BodyKit.teeth_row(_mandible(0.3, sgn) + Vector3(0.0, 0.02, -0.005 * sgn),
 				_mandible(0.95, sgn) + Vector3(0.0, 0.012, 0.0), 13, 0.055, Vector3(0.0, 1.0, -0.15 * sgn),
 				5 if sgn > 0.0 else 6, false):
 			jaw_parts.append([BodyKit.enamel(t[0]), t[1]])
@@ -212,8 +208,10 @@ static func _jaw_blade(sgn: float) -> ArrayMesh:
 		var tangent := ahead.normalized()
 		var side := tangent.cross(Vector3.UP).normalized()
 		var up := side.cross(tangent)
-		var w := lerpf(0.02, 0.006, u)
-		var h := lerpf(0.055, 0.012, u)
+		# Growing out of the skull at the hinge, drawn to a point at the chin.
+		var grow := (0.55 + 0.45 * smoothstep(0.0, 0.15, u)) * (1.0 - 0.85 * smoothstep(0.9, 1.0, u))
+		var w := lerpf(0.02, 0.006, u) * grow + 0.002
+		var h := lerpf(0.05, 0.012, u) * grow + 0.002
 		for j in sides + 1:
 			var a := TAU * j / sides
 			st.set_color(Color(0.0, smoothstep(0.2, -0.6, sin(a)), 0.0))
@@ -229,6 +227,9 @@ static func _jaw_blade(sgn: float) -> ArrayMesh:
 			st.add_index(a + 1)
 			st.add_index(a + row + 1)
 			st.add_index(a + row)
+	# The joint at the hinge: a rounded knob, so the bone has no open end.
+	var knob := MeshKit.ball(1.0, 0.0, 10, 6)
+	st.append_from(knob, 0, Transform3D(Basis().scaled(Vector3(0.035, 0.03, 0.016)), _mandible(0.0, sgn)))
 	st.generate_normals()
 	return st.commit()
 
@@ -236,7 +237,7 @@ static func _jaw_blade(sgn: float) -> ArrayMesh:
 ## A lower jaw bone on side [param sgn], [param u] of the way from the hinge
 ## to the chin (jaw space).
 static func _mandible(u: float, sgn: float) -> Vector3:
-	return Vector3(u * JAW_LEN, 0.06 * u * u, lerpf(0.16, 0.015, pow(u, 1.1)) * sgn)
+	return Vector3(u * JAW_LEN, 0.05 * u * u, lerpf(0.13, 0.015, pow(u, 1.1)) * sgn)
 
 
 func think() -> void:
@@ -253,6 +254,7 @@ func think() -> void:
 		alert()
 		state = State.WINDUP
 		_timer = WINDUP_TIME
+		_strike_from = pos
 		_strike_to = _rest + (sub.pos - _rest).limit_length(REACH)
 		Audio.play_at(&"gulper_strike", pos, 2.0)
 
@@ -270,9 +272,9 @@ func behave(delta: float) -> void:
 			# A slow, wandering drift that never quite repeats, and the odd nod;
 			# just out of hiding it creeps.
 			var side := Vector2(-out.y, out.x)
-			var drift := side * (sin(_t * 0.61) * 0.32 + sin(_t * 1.73 + 1.3) * 0.1) + out * sin(_t * 0.43 + 0.7) * 0.18
-			pos = pos.lerp(_rest + drift, 1.0 - exp(-lerpf(2.2, 0.6, _shy / 2.5) * delta))
-			aim = (pos - _burrow).normalized().rotated(sin(_t * 0.83 + 0.4) * 0.14)
+			var drift := side * (sin(_t * 0.47) * 0.24 + sin(_t * 1.31 + 1.3) * 0.06) + out * sin(_t * 0.37 + 0.7) * 0.12
+			pos = pos.lerp(_rest + drift, 1.0 - exp(-lerpf(1.8, 0.6, _shy / 2.5) * delta))
+			aim = (pos - _burrow).normalized().rotated(sin(_t * 0.71 + 0.4) * 0.1)
 			# Now and then a slow gulp: the jaw sags wide and the pouch fills.
 			_gulp_wait -= delta
 			if _gulp_wait <= 0.0:
@@ -283,18 +285,21 @@ func behave(delta: float) -> void:
 		State.WINDUP:
 			# Draws back and down into a coil, jaws clamped, turning to aim.
 			_timer -= delta
-			var to := (_strike_to - pos).normalized()
-			pos = pos.lerp(_rest - to * 0.6 - out * 0.35, 1.0 - exp(-9.0 * delta))
+			var to := (_strike_to - _rest).normalized()
+			var w := 1.0 - _timer / WINDUP_TIME
+			pos = _strike_from.lerp(_rest - to * 0.7 - out * 0.3, smoothstep(0.0, 1.0, w))
 			aim = to
-			want = 0.02 + 0.3 * smoothstep(0.6, 1.0, 1.0 - _timer / WINDUP_TIME)
+			want = 0.02 + 0.35 * smoothstep(0.75, 1.0, w)
 			if _timer <= 0.0:
 				state = State.STRIKE
 				_timer = STRIKE_TIME
 				_strike_from = pos
 		State.STRIKE:
 			_timer -= delta
-			var f := 1.0 - _timer / STRIKE_TIME
-			pos = _strike_from.lerp(_strike_to, ease(f, 0.4))
+			var f := clampf(1.0 - _timer / STRIKE_TIME, 0.0, 1.0)
+			# Out like a spring, a hair past the mark, settling onto it.
+			var g := f - 1.0
+			pos = _strike_from.lerp(_strike_to, 1.0 + 1.5 * g * g * g + 0.5 * g * g)
 			aim = (_strike_to - _strike_from).normalized()
 			# Wide as it closes in; shut on the bite.
 			want = sin(minf(f / 0.85, 1.0) * PI * 0.5) if f < 0.88 else 0.03
@@ -304,7 +309,8 @@ func behave(delta: float) -> void:
 				_bite = 1.0
 		State.RETRACT:
 			_timer -= delta
-			pos = pos.lerp(_rest, 1.0 - exp(-2.6 * delta))
+			# A quick recoil, then drawn slowly home.
+			pos = pos.lerp(_rest, 1.0 - exp(-(6.0 if _timer > 0.9 else 2.2) * delta))
 			# Still facing its strike, turning back as it settles.
 			var struck := (_strike_to - _strike_from).normalized()
 			aim = (pos - _burrow).normalized().slerp(struck, clampf((_timer - 0.4) / 0.8, 0.0, 1.0))
@@ -326,7 +332,7 @@ func behave(delta: float) -> void:
 	vel = Vector2.ZERO
 	# A bite shakes the head.
 	_bite = maxf(_bite - delta * 3.0, 0.0)
-	aim = aim.rotated(sin(_t * 38.0) * 0.16 * _bite)
+	aim = aim.rotated(sin(_t * 30.0) * 0.09 * _bite)
 	var turn := 16.0 if state == State.WINDUP or state == State.STRIKE else 5.0
 	facing = facing.slerp(aim, 1.0 - exp(-turn * delta)).normalized()
 	_gape = lerpf(_gape, want, 1.0 - exp(-(30.0 if want < _gape else 12.0) * delta))
@@ -335,7 +341,7 @@ func behave(delta: float) -> void:
 	_last_pos = pos
 	_wiggle = lerpf(_wiggle, clampf(speed / 10.0, 0.0, 1.0), 1.0 - exp(-6.0 * delta))
 	_coil = lerpf(_coil, 1.0 if state == State.WINDUP else 0.0, 1.0 - exp(-12.0 * delta))
-	_wave += delta * (1.6 + 9.0 * _wiggle + 4.0 * _coil)
+	_wave += delta * (1.4 + 5.0 * _wiggle + 3.0 * _coil)
 
 
 func tick(delta: float) -> void:
@@ -384,7 +390,7 @@ func _rebuild_pouch() -> void:
 		for k in POUCH_ROWS + 1:
 			for j in cols:
 				var deep := smoothstep(0.1, 0.4, minf(j, POUCH_COLS - j) / float(POUCH_COLS))
-				st.set_color(Color(0.0, 0.55, 0.0) if side == 0 else Color(0.07 * deep, 1.0, 0.0))
+				st.set_color(Color(0.0, 0.55, 0.0) if side == 0 else Color(0.02 * deep, 1.0, 0.0))
 				st.set_uv(Vector2(0.92 - grid[k * cols + j].x, 0.4 + j / float(POUCH_COLS) * 0.35))
 				st.add_vertex(grid[k * cols + j])
 		var base := side * (POUCH_ROWS + 1) * cols
@@ -405,9 +411,54 @@ func _rebuild_pouch() -> void:
 					st.add_index(a + 1)
 					st.add_index(a + cols + 1)
 					st.add_index(a + cols)
+	_cheeks(st, rot, (POUCH_ROWS + 1) * cols * 2)
 	st.generate_normals()
 	_pouch_mesh.clear_surfaces()
 	st.commit(_pouch_mesh)
+
+
+## The corners of the mouth: on each side, skin from the upper jaw's edge
+## down to the jaw bone, from the hinge forward to [constant CORNER_U],
+## stretching into a web as the jaw drops and bellying out a little.
+## Appended to [param st] from vertex [param base], with the jaw turned by
+## [param rot].
+func _cheeks(st: SurfaceTool, rot: Basis, base: int) -> void:
+	var rows := 8
+	var cols := 5
+	var at := base
+	for sgn: float in [1.0, -1.0]:
+		var grid := PackedVector3Array()
+		for k in rows + 1:
+			var t := k / float(rows)
+			for j in cols + 1:
+				var f := j / float(cols)
+				# The free edge curves back between the jaws, like the corner of
+				# a mouth, rather than running straight across.
+				var u := CORNER_U * t * (1.0 - 0.45 * sin(PI * f) * t)
+				var bone := HINGE + rot * (_mandible(u, sgn) + Vector3(0.0, 0.01, 0.008 * sgn))
+				var lip := _upper_lip(HINGE.x + u * JAW_LEN, sgn)
+				var p := lip.lerp(bone, f)
+				p.z += sgn * sin(PI * f) * (0.01 + 0.04 * _gape) * sin(PI * 0.5 * t)
+				grid.append(p)
+		for side in 2:
+			st.set_smooth_group(10 + side)
+			for k in rows + 1:
+				for j in cols + 1:
+					var g := grid[k * (cols + 1) + j]
+					st.set_color(Color(0.0, lerpf(0.2, 0.6, j / float(cols)), 0.0) if side == 0
+						else Color(0.0, 1.0, 0.0))
+					st.set_uv(Vector2(0.92 - g.x, 0.3 + j * 0.02))
+					st.add_vertex(g)
+			var start := at + side * (rows + 1) * (cols + 1)
+			var outward := (side == 0) != (sgn > 0.0)
+			for k in rows:
+				for j in cols:
+					var a := start + k * (cols + 1) + j
+					var quad := [a, a + 1, a + cols + 1, a + 1, a + cols + 2, a + cols + 1] if outward \
+						else [a, a + cols + 1, a + 1, a + 1, a + cols + 1, a + cols + 2]
+					for i: int in quad:
+						st.add_index(i)
+		at += (rows + 1) * (cols + 1) * 2
 
 
 func _rebuild_body() -> void:
@@ -450,7 +501,7 @@ func _rebuild_body() -> void:
 			var chord := (neck - lip).normalized()
 			var off := p - want
 			off -= chord * off.dot(chord)
-			_bends[k] = want + off.limit_length(gap * 0.3)
+			_bends[k] = want + off.limit_length(gap * 0.15)
 	var knots := [lip, _bends[0], _bends[1], neck]
 	var target := PackedVector3Array()
 	for seg in 3:
@@ -470,8 +521,10 @@ func _rebuild_body() -> void:
 		var t := float(i) / 21.0
 		var tangent := (target[i + 1] - target[i - 1]).normalized()
 		var side := tangent.cross(Vector3.BACK).normalized()
-		var amp := (0.05 + 0.14 * _wiggle + 0.28 * _coil) * clampf(gap / 1.5, 0.3, 1.0)
-		target[i] += side * sin(arc * TAU / 2.4 - _wave) * amp * sin(PI * t) * (1.0 - smoothstep(0.7, 1.0, t))
+		# Drawn taut, as at the end of a lunge, the body runs nearly straight.
+		var slack := 1.0 - 0.85 * smoothstep(2.5, 6.5, gap)
+		var amp := (0.04 + 0.12 * _wiggle + 0.24 * _coil) * clampf(gap / 1.5, 0.3, 1.0) * slack
+		target[i] += side * sin(arc * TAU / 3.2 - _wave) * amp * sin(PI * t) * (1.0 - smoothstep(0.7, 1.0, t))
 	var pts := PackedVector3Array()
 	for i in 5:
 		pts.append(start.lerp(lip, i / 5.0))

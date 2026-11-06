@@ -163,6 +163,7 @@ func _process(_delta: float) -> void:
 			var g := _dweller as Gulper
 			g.state = Gulper.State.WINDUP
 			g.set(&"_timer", Gulper.WINDUP_TIME)
+			g.set(&"_strike_from", g.pos)
 			g.set(&"_strike_to", g.pos + (g.wall_normal + Vector2(0.5, 0.0)).normalized() * 7.0)
 		_dweller.tick(dt)
 		_dweller.sync_transform()
@@ -245,11 +246,21 @@ func _wall_scene(script: Script, layout: LevelLayout) -> void:
 	cam.fov = 42.0
 	cam.far = 400
 	var lift: float = {"wall": 0.9, "wallclip": 3.5}.get(_mode, 4.0)
+	# An optional camera angle round the head (degrees), and closer, for a
+	# look at it from the front or the side.
+	var args := OS.get_cmdline_user_args()
+	var yaw := float(args[4]) if args.size() > 4 and args[4].is_valid_float() else NAN
 	var distance: float = {"wall": 8.0, "wallclip": 13.0}.get(_mode, DiveCamera.BASE_DISTANCE)
 	var look := best.pos + best.normal * lift
 	cam.position = Vector3(look.x, look.y, distance)
 	add_child(cam)
 	cam.current = true
+	if not is_nan(yaw):
+		var head := Vector3(_dweller.pos.x, _dweller.pos.y, 0.0)
+		var pitch := float(args[5]) if args.size() > 5 else 10.0
+		cam.position = head + Basis(Vector3.UP, deg_to_rad(yaw)) * Basis(Vector3.RIGHT, deg_to_rad(-pitch)) \
+			* Vector3(0.0, 0.0, 3.6)
+		cam.look_at(head - Vector3(_dweller.facing.x, _dweller.facing.y, 0.0) * 0.1, Vector3.UP)
 	# The sub's lamp, off to one side.
 	var lamp := OmniLight3D.new()
 	lamp.position = Vector3(look.x - 3.0, look.y + 1.5, 3.0)
