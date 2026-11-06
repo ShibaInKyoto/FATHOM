@@ -164,7 +164,10 @@ func _process(_delta: float) -> void:
 			g.state = Gulper.State.WINDUP
 			g.set(&"_timer", Gulper.WINDUP_TIME)
 			g.set(&"_strike_from", g.pos)
-			g.set(&"_strike_to", g.pos + (g.wall_normal + Vector2(0.5, 0.0)).normalized() * 7.0)
+			g.set(&"_coil_from", g.facing)
+			var args := OS.get_cmdline_user_args()
+			var turn := deg_to_rad(float(args[4])) if args.size() > 4 and args[4].is_valid_float() else 0.46
+			g.set(&"_strike_to", g.pos + g.wall_normal.rotated(turn) * 7.0)
 		_dweller.tick(dt)
 		_dweller.sync_transform()
 	if _school:
@@ -249,7 +252,7 @@ func _wall_scene(script: Script, layout: LevelLayout) -> void:
 	# An optional camera angle round the head (degrees), and closer, for a
 	# look at it from the front or the side.
 	var args := OS.get_cmdline_user_args()
-	var yaw := float(args[4]) if args.size() > 4 and args[4].is_valid_float() else NAN
+	var yaw := float(args[4]) if _mode == "wall" and args.size() > 4 and args[4].is_valid_float() else NAN
 	var distance: float = {"wall": 8.0, "wallclip": 13.0}.get(_mode, DiveCamera.BASE_DISTANCE)
 	var look := best.pos + best.normal * lift
 	cam.position = Vector3(look.x, look.y, distance)

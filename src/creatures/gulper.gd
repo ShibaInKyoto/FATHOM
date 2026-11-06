@@ -19,7 +19,7 @@ enum State { LURK, STRIKE, RETRACT, HIDE, WINDUP }
 const REACH := 9.5
 const STRIKE_TIME := 0.32
 ## The coil before a strike: a tell, as long as a blink.
-const WINDUP_TIME := 0.22
+const WINDUP_TIME := 0.25
 const SENSE_RANGE := 10.0
 ## Model space: the head, x from where the body joins it to the snout.
 ## Stations as in [method BodyKit.body].
@@ -44,16 +44,28 @@ const CORNER_U := 0.26
 const POUCH_ROWS := 20
 const POUCH_COLS := 12
 const ROCK_SHADER := preload("res://src/fx/shaders/burrow_rock.gdshader")
+## The body is drawn in sections this far apart (metres).
+const LINK := 0.2
+## How far behind the head the body runs straight along the head's line.
+const NECK_RUN := 0.4
+## How far behind the head the body begins: the neck.
+const NECK_BACK := -NECK_X + NECK_RUN
+## How far into the burrow the body is drawn (beyond that it is out of sight).
+const SHOWN_DEPTH := 1.6
 
 ## Wrinkled skin, shared by every gulper (see _skin()).
 static var _skin_tex: NoiseTexture2D
 
 var wall_normal := Vector2.UP
 var state := State.LURK
+## The body as last drawn (world space, burrow to neck), for checking.
+var drawn := PackedVector3Array()
 var _burrow := Vector2.ZERO
 var _rest := Vector2.ZERO
 var _strike_from := Vector2.ZERO
 var _strike_to := Vector2.ZERO
+## Which way it faced as it began to coil.
+var _coil_from := Vector2.UP
 var _timer := 0.0
 var _cooldown := 0.0
 var _t := 0.0
@@ -67,10 +79,12 @@ var _gape := 0.16
 ## none until the eel is found to sit against rock.
 var _mouth := Vector3.INF
 var _axis := Vector3.UP
-## Two points a third and two thirds of the way along the body (world
-## space), following where the head pulls it with a lag; the body is a
-## smooth curve through them.
-var _bends := PackedVector3Array()
+## The body's sideways bow (metres at its middle) and how fast it is
+## swinging: thrown out by the head's sideways acceleration, it swings back
+## and settles like a spring; and the head's velocity a step ago.
+var _bow := 0.0
+var _bow_v := 0.0
+var _last_vel := Vector2.ZERO
 var _last_pos := Vector2.ZERO
 var _dt := 0.0
 ## How hard the body is waving (speed), how coiled it is (the wind-up), the
@@ -255,6 +269,7 @@ func think() -> void:
 		state = State.WINDUP
 		_timer = WINDUP_TIME
 		_strike_from = pos
+		_coil_from = facing
 		_strike_to = _rest + (sub.pos - _rest).limit_length(REACH)
 		Audio.play_at(&"gulper_strike", pos, 2.0)
 
@@ -287,8 +302,18 @@ func behave(delta: float) -> void:
 			_timer -= delta
 			var to := (_strike_to - _rest).normalized()
 			var w := 1.0 - _timer / WINDUP_TIME
-			pos = _strike_from.lerp(_rest - to * 0.7 - out * 0.3, smoothstep(0.0, 1.0, w))
-			aim = to
+			# Low and turned to its mark: striking straight out it sinks back
+			# into the hole; striking aside it swings round, its neck kept out
+			# ahead of the hole that way so the body behind bends, never folds.
+			var turn_by := acos(clampf(to.dot(out), -1.0, 1.0))
+			var rise := lerpf(-0.5, 0.9, smoothstep(0.0, 1.6, turn_by))
+			var ahead := 0.2 + 0.9 * smoothstep(0.4, 2.0, turn_by)
+			var coil := _hole() + out * rise + to * (ahead + NECK_BACK)
+			# It turns as it moves, the two together, so the neck never swings
+			# behind the hole on the way.
+			var e := smoothstep(0.0, 1.0, w)
+			pos = _strike_from.lerp(coil, e)
+			aim = _coil_from.slerp(to, e)
 			want = 0.02 + 0.35 * smoothstep(0.75, 1.0, w)
 			if _timer <= 0.0:
 				state = State.STRIKE
@@ -311,9 +336,11 @@ func behave(delta: float) -> void:
 			_timer -= delta
 			# A quick recoil, then drawn slowly home.
 			pos = pos.lerp(_rest, 1.0 - exp(-(6.0 if _timer > 0.9 else 2.2) * delta))
-			# Still facing its strike, turning back as it settles.
+			# Still facing its strike, turning back to face out of its hole as it
+			# nears home.
 			var struck := (_strike_to - _strike_from).normalized()
-			aim = (pos - _burrow).normalized().slerp(struck, clampf((_timer - 0.4) / 0.8, 0.0, 1.0))
+			var home := (pos - _burrow).normalized()
+			aim = home.slerp(struck, smoothstep(1.2, 4.5, pos.distance_to(_rest)) * clampf(_timer / 0.6, 0.0, 1.0))
 			if _timer > 0.95:
 				want = 0.03
 			if _timer <= 0.0:
@@ -333,12 +360,31 @@ func behave(delta: float) -> void:
 	# A bite shakes the head.
 	_bite = maxf(_bite - delta * 3.0, 0.0)
 	aim = aim.rotated(sin(_t * 30.0) * 0.09 * _bite)
-	var turn := 16.0 if state == State.WINDUP or state == State.STRIKE else 5.0
+	# Coiling and drawing back it turns as fast as it moves (its aim is set
+	# to match), striking a little slower, lurking lazily.
+	var turn := 5.0
+	if state == State.WINDUP or state == State.RETRACT:
+		turn = 40.0
+	elif state == State.STRIKE:
+		turn = 16.0
 	facing = facing.slerp(aim, 1.0 - exp(-turn * delta)).normalized()
 	_gape = lerpf(_gape, want, 1.0 - exp(-(30.0 if want < _gape else 12.0) * delta))
 	# The body waves with the head's speed, and coils as it winds up.
-	var speed := pos.distance_to(_last_pos) / maxf(delta, 0.001)
+	var head_vel := (pos - _last_pos) / maxf(delta, 0.001)
+	var speed := head_vel.length()
 	_last_pos = pos
+	# The bow: the head's acceleration across the body throws the middle of
+	# the body the other way; a spring, a little under-damped, brings it back.
+	var root := Vector2(_mouth.x, _mouth.y) if _mouth != Vector3.INF else _burrow
+	var chord := (pos - root).normalized() if pos.distance_to(root) > 0.1 else wall_normal
+	var across := Vector2(-chord.y, chord.x)
+	var accel := (head_vel - _last_vel) / maxf(delta, 0.001)
+	_last_vel = head_vel
+	# (+_bow lies to the right of the line from the burrow to the head.)
+	_bow_v += (-70.0 * _bow - 9.0 * _bow_v + clampf(accel.dot(across), -400.0, 400.0) * 0.006) * delta
+	_bow += _bow_v * delta
+	var span := pos.distance_to(root)
+	_bow = clampf(_bow, -0.14 * span, 0.14 * span)
 	_wiggle = lerpf(_wiggle, clampf(speed / 10.0, 0.0, 1.0), 1.0 - exp(-6.0 * delta))
 	_coil = lerpf(_coil, 1.0 if state == State.WINDUP else 0.0, 1.0 - exp(-12.0 * delta))
 	_wave += delta * (1.4 + 5.0 * _wiggle + 3.0 * _coil)
@@ -347,6 +393,11 @@ func behave(delta: float) -> void:
 func tick(delta: float) -> void:
 	super.tick(delta)
 	_rebuild_body()
+
+
+## Where the burrow opens, on the play plane.
+func _hole() -> Vector2:
+	return Vector2(_mouth.x, _mouth.y) if _mouth != Vector3.INF else _burrow + wall_normal * 1.2
 
 
 ## The head never collides with rock: it is anchored to the burrow.
@@ -464,80 +515,78 @@ func _cheeks(st: SurfaceTool, rot: Basis, base: int) -> void:
 func _rebuild_body() -> void:
 	if _mouth == Vector3.INF and level and level.field.sample(_rest) < 2.0:
 		_dig_burrow()
-	# The body ends at the neck's last ring, along the head's own line.
-	var head := pos - facing * -NECK_X
-	var joint := Vector3(head.x, head.y, 0.0)
 	var face := Vector3(facing.x, facing.y, 0.0)
-	var start: Vector3
+	# The neck: where the body meets the head, on the head's own line; the
+	# body runs straight back along that line a little way.
+	var joint := Vector3(pos.x, pos.y, 0.0) + face * NECK_X
+	var neck := joint - face * NECK_RUN
+	var root: Vector3
 	var out: Vector3
+	var pts := PackedVector3Array()
 	if _mouth != Vector3.INF:
-		start = _mouth - _axis * 2.2
 		out = _axis
+		# The curve starts at the mouth, or deeper down the burrow when the
+		# neck sits close by or off to the side, so it always runs forwards
+		# and has room to swing across.
+		var rel := neck - _mouth
+		var depth := rel.dot(out)
+		var lateral := (rel - out * depth).length()
+		root = _mouth + out * minf(0.0, depth - maxf(1.0, 2.2 * lateral))
+		# Up the burrow to there.
+		var steps := int(SHOWN_DEPTH / LINK)
+		for i in steps:
+			pts.append(root - out * (SHOWN_DEPTH - i * LINK))
 	else:
 		# No rock to burrow in (a specimen shown in open water): it trails away.
-		start = joint - Vector3(wall_normal.x, wall_normal.y, 0.0) * 3.0
 		out = Vector3(wall_normal.x, wall_normal.y, 0.0)
-	# Straight up the burrow (stopping short of the neck when the head sits
-	# close by), a smooth curve from the burrow's line to the head's, and the
-	# last stretch dead straight along the head's line into the neck.
-	var neck := joint - face * 0.45
-	var run := clampf((neck - start).dot(out) - 0.4, 0.3, 2.45)
-	var lip := start + out * run
-	var gap := lip.distance_to(neck)
-	# Where the body would lie at rest: a smooth curve from the burrow's line
-	# to the head's. Its two inner points follow there with a lag (the one
-	# nearer the burrow the slower), so the body bows out behind a lunge and
-	# bunches as it is drawn back, and yet is always one smooth curve.
-	var rest := [_hermite(lip, out * gap * 0.8, neck, face * gap * 0.8, 1.0 / 3.0),
-		_hermite(lip, out * gap * 0.8, neck, face * gap * 0.8, 2.0 / 3.0)]
-	if _bends.size() != 2 or _dt <= 0.0:
-		_bends = PackedVector3Array(rest)
-	else:
-		for k in 2:
-			var want: Vector3 = rest[k]
-			var p := _bends[k].lerp(want, 1.0 - exp(-(8.0 if k == 0 else 12.0) * _dt))
-			# Only bowing out to the side: lagging along the body would fold it
-			# back on itself.
-			var chord := (neck - lip).normalized()
-			var off := p - want
-			off -= chord * off.dot(chord)
-			_bends[k] = want + off.limit_length(gap * 0.15)
-	var knots := [lip, _bends[0], _bends[1], neck]
-	var target := PackedVector3Array()
-	for seg in 3:
-		var a: Vector3 = knots[seg]
-		var b: Vector3 = knots[seg + 1]
-		var span := a.distance_to(b)
-		var ta: Vector3 = out * span if seg == 0 else ((b - (knots[seg - 1] as Vector3)) * 0.5)
-		var tb: Vector3 = face * span if seg == 2 else (((knots[seg + 2] as Vector3) - a) * 0.5)
-		for i in 7:
-			target.append(_hermite(a, ta, b, tb, i / 7.0))
-	target.append(neck)
-	# A wave runs down the body from the head: slow and slight lurking, quick
-	# and deeper when it lunges or pulls back, an S when it coils.
-	var arc := 0.0
-	for i in range(20, 0, -1):
-		arc += target[i + 1].distance_to(target[i])
-		var t := float(i) / 21.0
-		var tangent := (target[i + 1] - target[i - 1]).normalized()
-		var side := tangent.cross(Vector3.BACK).normalized()
-		# Drawn taut, as at the end of a lunge, the body runs nearly straight.
-		var slack := 1.0 - 0.85 * smoothstep(2.5, 6.5, gap)
-		var amp := (0.04 + 0.12 * _wiggle + 0.24 * _coil) * clampf(gap / 1.5, 0.3, 1.0) * slack
-		target[i] += side * sin(arc * TAU / 3.2 - _wave) * amp * sin(PI * t) * (1.0 - smoothstep(0.7, 1.0, t))
-	var pts := PackedVector3Array()
-	for i in 5:
-		pts.append(start.lerp(lip, i / 5.0))
-	pts.append_array(target)
-	for i in range(1, 4):
-		pts.append(neck.lerp(joint, i / 3.0))
-	# Smoothed, so the lagging body bends in curves, never in kinks (the
-	# burrow's line and the last stretch into the neck kept as they are).
-	for _pass in 4:
-		var smooth := pts.duplicate()
-		for i in range(4, pts.size() - 4):
-			smooth[i] = pts[i] * 0.5 + (pts[i - 1] + pts[i + 1]) * 0.25
-		pts = smooth
+		root = neck - out * 3.0
+	# From the mouth to the neck, one smooth curve: it leaves the hole along
+	# the burrow's line and meets the neck along the head's, so there is
+	# nothing to kink. Sampled evenly along its length.
+	var gap := root.distance_to(neck)
+	var c1 := root + out * gap * 0.42
+	var c2 := neck - face * gap * 0.42
+	var dense := PackedVector3Array()
+	var lengths := PackedFloat32Array([0.0])
+	for i in 97:
+		var t := i / 96.0
+		var a := 1.0 - t
+		dense.append(root * a * a * a + c1 * 3.0 * a * a * t + c2 * 3.0 * a * t * t + neck * t * t * t)
+		if i > 0:
+			lengths.append(lengths[i - 1] + dense[i].distance_to(dense[i - 1]))
+	var total := lengths[96]
+	var count := maxi(int(ceil(total / LINK)), 2)
+	var k := 0
+	var curve := PackedVector3Array()
+	for i in count + 1:
+		var want := total * i / count
+		while k < 95 and lengths[k + 1] < want:
+			k += 1
+		var f := (want - lengths[k]) / maxf(lengths[k + 1] - lengths[k], 1e-5)
+		curve.append(dense[k].lerp(dense[k + 1], clampf(f, 0.0, 1.0)))
+	# The bow and a slow muscle wave running down from the head, both smooth
+	# across the whole curve and gone at its ends; drawn taut, the body runs
+	# nearly straight.
+	var slack := 1.0 - 0.8 * smoothstep(3.0, 7.0, gap)
+	var amp := (0.035 + 0.06 * _wiggle + 0.12 * _coil) * clampf(gap / 2.5, 0.2, 1.0) * slack
+	var bow := clampf(_bow, -0.12 * gap, 0.12 * gap)
+	var offsets := PackedFloat32Array()
+	offsets.resize(count + 1)
+	for i in range(1, count):
+		var t := float(i) / count
+		var from_head := (1.0 - t) * total
+		# Both shapes fall to nothing, and level out, at the burrow and the
+		# neck, so the body still leaves the one and meets the other square.
+		var hump := 16.0 * t * t * (1.0 - t) * (1.0 - t)
+		var wave := sin(from_head * TAU / 2.8 - _wave) * amp * smoothstep(0.0, 0.3, t) * smoothstep(0.0, 1.2, from_head)
+		offsets[i] = bow * hump + wave
+	for i in range(1, count):
+		var tangent := (curve[i + 1] - curve[i - 1]).normalized()
+		curve[i] += tangent.cross(Vector3.BACK).normalized() * offsets[i]
+	pts.append_array(curve)
+	for i in range(1, 3):
+		pts.append(neck.lerp(joint, i / 2.0))
+	drawn = pts.duplicate()
 	# Into the head's own space (where the model will be this frame).
 	var to_local := Transform3D(model.basis, Vector3(pos.x, pos.y, 0.0)).affine_inverse()
 	for i in pts.size():
@@ -572,11 +621,11 @@ func _body_tube(pts: PackedVector3Array) -> void:
 	var fin := PackedVector3Array()
 	var fin_tip := PackedVector3Array()
 	for i in n:
-		var t := float(i) / (n - 1)
+		# How far back from the neck (near enough).
+		var back_by := (n - 1 - i) * LINK
 		var side := tangents[i].cross(backs[i])
-		# Thickening a little up the body, easing to the neck's girth.
-		var r := lerpf(0.1, 0.118, smoothstep(0.0, 0.8, t))
-		r = lerpf(r, NECK_R, smoothstep(0.85, 1.0, t))
+		# Slimming a little down the body from the neck's girth.
+		var r := lerpf(NECK_R, 0.1, smoothstep(0.3, 6.0, back_by))
 		var ring := PackedVector3Array()
 		for j in BODY_SIDES + 1:
 			var a := TAU * j / BODY_SIDES
@@ -584,7 +633,7 @@ func _body_tube(pts: PackedVector3Array) -> void:
 			var ss := signf(sin(a)) * pow(absf(sin(a)), 0.85)
 			ring.append(pts[i] + backs[i] * sc * r + side * ss * r)
 		grid.append(ring)
-		var h := 0.09 * sin(PI * clampf((i - 6.0) / 18.0, 0.0, 1.0))
+		var h := 0.09 * smoothstep(0.4, 1.2, back_by) * (1.0 - smoothstep(4.0, 7.0, back_by))
 		if _mouth != Vector3.INF:
 			# None of it until the body is clear of the burrow's mouth (the
 			# mouth and its axis brought into the head's space).
@@ -649,14 +698,6 @@ func _body_tube(pts: PackedVector3Array) -> void:
 				st.add_index(k)
 	_body_mesh.clear_surfaces()
 	st.commit(_body_mesh)
-
-
-## A cubic Hermite curve from [param a] (heading [param ta]) to [param b]
-## (heading [param tb]), at [param t].
-static func _hermite(a: Vector3, ta: Vector3, b: Vector3, tb: Vector3, t: float) -> Vector3:
-	var t2 := t * t
-	var t3 := t2 * t
-	return a * (2.0 * t3 - 3.0 * t2 + 1.0) + ta * (t3 - 2.0 * t2 + t) + b * (-2.0 * t3 + 3.0 * t2) + tb * (t3 - t2)
 
 
 ## The neck and skull, lofted from [constant HEAD] as BodyKit lofts a body,
