@@ -168,6 +168,12 @@ func _process(_delta: float) -> void:
 			var args := OS.get_cmdline_user_args()
 			var turn := deg_to_rad(float(args[4])) if args.size() > 4 and args[4].is_valid_float() else 0.46
 			g.set(&"_strike_to", g.pos + g.wall_normal.rotated(turn) * 7.0)
+		if _mode == "wallclip" and _frames == 50 and _dweller is Lurelight:
+			# Snap at something swimming up to the lure.
+			var a := _dweller as Lurelight
+			a.state = Lurelight.State.SNAP
+			a.set(&"_timer", 0.4)
+			a.lock_facing = true
 		_dweller.tick(dt)
 		_dweller.sync_transform()
 	if _school:
@@ -262,7 +268,7 @@ func _wall_scene(script: Script, layout: LevelLayout) -> void:
 		var head := Vector3(_dweller.pos.x, _dweller.pos.y, 0.0)
 		var pitch := float(args[5]) if args.size() > 5 else 10.0
 		cam.position = head + Basis(Vector3.UP, deg_to_rad(yaw)) * Basis(Vector3.RIGHT, deg_to_rad(-pitch)) \
-			* Vector3(0.0, 0.0, 3.6)
+			* Vector3(0.0, 0.0, maxf(3.6, _dweller.body_span * 2.4))
 		cam.look_at(head - Vector3(_dweller.facing.x, _dweller.facing.y, 0.0) * 0.1, Vector3.UP)
 	# The sub's lamp, off to one side.
 	var lamp := OmniLight3D.new()
