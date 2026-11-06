@@ -121,6 +121,14 @@ uniform float bar_freq = 2.0;
 uniform float glass_alpha = 0.12;
 uniform float glass_rim = 0.7;
 uniform float glass_fin = 0.6;
+// Soft, blotchy variation of the skin's colour (0 for none): no two
+// patches of skin quite the same shade.
+uniform float mottle = 0.0;
+// Dark markings: up to four soft-edged blotches in the body's own space
+// (xyz its centre, mirrored on both flanks, w how dark), each this big
+// (radii in metres): a band through the eye, saddles over the back.
+uniform vec4 blotch_at[4];
+uniform vec3 blotch_size[4];
 // Dark spots dappling the back (0 for none), their size in metres.
 uniform float spots = 0.0;
 uniform float spot_size = 0.35;
@@ -309,8 +317,26 @@ void fragment() {
 		vec3 f = fract(g) - 0.5;
 		vec2 key = cell.xy + cell.z * vec2(7.13, 3.71);
 		vec3 o = vec3(hash2(key), hash2(key + 7.3), hash2(key + 1.9)) - 0.5;
-		float spot = 1.0 - smoothstep(0.2, 0.32, length(f - o * 0.35));
-		base *= 1.0 - spot * spots * step(hash2(key + 3.1), 0.55) * (1.0 - COLOR.g);
+		// Each a different size and depth of colour, a few large, most small.
+		float r = mix(0.3, 0.46, pow(hash2(key + 5.7), 1.5));
+		float spot = 1.0 - smoothstep(r * 0.7, r, length(f - o * 0.35));
+		float depth = mix(0.55, 1.0, hash2(key + 8.3));
+		base *= 1.0 - spot * spots * depth * step(hash2(key + 3.1), 0.85) * (1.0 - COLOR.g * 0.85);
+	}
+	if (!enamel && COLOR.b < 0.001) {
+		if (mottle > 0.0) {
+			float m = value_noise(body_pos * 2.7) * 0.6 + value_noise(body_pos * 8.0 + 3.1) * 0.4;
+			base *= 1.0 + (m - 0.5) * mottle;
+		}
+		vec3 q = vec3(body_pos.xy, abs(body_pos.z));
+		// Ragged edges: markings, not shadows.
+		float warp = (value_noise(body_pos * 5.0 + 1.7) - 0.5) * 0.6 + (value_noise(body_pos * 14.0) - 0.5) * 0.3;
+		for (int i = 0; i < 4; i++) {
+			if (blotch_at[i].w > 0.0) {
+				float d = length((q - blotch_at[i].xyz) / max(blotch_size[i], vec3(0.001)));
+				base *= 1.0 - blotch_at[i].w * (1.0 - smoothstep(0.86, 1.0, d + warp));
+			}
+		}
 	}
 	float hgt = 0.0;
 	float bare = 1.0;

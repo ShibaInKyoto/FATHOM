@@ -43,6 +43,8 @@ const SPINES := 96
 const JAW_HINGE := Vector3(0.69, -0.06, 0.0)
 
 static var _spine_mesh: Mesh
+## Leathery, finely pebbled skin, shared by every puffer.
+static var _skin_tex: NoiseTexture2D
 
 var state := State.CALM
 var _timer := 0.0
@@ -83,30 +85,28 @@ func setup() -> void:
 
 func build_model() -> void:
 	var mat := species_material(func(m: ShaderMaterial) -> void:
-		m.set_shader_parameter(&"back_color", Color(0.5, 0.43, 0.26))
-		m.set_shader_parameter(&"belly_color", Color(0.88, 0.85, 0.74))
+		m.set_shader_parameter(&"back_color", Color(0.5, 0.44, 0.27))
+		m.set_shader_parameter(&"belly_color", Color(0.86, 0.84, 0.74))
 		m.set_shader_parameter(&"glow_color", Color(1.0, 0.85, 0.4))
 		m.set_shader_parameter(&"glow_strength", 1.6)
 		m.set_shader_parameter(&"roughness", 0.55)
 		m.set_shader_parameter(&"metallic", 0.0)
 		m.set_shader_parameter(&"rim_strength", 0.3)
-		m.set_shader_parameter(&"skin_pits", 0.004)
-		m.set_shader_parameter(&"spots", 0.75)
-		m.set_shader_parameter(&"spot_size", 0.14)
-		m.set_shader_parameter(&"body_length", 1.36)
-		# Stiff-bodied: only the tail end sweeps, slowly; the soft fins on its
-		# back and belly and its pectorals flutter to drive it.
-		m.set_shader_parameter(&"swim_amp", 0.09)
-		m.set_shader_parameter(&"swim_freq", 3.0)
-		m.set_shader_parameter(&"swim_wave", 1.5)
-		m.set_shader_parameter(&"swim_vertical", 0.0)
-		m.set_shader_parameter(&"swim_head", 0.0)
-		m.set_shader_parameter(&"swim_still", 0.0)
-		m.set_shader_parameter(&"anchored", true)
-		m.set_shader_parameter(&"flutter_amp", 0.07)
-		m.set_shader_parameter(&"flutter_freq", 22.0)
-		m.set_shader_parameter(&"flutter_wave", 14.0)
-		m.set_shader_parameter(&"fin_color", Color(0.62, 0.55, 0.36, 0.7))
+		m.set_shader_parameter(&"skin_pits", 0.003)
+		m.set_shader_parameter(&"skin_tex", _skin())
+		m.set_shader_parameter(&"skin_tex_scale", 5.0)
+		m.set_shader_parameter(&"skin_tex_depth", 0.0015)
+		m.set_shader_parameter(&"skin_tex_shade", 0.1)
+		m.set_shader_parameter(&"mottle", 0.5)
+		m.set_shader_parameter(&"spots", 0.85)
+		m.set_shader_parameter(&"spot_size", 0.11)
+		# A dark band down through each eye, and saddles over the nape, the
+		# middle of the back and in front of the tail, running down the flanks.
+		m.set_shader_parameter(&"blotch_at", [Vector4(0.49, 0.05, 0.3, 0.5), Vector4(0.24, 0.42, 0.0, 0.45),
+			Vector4(-0.08, 0.4, 0.0, 0.45), Vector4(-0.4, 0.22, 0.0, 0.4)])
+		m.set_shader_parameter(&"blotch_size", [Vector3(0.07, 0.32, 0.26), Vector3(0.1, 0.3, 0.4),
+			Vector3(0.1, 0.32, 0.42), Vector3(0.08, 0.2, 0.3)])
+		m.set_shader_parameter(&"fin_color", Color(0.6, 0.52, 0.3, 0.75))
 		m.set_shader_parameter(&"tooth_color", Color(0.86, 0.82, 0.7)))
 	_body = add_visual(BodyKit.morph(_build(CALM, false), _build(PUFFED, true)), mat)
 	# The lower half of the beak, which gulps.
@@ -124,6 +124,24 @@ func build_model() -> void:
 	_spine_mat = StandardMaterial3D.new()
 	_spine_mat.albedo_color = Color(0.86, 0.82, 0.7)
 	_spine_mat.roughness = 0.45
+
+
+## Leathery skin, pebbled: soft cells, built once.
+static func _skin() -> NoiseTexture2D:
+	if _skin_tex == null:
+		var noise := FastNoiseLite.new()
+		noise.noise_type = FastNoiseLite.TYPE_CELLULAR
+		noise.cellular_return_type = FastNoiseLite.RETURN_DISTANCE
+		noise.frequency = 0.045
+		noise.seed = 23
+		_skin_tex = NoiseTexture2D.new()
+		_skin_tex.width = 256
+		_skin_tex.height = 256
+		_skin_tex.seamless = true
+		_skin_tex.generate_mipmaps = true
+		_skin_tex.normalize = true
+		_skin_tex.noise = noise
+	return _skin_tex
 
 
 ## The eye's place on a body of [param stations]: on the skin at
