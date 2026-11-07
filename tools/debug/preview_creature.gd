@@ -11,7 +11,9 @@ extends Node3D
 ## Usage: xvfb-run godot --path . res://tools/debug/preview_creature.tscn -- <out.png> <species>
 ## [sheet|swim|game|gameclip|stroke|clip|turnclip|wall|wallclip|wallgame] [biome index] [backdrop]
 ## "turnclip" films one swimming right, turning back left and back right
-## again, side on, to judge how it turns.
+## again, side on, to judge how it turns. "close" looks at the front half of
+## one from close by, at an angle round it: [yaw] [pitch] in degrees after
+## the biome.
 ## "wall", "wallclip" and "wallgame" set a wall dweller on a real floor of
 ## the cave, rock and all: close, filmed (it strikes part way through), or
 ## at the game camera's distance.
@@ -92,7 +94,7 @@ func _ready() -> void:
 	var count := 4
 	if _mode == "sheet":
 		count = 3
-	elif _mode == "game" or _mode == "turnclip":
+	elif _mode == "game" or _mode == "turnclip" or _mode == "close":
 		count = 1
 	elif _mode == "clip":
 		count = 2
@@ -153,6 +155,14 @@ func _ready() -> void:
 		# A drifter hangs below its bell: frame the whole of it.
 		cam.position.y -= span * 0.3
 		cam.position.z *= 0.8
+	if _mode == "close":
+		# Close on the front half, from an angle round it (yaw, pitch).
+		var yaw := float(args[4]) if args.size() > 4 and args[4].is_valid_float() else 30.0
+		var pitch := float(args[5]) if args.size() > 5 else 25.0
+		var head := Vector3(origin.x + span * 0.15, origin.y, 0.0)
+		var eye := head + Basis(Vector3.UP, deg_to_rad(yaw)) * Basis(Vector3.RIGHT, deg_to_rad(-pitch)) \
+			* Vector3(0.0, 0.0, span * 0.75)
+		cam.transform = Transform3D(Basis.looking_at(head - eye, Vector3.UP), eye)
 	if _mode == "game":
 		cam.fov = 42.0
 		cam.position = Vector3(origin.x, origin.y, DiveCamera.BASE_DISTANCE)
@@ -235,6 +245,9 @@ func _process(_delta: float) -> void:
 			elif t >= 2.6:
 				heading = Vector2(1.0, -0.3)
 			c.vel = heading.normalized() * SPEED
+		if _mode == "clip" and c is Manta and _frames == 240:
+			# Startled: it beats away hard.
+			c.set(&"_flee", 3.0)
 		if _mode == "clip" and c is Puffer:
 			# Startled: it swells, holds, and sags back.
 			if _frames == 40:
@@ -266,13 +279,21 @@ func _process(_delta: float) -> void:
 		if _frames > 10:
 			var args := OS.get_cmdline_user_args()
 			get_viewport().get_texture().get_image().save_png("%s_%03d.png" % [args[0].get_basename(), _frames - 11])
-		if _frames == 10 + (CLIP_FRAMES * 2 if _dweller is Lurelight or _colony else CLIP_FRAMES):
+		if _frames == 10 + _clip_frames():
 			get_tree().quit()
 		return
 	if _frames == 24:
 		var args := OS.get_cmdline_user_args()
 		get_viewport().get_texture().get_image().save_png(args[0] if args.size() > 0 else "user://creature.png")
 		get_tree().quit()
+
+
+## How many frames a clip runs: longer for the slow (a manta's beat and
+## glide, a lure's patient wait, a colony's drift).
+func _clip_frames() -> int:
+	if not _crits.is_empty() and _crits[0] is Manta:
+		return CLIP_FRAMES * 3
+	return CLIP_FRAMES * 2 if _dweller is Lurelight or _colony else CLIP_FRAMES
 
 
 ## Turns [param c] to a view: 1 three-quarter, 2 from above (a drifter that

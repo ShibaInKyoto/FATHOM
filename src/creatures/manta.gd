@@ -5,6 +5,15 @@ extends Creature
 ## bites nothing, pays no attention to noise or light, and banks away from a
 ## sub that crowds it. Hurt, it beats away fast. The camera sees the cave side
 ## on, so the wings are held tilted towards it to show their spread.
+## Built as the animal is: one disc, body and wings together, thick over the
+## body and thinning to swept-back pointed tips; a wide mouth across the
+## front of the head between two rolled horns, eyes at the corners of the
+## head, a whip tail with a small dorsal fin at its root. Its back is near
+## black with a pale chevron over each shoulder, its belly white and
+## spotted. It swims as mantas do: a few slow, deep beats, each wing curling
+## up and down as one with the stroke running back from its leading edge and
+## out to the trailing tip, then a long glide on outstretched wings; it bobs
+## with each beat and banks round as it turns.
 
 const SPEED := 2.4
 const FLEE_SPEED := 6.5
@@ -12,15 +21,35 @@ const FLEE_SPEED := 6.5
 const PERSONAL_SPACE := 7.0
 ## How far it holds its wings towards the camera, in radians.
 const TILT := 1.05
-## Model scale: a wingspan of about seven metres.
-const SIZE := 1.3
+## How far it banks into a turn for each radian a second it turns at.
+const BANK := 0.35
+## The disc: half its span (a wingspan of about seven metres), where the
+## wings leave the body, and its leading and trailing edges and thickness,
+## (z, x or metres) from the midline out to the wingtip.
+const HALF_SPAN := 3.4
+const WING_ROOT := 0.55
+const LEAD := [Vector2(0.0, 1.0), Vector2(0.45, 0.98), Vector2(0.7, 0.86), Vector2(1.2, 0.63),
+	Vector2(1.8, 0.35), Vector2(2.4, 0.01), Vector2(2.9, -0.37), Vector2(3.25, -0.72), Vector2(3.4, -0.95)]
+const TRAIL := [Vector2(0.0, -1.0), Vector2(0.45, -0.96), Vector2(0.8, -0.8), Vector2(1.4, -0.72),
+	Vector2(2.0, -0.75), Vector2(2.6, -0.82), Vector2(3.1, -0.9), Vector2(3.4, -0.95)]
+const THICK := [Vector2(0.0, 0.42), Vector2(0.3, 0.38), Vector2(0.55, 0.27), Vector2(0.9, 0.14),
+	Vector2(1.5, 0.075), Vector2(2.4, 0.045), Vector2(3.4, 0.012)]
+
+## The box the back's markings cover: x and |z| of its corner, and its size.
+const MARKINGS := Vector4(-0.7, 0.2, 1.5, 1.9)
+
+static var _mesh: ArrayMesh
+static var _markings: ImageTexture
 
 var _goal := Vector2.INF
 var _goal_timer := 0.0
 var _flee := 0.0
 var _t := 0.0
 var _tilt: Node3D
-var _wings: Array[Node3D] = []
+## The stroke: beats left in this bout, glide left, and beats so far.
+var _bout := 2
+var _glide := 0.0
+var _beats := 0
 
 
 func setup() -> void:
@@ -35,79 +64,229 @@ func setup() -> void:
 	hearing = 0.0
 	glow_color = Color(0.75, 0.9, 1.0)
 	_turn_speed = 1.6
+	# A big animal turning round takes its time.
+	turn_rate = 2.8
 	super.setup()
 	_t = level.rng.randf() * TAU
 
 
 func build_model() -> void:
 	var mat := species_material(func(m: ShaderMaterial) -> void:
-		m.set_shader_parameter(&"back_color", Color(0.09, 0.12, 0.2))
-		m.set_shader_parameter(&"belly_color", Color(0.86, 0.9, 0.92))
+		m.set_shader_parameter(&"back_color", Color(0.045, 0.05, 0.065))
+		m.set_shader_parameter(&"belly_color", Color(0.86, 0.88, 0.9))
 		m.set_shader_parameter(&"glow_color", Color(0.75, 0.9, 1.0))
 		m.set_shader_parameter(&"glow_strength", 0.0)
-		m.set_shader_parameter(&"rim_strength", 0.45)
-		m.set_shader_parameter(&"roughness", 0.5)
-		m.set_shader_parameter(&"body_length", 3.0)
-		m.set_shader_parameter(&"swim_amp", 0.03)
-		m.set_shader_parameter(&"swim_freq", 1.2)
-		m.set_shader_parameter(&"swim_wave", 0.8)
-		m.set_shader_parameter(&"swim_vertical", 0.0))
+		m.set_shader_parameter(&"rim_strength", 0.2)
+		m.set_shader_parameter(&"roughness", 0.42)
+		m.set_shader_parameter(&"metallic", 0.0)
+		m.set_shader_parameter(&"mottle", 0.22)
+		m.set_shader_parameter(&"skin_pits", 0.0015)
+		m.set_shader_parameter(&"tooth_color", Color(0.025, 0.025, 0.03))
+		# No sideways swimming: the swim clock drives the wings, one cycle a
+		# beat, and the tail's sway.
+		m.set_shader_parameter(&"swim_amp", 0.0)
+		m.set_shader_parameter(&"swim_freq", TAU)
+		m.set_shader_parameter(&"flap_amp", 0.68)
+		m.set_shader_parameter(&"flap_rest", 0.06)
+		m.set_shader_parameter(&"flap_root", WING_ROOT)
+		m.set_shader_parameter(&"flap_span", HALF_SPAN - WING_ROOT)
+		m.set_shader_parameter(&"flap_lag", 0.8)
+		m.set_shader_parameter(&"flap_tip_lag", 0.9)
+		m.set_shader_parameter(&"flutter_amp", 0.13)
+		m.set_shader_parameter(&"flutter_freq", TAU)
+		m.set_shader_parameter(&"flutter_wave", 2.2)
+		m.set_shader_parameter(&"marking_tex", _chevrons())
+		m.set_shader_parameter(&"marking_box", MARKINGS)
+		# Dark spots on the white belly, between the gills.
+		m.set_shader_parameter(&"blotch_at", [Vector4(0.25, -0.12, 0.12, 0.8), Vector4(-0.08, -0.11, 0.24, 0.7),
+			Vector4(0.1, -0.1, 0.4, 0.65), Vector4(-0.38, -0.07, 0.1, 0.75)])
+		m.set_shader_parameter(&"blotch_size", [Vector3(0.07, 0.08, 0.06), Vector3(0.06, 0.08, 0.07),
+			Vector3(0.05, 0.08, 0.05), Vector3(0.06, 0.08, 0.06)]))
 	_tilt = Node3D.new()
-	_tilt.scale = Vector3.ONE * SIZE
 	# Back to the camera from the start (a specimen in the hangar never ticks).
 	_tilt.rotation.x = TILT
 	model.add_child(_tilt)
-	# A flat, broad body along +X (the head), flattened top to bottom.
-	var body := MeshKit.lathe(PackedVector2Array([Vector2(0.0, 0.05), Vector2(0.2, 0.42), Vector2(0.55, 0.62),
-		Vector2(0.85, 0.5), Vector2(1.0, 0.25)]), 2.8, 18, 12, 0.32, 1.0)
-	_add_part(body, mat, Transform3D.IDENTITY)
-	# Wings: broad, swept-back triangles off either side, each on its own pivot
-	# along the body so it can beat.
-	var wing_outline := PackedVector2Array([Vector2(1.05, 0.0), Vector2(0.45, 1.3), Vector2(-0.45, 3.0),
-		Vector2(-0.8, 3.05), Vector2(-0.72, 2.2), Vector2(-1.0, 1.0), Vector2(-1.3, 0.0)])
-	var wing := MeshKit.fin(wing_outline, 0.08, 0.0, 0.12)
-	for side: float in [1.0, -1.0]:
-		var pivot := Node3D.new()
-		pivot.position = Vector3(0.0, 0.0, side * 0.45)
-		_tilt.add_child(pivot)
-		_wings.append(pivot)
-		var mi := MeshInstance3D.new()
-		mi.mesh = wing
-		mi.material_override = mat
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		# The fin is drawn in XY; lay it out along +Z (or -Z) from the pivot.
-		mi.basis = Basis(Vector3.RIGHT, side * PI * 0.5)
-		pivot.add_child(mi)
-		visuals.append(mi)
-	# Cephalic fins curling forward either side of the mouth, and a long whip tail.
-	var horn := MeshKit.fin(PackedVector2Array([Vector2(0.0, 0.0), Vector2(0.55, 0.1), Vector2(0.6, 0.22),
-		Vector2(0.05, 0.18)]), 0.06, 0.0, 0.2)
-	for side: float in [1.0, -1.0]:
-		_add_part(horn, mat, Transform3D(Basis(Vector3.RIGHT, side * PI * 0.5) * Basis(Vector3.BACK, -0.25),
-			Vector3(1.25, 0.0, side * 0.32)))
-	var tail := MeshKit.spike(0.07, 2.6)
-	_add_part(tail, mat, Transform3D(Basis(Vector3.UP, PI), Vector3(-1.2, 0.0, 0.0)))
-	# Eyes on the tilted body, so they stay put on it.
-	var eye_mat := StandardMaterial3D.new()
-	eye_mat.albedo_color = Color(0.03, 0.03, 0.04)
-	eye_mat.roughness = 0.05
-	for side: float in [1.0, -1.0]:
-		var eye := MeshInstance3D.new()
-		eye.mesh = MeshKit.sphere(0.09, 8, 4)
-		eye.material_override = eye_mat
-		eye.position = Vector3(1.05, 0.1, side * 0.5)
-		_tilt.add_child(eye)
-
-
-func _add_part(mesh: Mesh, mat: Material, xf: Transform3D) -> void:
+	if _mesh == null:
+		_mesh = _build_mesh()
 	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
+	mi.mesh = _mesh
 	mi.material_override = mat
-	mi.transform = xf
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_tilt.add_child(mi)
 	visuals.append(mi)
 
+
+# --- The model ---------------------------------------------------------------
+
+static func _build_mesh() -> ArrayMesh:
+	var parts := [[_disc()]]
+	# Cephalic fins either side of the mouth, rolled up as it cruises:
+	# flattened paddles, dark outside and pale where they curl under, their
+	# tips blunt.
+	var lobe := _cephalic()
+	for side: float in [1.0, -1.0]:
+		var aim := Basis(Vector3.UP, -0.16 * side) * Basis(Vector3.BACK, -0.12)
+		parts.append([lobe, Transform3D(aim, Vector3(0.9, -0.01, 0.4 * side))])
+		# Eyes, bulging from the sides of the head behind the fins.
+		var eye := MeshKit.painted(MeshKit.ball(0.085, 0.0, 12, 8), func(_v: Vector3) -> Color:
+			return Color(0.0, 0.0, 0.0, 0.3))
+		parts.append([eye, Transform3D(Basis.from_scale(Vector3(1.0, 0.85, 0.8)),
+			Vector3(_edge(LEAD, 0.6) - 0.1, 0.02, 0.6 * side))])
+	# The whip tail, swaying more towards its tip, and the little dorsal fin
+	# at its root.
+	var tail_pts := PackedVector3Array()
+	var tail_r := PackedFloat32Array()
+	for i in 14:
+		var f := i / 13.0
+		tail_pts.append(Vector3(-0.85 - 2.1 * f, 0.02 + 0.06 * f * f, 0.0))
+		tail_r.append(lerpf(0.06, 0.007, pow(f, 0.7)))
+	var tail := ArrayMesh.new()
+	MeshKit.tube(tail, tail_pts, tail_r, 7)
+	parts.append([MeshKit.painted(tail, func(v: Vector3) -> Color:
+		return Color(0.0, 0.08, clampf((-0.95 - v.x) / 1.9, 0.0, 1.0)))])
+	var dorsal := MeshKit.fin(PackedVector2Array([Vector2(-0.7, 0.02), Vector2(-0.94, 0.21), Vector2(-1.02, 0.2),
+		Vector2(-1.0, 0.02)]), 0.025, 0.0, 0.05)
+	parts.append([dorsal])
+	return MeshKit.merge(parts)
+
+
+## A cephalic fin rolled up, along +X from its root: a flattened tube
+## swelling a little then tapering to a blunt, rounded tip.
+static func _cephalic() -> ArrayMesh:
+	var pts := PackedVector3Array()
+	var radii := PackedFloat32Array()
+	for i in 9:
+		var f := i / 8.0
+		pts.append(Vector3(0.55 * f, 0.0, 0.0))
+		radii.append(0.06 * (1.0 + 0.15 * sin(f * PI)) * (1.0 - 0.45 * f * f))
+	var tube := ArrayMesh.new()
+	MeshKit.tube(tube, pts, radii, 12)
+	var tip := MeshKit.ball(0.034, 0.0, 10, 6)
+	var lobe := MeshKit.merge([[tube], [tip, Transform3D(Basis(), pts[8])]])
+	lobe = MeshKit.transformed(lobe, Transform3D(Basis.from_scale(Vector3(1.0, 0.62, 1.0)), Vector3.ZERO))
+	return MeshKit.painted(lobe, func(v: Vector3) -> Color:
+		# Pale on the underside, where it curls; a little free towards the tip.
+		return Color(0.0, 0.08 + 0.55 * smoothstep(0.0, -0.03, v.y), clampf(v.x * 0.25, 0.0, 0.12)))
+
+
+## The disc, body and wings as one surface: round each span station a loop
+## from the leading edge back over the top and forward under the belly,
+## thick and blunt over the head, thin and sharp out on the wings.
+static func _disc() -> ArrayMesh:
+	var spans := 120
+	var chords := 26
+	var loop := chords * 2
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in spans + 1:
+		var t := float(i) / spans * 2.0 - 1.0
+		var z := HALF_SPAN * signf(t) * pow(absf(t), 1.25)
+		var az := absf(z)
+		var lead := _edge(LEAD, az)
+		var trail := _edge(TRAIL, az)
+		var thick := _edge(THICK, az)
+		# Blunt over the head, where the mouth is, sharper out on the wings.
+		var bluntness := lerpf(0.3, 0.5, smoothstep(0.3, 0.75, az))
+		for k in loop:
+			var top := k <= chords
+			var c := pow(float(k if top else loop - k) / chords, 1.5)
+			var shape := pow(c, bluntness) * pow(1.0 - c, 0.9) / _peak(bluntness)
+			var x := lerpf(lead, trail, c)
+			var y := thick * shape * (0.62 if top else -0.38)
+			# The mouth: the front of the head drawn in a little, a gape
+			# across it between the fins.
+			var gape := (1.0 - smoothstep(0.0, 0.06, c)) * (1.0 - smoothstep(0.26, 0.36, az))
+			x -= 0.05 * gape
+			st.set_color(_paint(z, c, top))
+			st.set_uv(Vector2(x, 0.0))
+			st.add_vertex(Vector3(x, y, z))
+	for i in spans:
+		for k in loop:
+			var a := i * loop + k
+			var b := i * loop + (k + 1) % loop
+			st.add_index(a)
+			st.add_index(a + loop)
+			st.add_index(b)
+			st.add_index(b)
+			st.add_index(a + loop)
+			st.add_index(b + loop)
+	st.generate_normals()
+	return st.commit()
+
+
+## The pale chevron over each shoulder, as seen from above (x across,
+## |z| down, over [constant MARKINGS]): each fans out from behind the head,
+## back and out over the shoulder and fades into the wing, a dark band left
+## between them down the back; its edges are ragged and mottled.
+static func _chevrons() -> ImageTexture:
+	if _markings:
+		return _markings
+	var w := 192
+	var h := 240
+	var noise := FastNoiseLite.new()
+	noise.seed = 31
+	noise.frequency = 5.0
+	noise.fractal_octaves = 3
+	var img := Image.create(w, h, false, Image.FORMAT_L8)
+	for py in h:
+		for px in w:
+			var x := MARKINGS.x + (px + 0.5) / w * MARKINGS.z
+			var az := MARKINGS.y + (py + 0.5) / h * MARKINGS.w
+			var along := Vector2(-0.8, 1.0)
+			var rel := Vector2(x - 0.5, az - 0.45)
+			var f := rel.dot(along) / along.length_squared()
+			var off := (rel - along * clampf(f, 0.0, 1.0)).length()
+			var width := lerpf(0.07, 0.34, clampf(f, 0.0, 1.0))
+			var ragged := noise.get_noise_2d(x, az) * 0.09
+			var v := 1.0 - smoothstep(width * 0.6, width + 0.1, off + ragged)
+			v *= smoothstep(-0.05, 0.15, f) * (1.0 - smoothstep(0.6, 1.05, f + ragged))
+			v *= smoothstep(0.34, 0.5, az)
+			img.set_pixel(px, py, Color(v * 0.88, 0.0, 0.0))
+	img.generate_mipmaps()
+	_markings = ImageTexture.create_from_image(img)
+	return _markings
+
+
+## The highest point of a chord shaped c^b (1 - c)^0.9, to scale it to one.
+static func _peak(b: float) -> float:
+	var c := b / (b + 0.9)
+	return pow(c, b) * pow(1.0 - c, 0.9)
+
+
+## Where a smooth curve through [param pts] ((z, value) pairs) stands at
+## [param z].
+static func _edge(pts: Array, z: float) -> float:
+	var n := pts.size()
+	for i in range(1, n):
+		var b: Vector2 = pts[i]
+		if z <= b.x or i == n - 1:
+			var a: Vector2 = pts[i - 1]
+			var before: Vector2 = pts[maxi(i - 2, 0)]
+			var after: Vector2 = pts[mini(i + 1, n - 1)]
+			var f := clampf((z - a.x) / maxf(b.x - a.x, 0.0001), 0.0, 1.0)
+			return cubic_interpolate(a.y, b.y, before.y, after.y, f)
+	return (pts[n - 1] as Vector2).y
+
+
+## The skin at a point of the disc: dark above, the wingtips a little
+## greyer; white below, the wings' trailing edges and tips edged in grey;
+## a dark slot of mouth across the front of the head.
+static func _paint(z: float, c: float, top: bool) -> Color:
+	var az := absf(z)
+	var g := 0.0
+	if top:
+		# (The chevrons are painted over it: see _chevrons.)
+		g = 0.14 * smoothstep(2.2, 3.4, az)
+	else:
+		var margin := smoothstep(0.8, 1.0, c) * smoothstep(0.9, 1.8, az) + smoothstep(2.5, 3.4, az)
+		g = 1.0 - 0.55 * clampf(margin, 0.0, 1.0)
+	# The mouth's lower lip dark, so a dark slot shows across the front.
+	if not top and c < 0.05 and az < 0.32:
+		g = 0.0
+	return Color(0.0, g, 0.0)
+
+
+# --- Behaviour ----------------------------------------------------------------
 
 func behave(delta: float) -> void:
 	_t += delta
@@ -125,13 +304,6 @@ func behave(delta: float) -> void:
 		if away.length() < PERSONAL_SPACE:
 			desired += away.normalized() * speed * (1.0 - away.length() / PERSONAL_SPACE) * 2.0
 	steer(desired, 0.6 if _flee <= 0.0 else 1.5, delta)
-	# Slow, deep wingbeats, quicker when it bolts.
-	var beat := sin(_t * (1.1 if _flee <= 0.0 else 3.2)) * 0.38
-	for i in _wings.size():
-		_wings[i].rotation.x = beat * (1.0 if i == 0 else -1.0)
-	# Its dark back held towards the camera whichever way it heads (turned
-	# round to face left, the model's sides swap).
-	_tilt.rotation.x = TILT * _side()
 
 
 ## Somewhere roomy in clear sight to glide to next, a good way off.
@@ -149,3 +321,48 @@ func on_damaged(_amount: float, from: Vector2) -> void:
 	_flee = 5.0
 	_goal = pos + (pos - from).normalized() * 30.0
 	_goal_timer = 5.0
+
+
+# --- Swimming -----------------------------------------------------------------
+
+## Beat and glide: a bout of two or three slow, deep beats, then a glide of
+## a few seconds on outstretched wings (a bout always ends with the wings
+## level, so the glide settles out of the stroke, never stops it short).
+## Bolting, it beats hard and fast without a pause.
+func _update_stroke(delta: float) -> void:
+	var rate := 0.42
+	var want := 1.0
+	if _flee > 0.0:
+		rate = 0.95
+		want = 1.3
+		_glide = 0.0
+	elif _glide > 0.0:
+		_glide -= delta
+		rate = 0.2
+		want = 0.07
+	_swim_clock += delta * rate
+	var beats := floori(_swim_clock + _phase / TAU)
+	if beats != _beats:
+		_beats = beats
+		if _flee <= 0.0 and _glide <= 0.0:
+			_bout -= 1
+			if _bout <= 0:
+				# Varied from one glide to the next without touching the
+				# level's random stream.
+				var h := fposmod(sin(beats * 12.9898 + _phase * 78.233) * 43758.5453, 1.0)
+				_glide = 1.8 + h * 2.2
+				_bout = 2 + int(h * 2.0)
+	var ease := 3.0 if want > _swim_power else 1.4
+	_swim_power = lerpf(_swim_power, want, 1.0 - exp(-ease * delta))
+
+
+## Holds its back to the camera, banking into its turns (turning round
+## towards the camera, it rolls its back towards where it is turning); it
+## bobs with each beat, rising as its wings sweep down.
+func _update_visuals(delta: float) -> void:
+	super._update_visuals(delta)
+	var roll := TILT * _side() - clampf(_yaw_v * BANK, -0.9, 0.9)
+	var ph := _swim_clock * TAU + _phase
+	var pitch := 0.035 * cos(ph) * _swim_power
+	_tilt.basis = Basis(Vector3.RIGHT, roll) * Basis(Vector3.BACK, pitch)
+	_tilt.position = _tilt.basis.y * (-0.08 * sin(ph - 0.5) * _swim_power)

@@ -87,6 +87,19 @@ uniform float leg_lift = 0.35;
 instance uniform float gait = 0.0;
 instance uniform float gait_amp = 0.0;
 instance uniform float leg_tuck = 0.0;
+// Wings that beat (a ray's), riding the swim stroke (swim_clock, swim_freq,
+// swim_power): beyond [member flap_root] either side of the body, each half
+// of the disc curls up and down about the body's edge as one piece, so it
+// never stretches, its tip [member flap_rest] plus up to [member flap_amp]
+// radians off the line; the beat runs back from the leading edge
+// ([member flap_lag] radians a metre, so the wing twists as it strokes) and
+// out to the tip ([member flap_tip_lag] radians behind the root).
+uniform float flap_amp = 0.0;
+uniform float flap_rest = 0.0;
+uniform float flap_root = 0.5;
+uniform float flap_span = 3.0;
+uniform float flap_lag = 0.0;
+uniform float flap_tip_lag = 0.0;
 // The point of the spine that stays put as the body bends.
 uniform float bend_pivot = 0.0;
 // Models built with BodyKit carry, in UV.x, the point of the spine each
@@ -144,6 +157,12 @@ uniform vec3 blotch_size[4];
 // Dark spots dappling the back (0 for none), their size in metres.
 uniform float spots = 0.0;
 uniform float spot_size = 0.35;
+// Pale markings painted on the back (a manta's shoulder chevrons): a
+// texture laid over the body as seen from above, mirrored on both flanks,
+// its red how far the back there turns the belly's colour. The box it
+// covers: x and |z| of its corner, and its size along each (0 for none).
+uniform sampler2D marking_tex : hint_default_black, filter_linear_mipmap, repeat_disable;
+uniform vec4 marking_box = vec4(0.0);
 
 varying vec3 world_pos;
 varying vec3 body_pos;
@@ -210,6 +229,21 @@ void vertex() {
 		r.xz = turned(r.xz, -swing * side);
 		NORMAL.xz = turned(NORMAL.xz, -swing * side);
 		p = hip + r;
+	}
+	if (flap_amp > 0.0) {
+		float s = abs(p.z) - flap_root;
+		if (s > 0.0) {
+			float side = sign(p.z);
+			float span = max(flap_span, 0.01);
+			float w = swim_clock * swim_freq + phase + p.x * flap_lag - s / span * flap_tip_lag;
+			float tip = flap_rest + flap_amp * swim_power * sin(w);
+			vec3 q = bent(s, vec2(0.0, p.y), tip / span);
+			p.z = side * (flap_root + q.x);
+			p.y = q.y;
+			vec2 n = turned(vec2(NORMAL.z * side, NORMAL.y), q.z);
+			NORMAL.z = n.x * side;
+			NORMAL.y = n.y;
+		}
 	}
 	if (bell_squeeze != 0.0) {
 		float f = clamp((bell_top - p.x) / max(bell_top - bell_rim, 0.01), 0.0, 1.0);
@@ -347,6 +381,12 @@ void fragment() {
 		float spot = 1.0 - smoothstep(r * 0.7, r, length(f - o * 0.35));
 		float depth = mix(0.55, 1.0, hash2(key + 8.3));
 		base *= 1.0 - spot * spots * depth * step(hash2(key + 3.1), 0.85) * (1.0 - COLOR.g * 0.85);
+	}
+	if (marking_box.z > 0.0 && !enamel) {
+		vec2 muv = (vec2(body_pos.x, abs(body_pos.z)) - marking_box.xy) / marking_box.zw;
+		if (muv == clamp(muv, vec2(0.0), vec2(1.0))) {
+			base = mix(base, belly_color.rgb, texture(marking_tex, muv).r * (1.0 - COLOR.g));
+		}
 	}
 	if (!enamel && COLOR.b < 0.001) {
 		if (mottle > 0.0) {
