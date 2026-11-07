@@ -34,7 +34,7 @@ const LANTERN_SCALE := 1.25
 ## Where a lantern's tentacle hangs from (lantern space).
 const TENTACLE_ROOT := Vector3(-0.02, -0.4, 0.04)
 ## Stem samples between knots.
-const STEPS := 4
+const STEPS := 6
 const STEM_SIDES := 6
 
 static var _meshes: Dictionary[StringName, ArrayMesh] = {}
@@ -49,13 +49,18 @@ var _points := PackedVector3Array()
 var _last_points := PackedVector3Array()
 ## How far the creature (the chain's origin) moved since the last frame.
 var _shift := Vector3.ZERO
-var _heading := Vector3.ZERO
 var _clock := 0.0
 var _spin := 0.0
 var _pulse := 0.0
 var _alarm := 0.0
 var _bells: Array[MeshInstance3D] = []
-var _bell_ring: Node3D
+## Each bell as it sits on the stem (about the point of the stem it hangs
+## from), and how far down the stem that point is.
+var _bell_rest: Array[Transform3D] = []
+var _bell_at := PackedFloat32Array()
+## The stem as drawn this frame: points along it and how far along each is.
+var _curve := PackedVector3Array()
+var _curve_s := PackedFloat32Array()
 var _stem_mesh := ArrayMesh.new()
 var _float: MeshInstance3D
 var _shields: MultiMesh
@@ -140,10 +145,9 @@ func build_model() -> void:
 		m.set_shader_parameter(&"flutter_freq", 1.7)
 		m.set_shader_parameter(&"flutter_wave", 2.0), &"threads")
 	_build_meshes()
-	# The head: the float and its ring of swimming bells, slowly turning.
+	# The head: the float and its ring of swimming bells, slowly turning,
+	# each laid on the stem where it hangs so the head bends with it.
 	_float = _part(_meshes[&"float"], flesh, model)
-	_bell_ring = Node3D.new()
-	model.add_child(_bell_ring)
 	for k in BELLS:
 		# Two rows, one either side of the stem, each bell half a bell behind
 		# the one across from it.
@@ -154,10 +158,9 @@ func build_model() -> void:
 		var axis := (Vector3.RIGHT - out * 0.3).normalized()
 		var side := out - axis * out.dot(axis)
 		var basis := Basis(axis, side.normalized(), axis.cross(side.normalized()))
-		var centre := Vector3(x, 0.0, 0.0) + out * 0.2
-		var bell := _part(_meshes[&"bell"], glass, _bell_ring)
-		bell.transform = Transform3D(basis, centre - axis * BELL_L * 0.5)
-		_bells.append(bell)
+		_bells.append(_part(_meshes[&"bell"], glass, self))
+		_bell_rest.append(Transform3D(basis, out * 0.2 - axis * BELL_L * 0.5))
+		_bell_at.append(-x)
 	var stem := _part(_stem_mesh, flesh, self)
 	stem.extra_cull_margin = 4.0
 	_shields = _multimesh(_meshes[&"shield"], lantern_glass).multimesh
@@ -491,14 +494,22 @@ func _update_visuals(delta: float) -> void:
 
 
 ## The chain follows the head like a rope, drifting with the current.
+## Near the head the stem is stiff: it leaves the head straight back from
+## the way it swims and bends only gently, so the colony swings round in a
+## smooth curve; further back it hangs looser.
 func _drag_rope(delta: float) -> void:
 	segments[0] = pos
+	var behind := -vel.normalized() if vel.length_squared() > 0.01 else (segments[1] - pos).normalized()
 	for i in range(1, SEGMENTS):
 		var to := segments[i] - segments[i - 1]
 		var d := to.length()
 		if d > SPACING:
 			segments[i] = segments[i - 1] + to / d * SPACING
 		segments[i] += Vector2(0, -0.15 * delta) + level.current_at(segments[i]) * delta * 0.5
+		var back := behind if i == 1 else (segments[i - 1] - segments[i - 2]).normalized()
+		var stiff := lerpf(3.0, 0.4, smoothstep(1.0, 6.0, i))
+		var straight := segments[i - 1] + back * segments[i].distance_to(segments[i - 1])
+		segments[i] = segments[i].lerp(straight, 1.0 - exp(-stiff * delta))
 
 
 ## Lays the colony out along its chain: the head pointing down the line it
@@ -527,42 +538,52 @@ func _lay_out(delta: float) -> void:
 		var sway := Vector2(-heading.y, heading.x) * sin(_clock * 1.3 - i * 0.55) * 0.5 * f
 		var p := a + sway
 		_points[i] = Vector3(p.x, p.y, sin(i * 0.9 + _clock) * 0.4 * (0.25 + 0.75 * f)) - origin
-	# The head points down the line the chain makes behind it.
-	var want := (_points[0] - _points[FIRST_KNOT]).normalized()
-	if want == Vector3.ZERO:
-		want = Vector3(facing.x, facing.y, 0.0)
-	var eased := _heading.lerp(want, 1.0 - exp(-5.0 * delta)) if delta > 0.0 else want
-	_heading = eased.normalized() if eased.length() > 0.05 else want
-	var head_up := _up_across(_heading)
-	model.transform = Transform3D(Basis(_heading, head_up, _heading.cross(head_up)), _points[0])
-	_beat(delta)
-	# The stem: through the head along its axis, then on through every knot.
-	var knots := PackedVector3Array([_points[0] + _heading * 0.05, _points[0] - _heading * HEAD_L * 0.5,
-		_points[0] - _heading * HEAD_L])
-	for i in range(FIRST_KNOT, SEGMENTS):
-		knots.append(_points[i])
-	var samples := PackedVector3Array()
-	var last := knots.size() - 1
+	# One smooth curve through every knot, head and all.
+	_curve.resize(0)
+	var last := SEGMENTS - 1
 	for k in last:
-		var p0 := knots[maxi(k - 1, 0)]
-		var p3 := knots[mini(k + 2, last)]
+		var p0 := _points[maxi(k - 1, 0)] if k > 0 else _points[0] * 2.0 - _points[1]
+		var p3 := _points[mini(k + 2, last)]
 		for s in STEPS:
-			samples.append(knots[k].cubic_interpolate(knots[k + 1], p0, p3, float(s) / STEPS))
-	samples.append(knots[last])
-	_build_stem(samples)
+			_curve.append(_points[k].cubic_interpolate(_points[k + 1], p0, p3, float(s) / STEPS))
+	_curve.append(_points[last])
+	_curve_s.resize(_curve.size())
+	_curve_s[0] = 0.0
+	for i in range(1, _curve.size()):
+		_curve_s[i] = _curve_s[i - 1] + _curve[i].distance_to(_curve[i - 1])
+	model.transform = _on_curve(0.0)
+	_beat(delta)
+	_build_stem()
 	for j in LANTERNS:
-		var at := (j + 3) * STEPS
-		var tangent := (samples[mini(at + 1, samples.size() - 1)] - samples[at - 1]).normalized()
-		_place_lantern(j, samples[at], tangent, delta)
+		var at := (j + FIRST_KNOT) * STEPS
+		_place_lantern(j, _curve[at], _tangent(at), delta)
+
+
+## The stem's direction at curve point [param i].
+func _tangent(i: int) -> Vector3:
+	var n := _curve.size()
+	return (_curve[mini(i + 1, n - 1)] - _curve[maxi(i - 1, 0)]).normalized()
+
+
+## Where the stem is [param s] metres down from the head, square to it.
+func _on_curve(s: float) -> Transform3D:
+	var i := 1
+	while i < _curve.size() - 1 and _curve_s[i] < s:
+		i += 1
+	var f := clampf((s - _curve_s[i - 1]) / maxf(_curve_s[i] - _curve_s[i - 1], 0.0001), 0.0, 1.0)
+	var along := _tangent(i - 1).lerp(_tangent(i), f).normalized()
+	var up := _up_across(along)
+	return Transform3D(Basis(along, up, along.cross(up)), _curve[i - 1].lerp(_curve[i], f))
 
 
 ## The swimming bells beat by turns, faster the faster it swims (and hard
 ## after a sting), and the head turns slowly about its stem.
 func _beat(delta: float) -> void:
 	_spin += delta * 0.22
-	_bell_ring.transform = Transform3D(Basis(Vector3.RIGHT, _spin), Vector3.ZERO)
+	var spun := Transform3D(Basis(Vector3.RIGHT, _spin), Vector3.ZERO)
 	_pulse += delta * (0.6 + vel.length() * 0.45 + _alarm * 1.2)
 	for k in BELLS:
+		_bells[k].transform = _on_curve(_bell_at[k]) * spun * _bell_rest[k]
 		var c := fposmod(_pulse + (0.5 if k % 2 == 1 else 0.0) + k * 0.07, 1.0)
 		# Snaps shut, then slowly relaxes.
 		var squeeze := smoothstep(0.0, 0.2, c) if c < 0.2 else 1.0 - smoothstep(0.2, 0.9, c)
@@ -630,8 +651,9 @@ static func _up_across(along: Vector3) -> Vector3:
 	return (up - along * along.dot(up)).normalized()
 
 
-## Rebuilds the stem through [param samples], thinning towards the tail.
-func _build_stem(samples: PackedVector3Array) -> void:
+## Rebuilds the stem along the curve, thinning towards the tail.
+func _build_stem() -> void:
+	var samples := _curve
 	var n := samples.size()
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
@@ -641,12 +663,13 @@ func _build_stem(samples: PackedVector3Array) -> void:
 	normals.resize(verts.size())
 	colors.resize(verts.size())
 	for i in n:
-		var along := (samples[mini(i + 1, n - 1)] - samples[maxi(i - 1, 0)]).normalized()
+		var along := _tangent(i)
 		var up := _up_across(along)
 		var side := along.cross(up)
 		var f := float(i) / (n - 1)
-		# Fine through the head, where the bells hide it, thickest just behind.
-		var r := 0.013 if i < 2 * STEPS else lerpf(0.034, 0.018, f)
+		# Fine through the head, where the bells hide it, swelling smoothly to
+		# its thickest just behind.
+		var r := lerpf(0.013, lerpf(0.034, 0.018, f), smoothstep(HEAD_L - 0.3, HEAD_L + 0.6, _curve_s[i]))
 		for s in STEM_SIDES + 1:
 			var a := TAU * s / STEM_SIDES
 			var dir := up * cos(a) + side * sin(a)

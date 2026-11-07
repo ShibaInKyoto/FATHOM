@@ -22,7 +22,7 @@ extends Node3D
 ## up, "lantern" a few of its lanterns and their tentacles, "game" the dive
 ## camera's view; "clip", "headclip" and "lanternclip" film them (it stings
 ## something part way through), and "turnclip" films it turning back the
-## way it came.
+## way it came ("headturnclip" close up on its head).
 
 const TURN := 1.6
 const SPEED := 4.0
@@ -381,7 +381,7 @@ func _swim_colony(dt: float) -> void:
 	_colony_t += dt
 	var t := _colony_t
 	_colony.vel = Vector2(1.6, cos(t * 0.45) * 0.9)
-	if _mode == "turnclip" and _frames > 30:
+	if _mode.ends_with("turnclip") and _frames > 30:
 		# Swings round and back the way it came, over the top.
 		var turned := clampf((_frames - 30) / 120.0, 0.0, 1.0) * PI
 		_colony.vel = Vector2(cos(turned), sin(turned)) * 1.8
@@ -398,8 +398,10 @@ func _frame_colony() -> void:
 	var pts: PackedVector3Array = _colony.get(&"_points")
 	var at := Vector3(_colony.pos.x, _colony.pos.y, 0.0)
 	if _mode.begins_with("head"):
-		var head := at + pts[0] + Vector3(-0.8, 0.0, 0.0)
-		cam.position = head + Vector3(1.2, 0.7, 3.4)
+		# Where the bells give way to the chain.
+		var neck: Transform3D = _colony.call(&"_on_curve", 1.6)
+		var head := at + neck.origin
+		cam.position = head + Vector3(1.2, 0.7, 4.2)
 		cam.look_at(head, Vector3.UP)
 	elif _mode.begins_with("lantern"):
 		var mid := at + (pts[5] + pts[7]) * 0.5 + Vector3(0.0, -1.3, 0.0)
