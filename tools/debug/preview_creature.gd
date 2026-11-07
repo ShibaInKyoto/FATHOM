@@ -17,6 +17,12 @@ extends Node3D
 ## at the game camera's distance.
 ## "backdrop" hangs a lit rock-grey wall behind them, to judge see-through
 ## flesh.
+## The Lantern Chain ("siphon") swims a gentle path, its chain trailing
+## behind: "sheet" shows the whole colony, "head" its swimming bells close
+## up, "lantern" a few of its lanterns and their tentacles, "game" the dive
+## camera's view; "clip", "headclip" and "lanternclip" film them (it stings
+## something part way through), and "turnclip" films it turning back the
+## way it came.
 
 const TURN := 1.6
 const SPEED := 4.0
@@ -30,6 +36,8 @@ var _mode := "sheet"
 var _school: Creature
 var _dweller: Creature
 var _filming := false
+var _colony: Siphonophore
+var _colony_t := 0.0
 
 
 ## One fish of a school, posed and swum like any creature so it can be seen
@@ -55,7 +63,7 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	var id := StringName(args[1]) if args.size() > 1 else &"stalker"
 	_mode = args[2] if args.size() > 2 else "sheet"
-	_filming = _mode == "clip" or _mode == "gameclip" or _mode == "wallclip" or _mode == "turnclip"
+	_filming = _mode.ends_with("clip")
 	if _mode == "gameclip":
 		_mode = "game"
 	var biome := int(args[3]) if args.size() > 3 else 2
@@ -72,6 +80,9 @@ func _ready() -> void:
 	var script: Script = LevelPopulator.SPECIES.get(id, null)
 	if _mode.begins_with("wall"):
 		_wall_scene(script, layout)
+		return
+	if id == &"siphon":
+		_colony_scene(origin, backdrop)
 		return
 	if id == &"shoal" and _mode != "game":
 		script = SchoolFish
@@ -164,6 +175,12 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	var dt := 1.0 / 30.0
 	_frames += 1
+	if _colony:
+		if _filming and _frames == 70:
+			# Something brushes the chain a third of the way down.
+			_colony.call(&"_stung", 6)
+		_swim_colony(dt)
+		_frame_colony()
 	if _dweller:
 		if _mode == "wallclip" and _frames == 50 and _dweller is Gulper:
 			# Strike out across the cave.
@@ -249,7 +266,7 @@ func _process(_delta: float) -> void:
 		if _frames > 10:
 			var args := OS.get_cmdline_user_args()
 			get_viewport().get_texture().get_image().save_png("%s_%03d.png" % [args[0].get_basename(), _frames - 11])
-		if _frames == 10 + (CLIP_FRAMES * 2 if _dweller is Lurelight else CLIP_FRAMES):
+		if _frames == 10 + (CLIP_FRAMES * 2 if _dweller is Lurelight or _colony else CLIP_FRAMES):
 			get_tree().quit()
 		return
 	if _frames == 24:
@@ -319,3 +336,78 @@ func _wall_scene(script: Script, layout: LevelLayout) -> void:
 	lamp.light_energy = 3.0
 	lamp.omni_range = 16.0
 	add_child(lamp)
+
+
+## A Lantern Chain swimming a gentle path, already some way along it so its
+## chain trails out behind.
+func _colony_scene(origin: Vector2, backdrop: bool) -> void:
+	_colony = Siphonophore.new()
+	_colony.pos = origin
+	_level.add_entity(_colony)
+	for i in 600:
+		_swim_colony(1.0 / 30.0)
+	var key := DirectionalLight3D.new()
+	key.rotation_degrees = Vector3(-35, 30, 0)
+	key.light_energy = 1.3
+	add_child(key)
+	var rim := DirectionalLight3D.new()
+	rim.rotation_degrees = Vector3(-10, 200, 0)
+	rim.light_energy = 0.6
+	rim.light_color = Color(0.6, 0.85, 1.0)
+	add_child(rim)
+	var cam := Camera3D.new()
+	cam.fov = 42.0 if _mode.begins_with("game") else 36.0
+	cam.far = 400
+	add_child(cam)
+	cam.current = true
+	_frame_colony()
+	if _mode.begins_with("game"):
+		_level.environment_rig.environment.ambient_light_energy = 0.8
+	if backdrop:
+		var wall := MeshInstance3D.new()
+		var quad := QuadMesh.new()
+		quad.size = Vector2(200, 200)
+		wall.mesh = quad
+		var rock := StandardMaterial3D.new()
+		rock.albedo_color = Color(0.32, 0.36, 0.38)
+		rock.roughness = 0.9
+		wall.material_override = rock
+		wall.position = Vector3(_colony.pos.x, _colony.pos.y, -3.0)
+		add_child(wall)
+
+
+## One step along the colony's path: on to the right, rising and falling.
+func _swim_colony(dt: float) -> void:
+	_colony_t += dt
+	var t := _colony_t
+	_colony.vel = Vector2(1.6, cos(t * 0.45) * 0.9)
+	if _mode == "turnclip" and _frames > 30:
+		# Swings round and back the way it came, over the top.
+		var turned := clampf((_frames - 30) / 120.0, 0.0, 1.0) * PI
+		_colony.vel = Vector2(cos(turned), sin(turned)) * 1.8
+	_colony.pos += _colony.vel * dt
+	_colony.call(&"_update_visuals", dt)
+	_colony.sync_transform()
+
+
+## Points the camera at the part of the colony the mode shows.
+func _frame_colony() -> void:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return
+	var pts: PackedVector3Array = _colony.get(&"_points")
+	var at := Vector3(_colony.pos.x, _colony.pos.y, 0.0)
+	if _mode.begins_with("head"):
+		var head := at + pts[0] + Vector3(-0.8, 0.0, 0.0)
+		cam.position = head + Vector3(1.2, 0.7, 3.4)
+		cam.look_at(head, Vector3.UP)
+	elif _mode.begins_with("lantern"):
+		var mid := at + (pts[5] + pts[7]) * 0.5 + Vector3(0.0, -1.3, 0.0)
+		cam.position = mid + Vector3(0.8, 0.6, 7.5)
+		cam.look_at(mid, Vector3.UP)
+	elif _mode.begins_with("game"):
+		cam.position = Vector3(at.x - 6.0, at.y - 1.0, DiveCamera.BASE_DISTANCE)
+	else:
+		var mid := at + pts[8] + Vector3(0.0, -1.0, 0.0)
+		cam.position = mid + Vector3(0.0, 0.0, 30.0)
+		cam.look_at(mid, Vector3.UP)
