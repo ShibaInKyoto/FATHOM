@@ -157,6 +157,9 @@ func preview_creature(id: StringName) -> void:
 			level.player = sub
 			c.vel = Vector2.ZERO
 			c.pos = sub.pos
+		if c.has_method(&"reveal"):
+			# A creature that hides what it is, shown as it really is.
+			c.call(&"reveal")
 		c.sync_transform()
 	else:
 		level.add_child(specimen)

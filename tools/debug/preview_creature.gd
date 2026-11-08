@@ -13,7 +13,7 @@ extends Node3D
 ## "turnclip" films one swimming right, turning back left and back right
 ## again, side on, to judge how it turns. "close" looks at the front half of
 ## one from close by, at an angle round it: [yaw] [pitch] in degrees after
-## the biome.
+## the biome, then "awake" to show a disguised one revealed.
 ## "wall", "wallclip" and "wallgame" set a wall dweller on a real floor of
 ## the cave, rock and all: close, filmed (it strikes part way through), or
 ## at the game camera's distance.
@@ -113,6 +113,9 @@ func _ready() -> void:
 		c.lock_facing = true
 		span = maxf(c.body_span, maxf(c.reach * 2.0, c.radius * 2.0))
 		_crits.append(c)
+		if _mode == "close" and args.size() > 6 and args[6] == "awake" and c.has_method(&"reveal"):
+			# A creature that hides what it is, shown as it really is.
+			c.call(&"reveal")
 	# Lay them out in a row, and turn each to its view.
 	var gap := span * 1.35 + minf(1.0, span * 0.4)
 	for i in count:
@@ -161,7 +164,7 @@ func _ready() -> void:
 		var pitch := float(args[5]) if args.size() > 5 else 25.0
 		var head := Vector3(origin.x + span * 0.15, origin.y, 0.0)
 		var eye := head + Basis(Vector3.UP, deg_to_rad(yaw)) * Basis(Vector3.RIGHT, deg_to_rad(-pitch)) \
-			* Vector3(0.0, 0.0, span * 0.75)
+			* Vector3(0.0, 0.0, maxf(span * 0.75, 3.4))
 		cam.transform = Transform3D(Basis.looking_at(head - eye, Vector3.UP), eye)
 	if _mode == "game":
 		cam.fov = 42.0
