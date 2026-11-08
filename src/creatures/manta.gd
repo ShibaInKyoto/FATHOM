@@ -8,11 +8,13 @@ extends Creature
 ## Built as the animal is: one disc, body and wings together, thick over the
 ## body and thinning to swept-back pointed tips; a wide mouth across the
 ## front of the head between two rolled horns, eyes at the corners of the
-## head, a whip tail with a small dorsal fin at its root. Its back is near
-## black with a pale chevron over each shoulder, its belly white and
-## spotted. It swims as mantas do: a few slow, deep beats, each wing curling
-## up and down as one with the stroke running back from its leading edge and
-## out to the trailing tip, then a long glide on outstretched wings; it bobs
+## head, a whip tail with a small dorsal fin at its root. Its skin is
+## painted (tools/art/manta_skin.py): a near-black back with a ragged white
+## chevron over each shoulder, scarred and freckled, and a white belly with
+## gill slits, its own scatter of spots and grey-edged wings.
+## It swims as mantas do: a few slow, deep beats, each wing curling up and
+## down as one with the stroke running back from its leading edge and out
+## to the trailing tip, then a long glide on outstretched wings; it bobs
 ## with each beat and banks round as it turns.
 
 const SPEED := 2.4
@@ -35,11 +37,14 @@ const TRAIL := [Vector2(0.0, -1.0), Vector2(0.45, -0.96), Vector2(0.8, -0.8), Ve
 const THICK := [Vector2(0.0, 0.42), Vector2(0.3, 0.38), Vector2(0.55, 0.27), Vector2(0.9, 0.14),
 	Vector2(1.5, 0.075), Vector2(2.4, 0.045), Vector2(3.4, 0.012)]
 
-## The box the back's markings cover: x and |z| of its corner, and its size.
-const MARKINGS := Vector4(-0.7, 0.2, 1.5, 1.9)
+## The disc's skin, painted by tools/art/manta_skin.py over this box (x of
+## its front edge, z of one side, its length and span): see the creature
+## shader's paint_top.
+const PAINT_BOX := Vector4(1.1, -3.45, 2.2, 6.9)
+const PAINT_BACK := preload("res://assets/creatures/manta_back.png")
+const PAINT_BELLY := preload("res://assets/creatures/manta_belly.png")
 
 static var _mesh: ArrayMesh
-static var _markings: ImageTexture
 
 var _goal := Vector2.INF
 var _goal_timer := 0.0
@@ -79,8 +84,6 @@ func build_model() -> void:
 		m.set_shader_parameter(&"rim_strength", 0.2)
 		m.set_shader_parameter(&"roughness", 0.42)
 		m.set_shader_parameter(&"metallic", 0.0)
-		m.set_shader_parameter(&"mottle", 0.22)
-		m.set_shader_parameter(&"skin_pits", 0.0015)
 		m.set_shader_parameter(&"tooth_color", Color(0.025, 0.025, 0.03))
 		# No sideways swimming: the swim clock drives the wings, one cycle a
 		# beat, and the tail's sway.
@@ -95,13 +98,10 @@ func build_model() -> void:
 		m.set_shader_parameter(&"flutter_amp", 0.13)
 		m.set_shader_parameter(&"flutter_freq", TAU)
 		m.set_shader_parameter(&"flutter_wave", 2.2)
-		m.set_shader_parameter(&"marking_tex", _chevrons())
-		m.set_shader_parameter(&"marking_box", MARKINGS)
-		# Dark spots on the white belly, between the gills.
-		m.set_shader_parameter(&"blotch_at", [Vector4(0.25, -0.12, 0.12, 0.8), Vector4(-0.08, -0.11, 0.24, 0.7),
-			Vector4(0.1, -0.1, 0.4, 0.65), Vector4(-0.38, -0.07, 0.1, 0.75)])
-		m.set_shader_parameter(&"blotch_size", [Vector3(0.07, 0.08, 0.06), Vector3(0.06, 0.08, 0.07),
-			Vector3(0.05, 0.08, 0.05), Vector3(0.06, 0.08, 0.06)]))
+		m.set_shader_parameter(&"paint_top", PAINT_BACK)
+		m.set_shader_parameter(&"paint_bottom", PAINT_BELLY)
+		m.set_shader_parameter(&"paint_box", PAINT_BOX)
+		m.set_shader_parameter(&"paint_relief", 0.003))
 	_tilt = Node3D.new()
 	# Back to the camera from the start (a specimen in the hangar never ticks).
 	_tilt.rotation.x = TILT
@@ -197,7 +197,7 @@ static func _disc() -> ArrayMesh:
 			# across it between the fins.
 			var gape := (1.0 - smoothstep(0.0, 0.06, c)) * (1.0 - smoothstep(0.26, 0.36, az))
 			x -= 0.05 * gape
-			st.set_color(_paint(z, c, top))
+			st.set_color(_paint(top))
 			st.set_uv(Vector2(x, 0.0))
 			st.add_vertex(Vector3(x, y, z))
 	for i in spans:
@@ -212,39 +212,6 @@ static func _disc() -> ArrayMesh:
 			st.add_index(b + loop)
 	st.generate_normals()
 	return st.commit()
-
-
-## The pale chevron over each shoulder, as seen from above (x across,
-## |z| down, over [constant MARKINGS]): each fans out from behind the head,
-## back and out over the shoulder and fades into the wing, a dark band left
-## between them down the back; its edges are ragged and mottled.
-static func _chevrons() -> ImageTexture:
-	if _markings:
-		return _markings
-	var w := 192
-	var h := 240
-	var noise := FastNoiseLite.new()
-	noise.seed = 31
-	noise.frequency = 5.0
-	noise.fractal_octaves = 3
-	var img := Image.create(w, h, false, Image.FORMAT_L8)
-	for py in h:
-		for px in w:
-			var x := MARKINGS.x + (px + 0.5) / w * MARKINGS.z
-			var az := MARKINGS.y + (py + 0.5) / h * MARKINGS.w
-			var along := Vector2(-0.8, 1.0)
-			var rel := Vector2(x - 0.5, az - 0.45)
-			var f := rel.dot(along) / along.length_squared()
-			var off := (rel - along * clampf(f, 0.0, 1.0)).length()
-			var width := lerpf(0.07, 0.34, clampf(f, 0.0, 1.0))
-			var ragged := noise.get_noise_2d(x, az) * 0.09
-			var v := 1.0 - smoothstep(width * 0.6, width + 0.1, off + ragged)
-			v *= smoothstep(-0.05, 0.15, f) * (1.0 - smoothstep(0.6, 1.05, f + ragged))
-			v *= smoothstep(0.34, 0.5, az)
-			img.set_pixel(px, py, Color(v * 0.88, 0.0, 0.0))
-	img.generate_mipmaps()
-	_markings = ImageTexture.create_from_image(img)
-	return _markings
 
 
 ## The highest point of a chord shaped c^b (1 - c)^0.9, to scale it to one.
@@ -268,22 +235,10 @@ static func _edge(pts: Array, z: float) -> float:
 	return (pts[n - 1] as Vector2).y
 
 
-## The skin at a point of the disc: dark above, the wingtips a little
-## greyer; white below, the wings' trailing edges and tips edged in grey;
-## a dark slot of mouth across the front of the head.
-static func _paint(z: float, c: float, top: bool) -> Color:
-	var az := absf(z)
-	var g := 0.0
-	if top:
-		# (The chevrons are painted over it: see _chevrons.)
-		g = 0.14 * smoothstep(2.2, 3.4, az)
-	else:
-		var margin := smoothstep(0.8, 1.0, c) * smoothstep(0.9, 1.8, az) + smoothstep(2.5, 3.4, az)
-		g = 1.0 - 0.55 * clampf(margin, 0.0, 1.0)
-	# The mouth's lower lip dark, so a dark slot shows across the front.
-	if not top and c < 0.05 and az < 0.32:
-		g = 0.0
-	return Color(0.0, g, 0.0)
+## The disc's own colour, dark above and pale below (its skin is painted
+## over it: see [constant PAINT_BOX]).
+static func _paint(top: bool) -> Color:
+	return Color(0.0, 0.0 if top else 1.0, 0.0)
 
 
 # --- Behaviour ----------------------------------------------------------------

@@ -157,12 +157,18 @@ uniform vec3 blotch_size[4];
 // Dark spots dappling the back (0 for none), their size in metres.
 uniform float spots = 0.0;
 uniform float spot_size = 0.35;
-// Pale markings painted on the back (a manta's shoulder chevrons): a
-// texture laid over the body as seen from above, mirrored on both flanks,
-// its red how far the back there turns the belly's colour. The box it
-// covers: x and |z| of its corner, and its size along each (0 for none).
-uniform sampler2D marking_tex : hint_default_black, filter_linear_mipmap, repeat_disable;
-uniform vec4 marking_box = vec4(0.0);
+// Skin painted over a disc (a ray's): one texture for the back, one for the
+// belly, laid over the body as seen from above and from below across the
+// whole span (so the two sides may differ); rgb the colour, alpha the
+// relief (a half flat, [member paint_relief] metres from there to either
+// end). The box they cover: x of its front edge, z of one side, its length
+// back and its span (0 for none). Only the skin takes them, not fins,
+// teeth or eyes.
+uniform sampler2D paint_top : source_color, hint_default_black, filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D paint_bottom : source_color, hint_default_black, filter_linear_mipmap_anisotropic,
+	repeat_disable;
+uniform vec4 paint_box = vec4(0.0);
+uniform float paint_relief = 0.004;
 
 varying vec3 world_pos;
 varying vec3 body_pos;
@@ -382,12 +388,6 @@ void fragment() {
 		float depth = mix(0.55, 1.0, hash2(key + 8.3));
 		base *= 1.0 - spot * spots * depth * step(hash2(key + 3.1), 0.85) * (1.0 - COLOR.g * 0.85);
 	}
-	if (marking_box.z > 0.0 && !enamel) {
-		vec2 muv = (vec2(body_pos.x, abs(body_pos.z)) - marking_box.xy) / marking_box.zw;
-		if (muv == clamp(muv, vec2(0.0), vec2(1.0))) {
-			base = mix(base, belly_color.rgb, texture(marking_tex, muv).r * (1.0 - COLOR.g));
-		}
-	}
 	if (!enamel && COLOR.b < 0.001) {
 		if (mottle > 0.0) {
 			float m = value_noise(body_pos * 2.7) * 0.6 + value_noise(body_pos * 8.0 + 3.1) * 0.4;
@@ -406,6 +406,13 @@ void fragment() {
 	float hgt = 0.0;
 	float bare = 1.0;
 	float px = 0.5 * (length(dFdx(body_pos)) + length(dFdy(body_pos)));
+	bool painted = paint_box.z > 0.0 && !enamel && COLOR.b < 0.001;
+	if (painted) {
+		vec2 puv = vec2((body_pos.z - paint_box.y) / paint_box.w, (paint_box.x - body_pos.x) / paint_box.z);
+		vec4 paint = mix(texture(paint_bottom, puv), texture(paint_top, puv), smoothstep(-0.004, 0.004, body_pos.y));
+		base = paint.rgb;
+		hgt += (paint.a - 0.5) * 2.0 * paint_relief;
+	}
 	if (scale_size > 0.0 && COLOR.b < 0.001 && !enamel) {
 		vec3 sc = scales(skin_uv);
 		// Scales smaller than a few pixels on screen fade out rather than shimmer
@@ -431,7 +438,7 @@ void fragment() {
 		hgt += (h - 0.5) * skin_tex_depth;
 		base *= 1.0 - (0.5 - h) * skin_tex_shade;
 	}
-	if (hgt != 0.0 || scale_size > 0.0 || skin_pits > 0.0 || skin_tex_scale > 0.0) {
+	if (hgt != 0.0 || scale_size > 0.0 || skin_pits > 0.0 || skin_tex_scale > 0.0 || painted) {
 		NORMAL = bumped(NORMAL, VERTEX, hgt);
 	}
 	ALBEDO = base;
