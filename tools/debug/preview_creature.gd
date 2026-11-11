@@ -13,7 +13,8 @@ extends Node3D
 ## "turnclip" films one swimming right, turning back left and back right
 ## again, side on, to judge how it turns. "close" looks at the front half of
 ## one from close by, at an angle round it: [yaw] [pitch] in degrees after
-## the biome, then "awake" to show a disguised one revealed.
+## the biome, then "awake" to show a disguised one revealed (or "peek", a
+## sleeping Mimic as its lid lifts).
 ## "wall", "wallclip" and "wallgame" set a wall dweller on a real floor of
 ## the cave, rock and all: close, filmed (it strikes part way through), or
 ## at the game camera's distance.
@@ -113,6 +114,10 @@ func _ready() -> void:
 		c.lock_facing = true
 		span = maxf(c.body_span, maxf(c.reach * 2.0, c.radius * 2.0))
 		_crits.append(c)
+		if _mode == "close" and args.size() > 6 and args[6] == "peek" and c is Mimic:
+			# Asleep, caught as its lid lifts a crack.
+			var every := 8.0 + 4.0 * fposmod(c._phase * 3.7, 1.0)
+			c.set(&"_t", fposmod(1.3 - c._phase * 5.0, every))
 		if _mode == "close" and args.size() > 6 and args[6] == "awake" and c.has_method(&"reveal"):
 			# A creature that hides what it is, shown as it really is.
 			c.call(&"reveal")

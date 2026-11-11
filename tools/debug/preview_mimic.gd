@@ -2,11 +2,14 @@ extends "res://tools/debug/preview_stage.gd"
 ## Debug helper: a salvage cache and a Mimic side by side beside the sub,
 ## through the dive camera with the HUD: asleep (they should look alike),
 ## then the Mimic wakes, lunges and gives chase.
-## Usage: xvfb-run godot --path . res://tools/debug/preview_mimic.tscn -- <out_dir> [zoom] [film]
-## "film" saves every frame for twelve seconds instead: the sub runs from it
-## and it gives chase, then gives up and settles back into a crate.
+## Usage: xvfb-run godot --path . res://tools/debug/preview_mimic.tscn -- <out_dir> [zoom] [film|idle]
+## "film" saves every frame for twelve seconds instead: the sub backs away
+## and it comes after it bite by bite, then the sub gets clear and it gives
+## up and settles back into a crate. "idle" films the two asleep, side by
+## side, for twelve seconds (ten frames a second): only the Mimic stirs.
 
 var _mimic: Mimic
+var _idle := false
 
 
 func _ready() -> void:
@@ -19,14 +22,20 @@ func _ready() -> void:
 	_mimic = Mimic.new()
 	_mimic.pos = at + Vector2(2.2, 0.0)
 	level.add_entity(_mimic)
-	place_sub(at + Vector2(-9.0, 1.5), float(args[1]) if args.size() > 1 else 0.4)
+	var mode := args[2] if args.size() > 2 else ""
+	_idle = mode == "idle"
+	place_sub(at + (Vector2(0.0, 6.5) if _idle else Vector2(-9.0, 1.5)), float(args[1]) if args.size() > 1 else 0.4)
 	add_hud()
 	shot_prefix = "mimic"
 	shot_times = [0.9, 1.3, 1.55, 2.3, 3.2]
-	if args.size() > 2 and args[2] == "film":
+	if mode == "film":
 		shot_times.clear()
 		for i in 330:
 			shot_times.append(0.7 + i / 30.0)
+	elif _idle:
+		shot_times.clear()
+		for i in 120:
+			shot_times.append(0.5 + i / 10.0)
 
 
 func direct(_dt: float) -> void:
@@ -34,9 +43,17 @@ func direct(_dt: float) -> void:
 	sub.aim = (_mimic.pos - sub.pos).normalized()
 	# (Filmed, not fought: the sub shrugs off its bites.)
 	sub.run.hull = sub.stats.max_hull
+	if _idle:
+		# Hanging over the two as they sink, well out of its reach, the lamp
+		# on them.
+		var between := _mimic.pos + Vector2(-2.2, 0.0)
+		sub.pos = between + Vector2(-4.5, 3.0)
+		sub.vel = Vector2.ZERO
+		sub.aim = (between - sub.pos).normalized()
+		return
 	# Backs off as it comes, so it has to chase; then gets clear away, so it
 	# gives up and settles.
-	sub.external_move = Vector2(-1.0, 0.15) if t > 1.4 and t < 7.0 else Vector2.ZERO
+	sub.external_move = Vector2(-0.55, 0.1) if t > 1.4 and t < 7.0 else Vector2.ZERO
 	if t >= 7.5 and _mimic.state == Mimic.State.CHASE:
 		_mimic.set(&"_timer", 0.0)
 	if t >= 7.5 and t < 7.5 + STEP * 1.5:

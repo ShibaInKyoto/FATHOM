@@ -3,15 +3,20 @@ extends Creature
 ## Looks exactly like a salvage cache until something gets close. Sonar marks
 ## it as hostile, which is the only tell. Worth a lot of salvage if killed.
 ## The crate is its shell (the same crate a cache is: see [CrateModel]), and
-## the beacon blinking on its lid is a lure that keeps a cache's time. Woken,
-## the lid snaps up like a jaw on a wet red maw, both rims crowded with
-## teeth, a cluster of eyes glowing under the lid and a tongue lashing out;
-## tentacles unfurl from under it and drive it after its prey, pulsing like
-## an octopus's as it swims, trailing behind it, while the jaw chomps. When
-## it gives up it settles, draws its tentacles back in, shuts, and its lure
-## blinks again.
+## the beacon blinking on its lid is a lure that keeps a cache's time. Asleep
+## it all but passes for one: it breathes, just, and now and then its lid
+## lifts a crack and something glows inside before it shuts again.
+## Woken, it hunts in bites: it closes in, holding just out of reach, rears
+## back with its jaw gaping on a wet red maw (teeth crowding both rims, eyes
+## glowing under the lid, the tongue sliding out), snaps forward and slams
+## the jaw shut, then recoils and comes again. Its tentacles pull it along
+## in strokes together, like an octopus's, coil as it rears and sweep back
+## as it strikes. When it gives up it settles, draws them in, shuts, and its
+## lure blinks again.
 
 enum State { DORMANT, LUNGE, CHASE, SETTLE }
+## A bite: closing in, rearing back, the snap, and the recoil.
+enum Bite { APPROACH, WINDUP, SNAP, RECOIL }
 
 const TENTACLES := 6
 const TENTACLE_L := 1.5
@@ -20,6 +25,16 @@ const TONGUE_L := 0.9
 const ROOTS := [Vector3(0.52, -0.5, 0.3), Vector3(0.52, -0.5, -0.3), Vector3(0.0, -0.52, 0.36),
 	Vector3(0.0, -0.52, -0.36), Vector3(-0.52, -0.5, 0.3), Vector3(-0.52, -0.5, -0.3)]
 const LURE := Color(1.0, 0.75, 0.2)
+## Where it holds off its prey before striking (centre to centre), and how
+## close it must be to strike.
+const STAND_OFF := 2.8
+const STRIKE_RANGE := 3.7
+const WINDUP_TIME := 0.3
+const SNAP_TIME := 0.22
+const SNAP_SPEED := 12.0
+const RECOIL_TIME := 0.45
+const RECOIL_SPEED := 5.0
+const GAPE := 1.25
 ## Strings of slime from the base's rim to the lid's (crate space), that
 ## stretch thin as the jaw opens and part when it gapes.
 const STRANDS := [[Vector3(0.62, 0.11, -0.3), Vector3(0.6, 0.19, -0.26)],
@@ -29,6 +44,8 @@ const STRANDS := [[Vector3(0.62, 0.11, -0.3), Vector3(0.6, 0.19, -0.26)],
 static var _meshes: Dictionary[StringName, ArrayMesh] = {}
 
 var state := State.DORMANT
+var _bite := Bite.APPROACH
+var _bite_t := 0.0
 var _timer := 0.0
 var _t := 0.0
 var _body: Node3D
@@ -37,6 +54,7 @@ var _beacon: MeshInstance3D
 var _lure_lit: Material
 var _lure_blink: Material
 var _tongue: MeshInstance3D
+var _roof: MeshInstance3D
 var _tentacles: Array[MeshInstance3D] = []
 var _strands: Array[MeshInstance3D] = []
 ## How far the jaw is open (radians), and how fast it is moving.
@@ -45,8 +63,15 @@ var _jaw_v := 0.0
 ## How far the tentacles are out (0 tucked away, 1 out).
 var _reach := 0.0
 var _turn := 0.0
+var _faces := 1.0
+var _pitch := 0.0
 var _pull := 0.0
 var _tilt := 0.0
+## Where it is going for (the direction to its prey), the way its tentacles
+## trail (world space), and how far the tongue is out.
+var _aim := Vector2.RIGHT
+var _trail := Vector2(0.0, -1.0)
+var _tongue_out := 0.0
 
 
 func setup() -> void:
@@ -93,7 +118,7 @@ func build_model() -> void:
 		m.set_shader_parameter(&"mottle", 0.45)
 		m.set_shader_parameter(&"spots", 0.35)
 		m.set_shader_parameter(&"spot_size", 0.05)
-		_writhe(m, TENTACLE_L, 0.3, 3.8, 0.5), &"limbs")
+		_writhe(m, TENTACLE_L, 0.12, 3.2, 0.5), &"limbs")
 	var tongue := species_material(func(m: ShaderMaterial) -> void:
 		m.set_shader_parameter(&"back_color", Color(0.5, 0.1, 0.13))
 		m.set_shader_parameter(&"belly_color", Color(0.78, 0.34, 0.36))
@@ -121,7 +146,7 @@ func build_model() -> void:
 	lid.position = -CrateModel.HINGE
 	_hinge.add_child(lid)
 	_shell(CrateModel.lid(), lid)
-	_part(_meshes[&"palate"], flesh, lid)
+	_roof = _part(_meshes[&"palate"], flesh, lid)
 	_beacon = CrateModel.beacon(LURE)
 	_lure_blink = _beacon.material_override
 	_lure_lit = MeshKit.emissive_material(Color(1.0, 0.3, 0.08), 10.0)
@@ -307,77 +332,124 @@ func think() -> void:
 			_wake()
 
 
+## It springs: a short rear, the jaw thrown open, and it strikes.
 func _wake() -> void:
 	alert()
 	state = State.LUNGE
 	_timer = 0.8
+	_bite = Bite.WINDUP
+	_bite_t = 0.18
 	scannable = true
 	Audio.play_at(&"lurelight_snap", pos, 3.0)
-	if level.player:
-		vel = (level.player.pos - pos).normalized() * 14.0
 
 
 func behave(delta: float) -> void:
 	_t += delta
+	var sub := level.player
+	var hunting := sub != null and sub.alive
+	if hunting:
+		_aim = (sub.pos - pos).normalized()
 	match state:
 		State.DORMANT:
 			vel = vel.lerp(Vector2(0, -0.6), 1.0 - exp(-1.2 * delta))
-		State.LUNGE:
+		State.LUNGE, State.CHASE:
 			_timer -= delta
+			if hunting:
+				_hunt(sub, delta)
 			if _timer <= 0.0:
-				state = State.CHASE
-				_timer = 7.0
-		State.CHASE:
-			_timer -= delta
-			var sub := level.player
-			if sub and sub.alive:
-				seek(sub.pos, 6.5, 2.0, delta)
-				facing = (sub.pos - pos).normalized()
-			if _timer <= 0.0:
-				state = State.SETTLE
+				if state == State.LUNGE:
+					state = State.CHASE
+					_timer = 7.0
+				elif _bite != Bite.SNAP:
+					state = State.SETTLE
 		State.SETTLE:
 			vel = vel.lerp(Vector2(0, -1.0), 1.0 - exp(-1.0 * delta))
-			if level.player and level.player.pos.distance_to(pos) < 4.0:
+			if sub and sub.pos.distance_to(pos) < 4.0:
 				_wake()
 
 
-## Asleep it is a crate and nothing more. Awake: the jaw snaps open and
-## chomps, the tentacles shoot out and pulse it along, trailing behind, the
-## tongue lashes, the shell turns its mouth on its prey and rocks with each
-## pull of its tentacles; settling, it all draws back in and the lure blinks
-## as a cache's beacon does.
+## One bite after another: close in to just out of reach, rear back, snap
+## forward, recoil.
+func _hunt(sub: Submarine, delta: float) -> void:
+	var to := sub.pos - pos
+	var d := to.length()
+	match _bite:
+		Bite.APPROACH:
+			seek(sub.pos - _aim * STAND_OFF, 6.5, 2.0, delta)
+			if d < STRIKE_RANGE:
+				_bite = Bite.WINDUP
+				_bite_t = WINDUP_TIME
+		Bite.WINDUP:
+			# Drawing back, almost still, before the strike.
+			vel = vel.lerp(-_aim * 1.5, 1.0 - exp(-8.0 * delta))
+			_bite_t -= delta
+			if _bite_t <= 0.0:
+				_bite = Bite.SNAP
+				_bite_t = SNAP_TIME
+				vel = _aim * SNAP_SPEED
+		Bite.SNAP:
+			_bite_t -= delta
+			if _bite_t <= 0.0:
+				_recoil()
+		Bite.RECOIL:
+			vel = vel.lerp(Vector2.ZERO, 1.0 - exp(-3.0 * delta))
+			_bite_t -= delta
+			if _bite_t <= 0.0:
+				_bite = Bite.APPROACH
+
+
+func _recoil() -> void:
+	_bite = Bite.RECOIL
+	_bite_t = RECOIL_TIME
+	vel = -_aim * RECOIL_SPEED
+
+
+# --- Drawing ----------------------------------------------------------------
+
+## Asleep it is a crate and nothing more, or nearly: it breathes, and now and
+## then its lid lifts a crack and shuts. Hunting, each part plays its part
+## in the bite (see _hunt); settling, it all draws back in and the lure
+## blinks as a cache's beacon does.
 func _update_visuals(delta: float) -> void:
 	var awake := state == State.LUNGE or state == State.CHASE
+	var striking := awake and (_bite == Bite.WINDUP or _bite == Bite.SNAP)
 	var jaw_want := 0.0
-	match state:
-		State.LUNGE:
-			jaw_want = 1.15
-		State.CHASE:
-			jaw_want = 0.3 + 0.55 * (0.5 + 0.5 * sin(_t * 7.0))
-	var spring := _spring(_jaw, _jaw_v, jaw_want, 22.0 if jaw_want > _jaw else 12.0, delta)
-	_jaw = maxf(spring.x, 0.0)
+	var jaw_rate := 12.0
+	if state == State.DORMANT:
+		jaw_want = _peek()
+		jaw_rate = 4.0
+	elif awake:
+		match _bite:
+			Bite.APPROACH:
+				jaw_want = 0.32 + 0.06 * sin(_t * 2.2)
+			Bite.WINDUP:
+				jaw_want = GAPE
+				jaw_rate = 16.0
+			Bite.SNAP:
+				# Wide until the last moment, then slammed shut.
+				jaw_want = GAPE if _bite_t > SNAP_TIME * 0.4 else 0.0
+				jaw_rate = 16.0 if _bite_t > SNAP_TIME * 0.4 else 45.0
+			Bite.RECOIL:
+				jaw_want = 0.0 if _bite_t > RECOIL_TIME - 0.18 else 0.35
+	var spring := _spring(_jaw, _jaw_v, jaw_want, jaw_rate, delta)
+	_jaw = clampf(spring.x, 0.0, GAPE + 0.1)
 	_jaw_v = spring.y
 	_hinge.rotation.z = _jaw
 	_reach = lerpf(_reach, 1.0 if awake else 0.0, 1.0 - exp(-(9.0 if awake else 1.6) * delta))
-	var speed := vel.length()
-	_pull += delta * (2.5 + speed * 0.9) if _reach > 0.02 else 0.0
+	# Its tentacles pull in strokes, quicker the faster it goes; they hold
+	# still, coiled, while it rears.
+	if _reach > 0.02 and not striking:
+		_pull += delta * TAU * (0.7 + vel.length() * 0.12)
 	# The lure: blinking in a cache's time while it sleeps; lit while it hunts.
 	_beacon.material_override = _lure_lit if _reach > 0.3 else _lure_blink
 	_beacon.visible = _reach > 0.3 or fmod(_t, 1.2) < 0.6
-	# Its mouth turned on whatever it chases, pitched up or down at it, and
-	# rocking with each pull; asleep, the crate's slant.
-	var sub := level.player
-	var target := Vector2.RIGHT
-	if sub and awake:
-		target = (sub.pos - pos).normalized()
-	var want_yaw := PI if target.x < -0.1 else (0.0 if target.x > 0.1 else _turn)
-	_turn = lerp_angle(_turn, want_yaw, 1.0 - exp(-6.0 * delta)) if delta > 0.0 else want_yaw
-	var pitch := clampf(atan2(target.y, absf(target.x)), -0.6, 0.6) * _reach
-	var rock := sin(_pull) * 0.08 * _reach
-	_body.basis = Basis(Vector3.UP, _turn) * Basis(Vector3.BACK, lerpf(_tilt, pitch + rock, _reach))
-	_body.scale = Vector3(1.0, 1.0 + 0.04 * sin(_pull * 2.0) * _reach, 1.0)
-	_pose_tongue()
-	_pose_tentacles(delta)
+	# Its eyes, under the lid: asleep, they kindle only as the lid lifts, a
+	# glint in the crack.
+	var peeking := clampf(_jaw / 0.05, 0.0, 1.0) * (1.0 - _reach)
+	_roof.set_instance_shader_parameter(&"glow_boost", (1.6 if striking else 1.0) if awake else 0.3 + 2.5 * peeking)
+	_pose_body(delta, awake, striking)
+	_pose_tongue(delta, awake)
+	_pose_tentacles(delta, striking)
 	_pose_strands()
 	for v in visuals:
 		v.set_instance_shader_parameter(&"marked", _marked / _mark_total if _marked > 0.0 else 0.0)
@@ -386,16 +458,53 @@ func _update_visuals(delta: float) -> void:
 		v.set_instance_shader_parameter(&"swim_power", _reach)
 
 
-## The tongue lies along the jaw, and slides out to loll over the front
-## teeth as it opens.
-func _pose_tongue() -> void:
-	var open := clampf(_jaw / 1.15, 0.0, 1.0)
-	_tongue.visible = open > 0.05
-	var lift := 0.12 + 0.1 * open
+## Asleep, how far its lid lifts: every so often (never in step with another
+## mimic), slowly a crack, held a moment, and shut.
+func _peek() -> float:
+	var every := 8.0 + 4.0 * fposmod(_phase * 3.7, 1.0)
+	var c := fposmod(_t + _phase * 5.0, every)
+	return 0.05 * smoothstep(0.0, 0.9, c) * (1.0 - smoothstep(1.7, 2.4, c))
+
+
+## Its mouth turned on its prey: it keeps the side it faces until its prey
+## is well behind it, never turning mid-strike, and pitches its mouth up or
+## down at it; it rears back as it winds up and dips into the snap. Asleep,
+## the crate's slant, and a breath so faint it is barely there.
+func _pose_body(delta: float, awake: bool, striking: bool) -> void:
+	if awake and not striking:
+		if _aim.x < -0.3:
+			_faces = -1.0
+		elif _aim.x > 0.3:
+			_faces = 1.0
+	var want_turn := 0.0 if _faces > 0.0 else PI
+	_turn = lerp_angle(_turn, want_turn, 1.0 - exp(-4.0 * delta)) if delta > 0.0 else want_turn
+	var want_pitch := 0.0
+	if awake:
+		want_pitch = clampf(atan2(_aim.y, _aim.x * _faces), -0.7, 0.7)
+		if _bite == Bite.WINDUP:
+			want_pitch += 0.22
+		elif _bite == Bite.SNAP:
+			want_pitch -= 0.12
+	if not striking or _bite == Bite.WINDUP:
+		_pitch = lerpf(_pitch, want_pitch, 1.0 - exp(-7.0 * delta)) if delta > 0.0 else want_pitch
+	var surge := sin(_pull) * 0.04 * _reach
+	_body.basis = Basis(Vector3.UP, _turn) * Basis(Vector3.BACK, lerpf(_tilt, _pitch + surge, _reach))
+	var breath := 0.007 * sin(_t * 1.1) * (1.0 - _reach)
+	_body.scale = Vector3(1.0, 1.0 + breath + 0.02 * sin(_pull) * _reach, 1.0)
+
+
+## The tongue slides out along the jaw as it rears, and is whipped back in
+## before the jaw slams shut.
+func _pose_tongue(delta: float, awake: bool) -> void:
+	var want := 1.0 if awake and _bite == Bite.WINDUP else (0.3 if awake and _bite == Bite.APPROACH else 0.0)
+	var rate := 7.0 if want > _tongue_out else 25.0
+	_tongue_out = lerpf(_tongue_out, want, 1.0 - exp(-rate * delta)) if delta > 0.0 else want
+	_tongue.visible = _jaw > 0.15 and _tongue_out > 0.02
+	var lift := 0.12 + 0.08 * _tongue_out
 	var turned := Basis(Vector3.BACK, PI + lift)
-	var basis := Basis(turned.x * lerpf(0.75, 1.3, open), turned.y, turned.z)
+	var basis := Basis(turned.x * lerpf(0.6, 1.25, _tongue_out), turned.y, turned.z)
 	_tongue.transform = Transform3D(basis, Vector3(-0.35, 0.03, 0.0) + basis.x * -TONGUE_L * 0.5)
-	_tongue.set_instance_shader_parameter(&"bend", 1.3 * open)
+	_tongue.set_instance_shader_parameter(&"bend", 1.2 * _tongue_out)
 
 
 ## The slime strings stretch from rim to rim, thinning as the jaw opens.
@@ -416,29 +525,38 @@ func _pose_strands() -> void:
 		strand.transform = Transform3D(Basis(side * thin, span, span.cross(side).normalized() * thin), a)
 
 
-## The tentacles stream out behind it as it swims and hang below it
-## otherwise, each a little fanned out from the next and curling at its
-## tip; tucked away (and hidden) while it sleeps.
-func _pose_tentacles(_delta: float) -> void:
+## The tentacles stream behind it as it swims and hang below it otherwise,
+## always below the crate. They stroke together: spreading and curling, then
+## sweeping back as one; coiled as it rears, swept straight back as it
+## strikes. Tucked away (and hidden) while it sleeps.
+func _pose_tentacles(delta: float, striking: bool) -> void:
 	var show := _reach > 0.02
-	var back := Vector2(0.0, -1.0) - vel * 0.12
-	var world := Vector3(back.x, back.y, 0.0).normalized()
-	var local := (model.global_basis * _body.basis).inverse() * world if is_inside_tree() else Vector3.DOWN
+	var want := (Vector2(0.0, -1.0) - vel * 0.1).normalized()
+	_trail = _trail.lerp(want, 1.0 - exp(-6.0 * delta)).normalized() if delta > 0.0 else want
+	var local := Vector3.DOWN
+	if is_inside_tree():
+		local = ((model.global_basis * _body.basis).inverse() * Vector3(_trail.x, _trail.y, 0.0)).normalized()
+	local.y = minf(local.y, -0.35)
+	var stroke := 0.5 + 0.5 * sin(_pull)
+	var curl := lerpf(0.15, 0.85, stroke)
+	var fan := lerpf(0.25, 0.6, stroke)
+	if striking:
+		curl = 1.3 if _bite == Bite.WINDUP else 0.05
+		fan = 0.7 if _bite == Bite.WINDUP else 0.15
 	for k in TENTACLES:
 		var t := _tentacles[k]
 		t.visible = show
 		if not show:
 			continue
 		var root: Vector3 = ROOTS[k]
-		var dir := (local.normalized() + Vector3(root.x, 0.0, root.z) * 0.6).normalized()
+		var dir := (local.normalized() + Vector3(root.x, 0.0, root.z) * fan).normalized()
 		var along := -dir
 		var side := along.cross(Vector3.BACK if absf(along.z) < 0.9 else Vector3.RIGHT).normalized()
 		var up := side.cross(along)
-		var length := _reach
 		var thick := lerpf(0.4, 1.0, _reach)
-		var basis := Basis(along * length, up * thick, side * thick)
-		t.transform = Transform3D(basis, root - along * length * TENTACLE_L * 0.5)
-		t.set_instance_shader_parameter(&"bend", 0.35 + 0.3 * sin(_t * 2.3 + k * 1.7) + (1.0 - _reach) * 1.2)
+		var basis := Basis(along * _reach, up * thick, side * thick)
+		t.transform = Transform3D(basis, root - along * _reach * TENTACLE_L * 0.5)
+		t.set_instance_shader_parameter(&"bend", curl + (1.0 - _reach) * 1.2 + 0.05 * sin(k * 2.1))
 
 
 func on_harpoon_hit(harpoon: Node, damage: float) -> HarpoonReaction:
@@ -452,6 +570,10 @@ func on_touch_player(sub: Submarine) -> void:
 		_wake()
 	sub.take_damage(contact_damage, pos, self)
 	Audio.play_at(&"stalker_bite", pos, -2.0)
+	# Its teeth in, it lets go and draws back for the next bite.
+	if state != State.DORMANT:
+		_aim = (sub.pos - pos).normalized()
+		_recoil()
 
 
 func die() -> void:
@@ -462,6 +584,8 @@ func die() -> void:
 ## Shown as a specimen (the codex): awake, so what it really is shows.
 func reveal() -> void:
 	state = State.CHASE
+	_bite = Bite.WINDUP
+	_bite_t = 99.0
 	_jaw = 0.9
 	_reach = 1.0
 	_update_visuals(0.0)
