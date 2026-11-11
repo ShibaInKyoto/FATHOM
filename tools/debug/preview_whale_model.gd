@@ -22,7 +22,8 @@ func _ready() -> void:
 	add_child(level)
 	level.build(layout, 1)
 	level.terrain.visible = false
-	level.environment_rig.environment.ambient_light_energy = 1.4
+	# Lit about as the shelf is in a dive.
+	level.environment_rig.environment.ambient_light_energy = 0.55
 	level.environment_rig.environment.volumetric_fog_enabled = false
 	level.environment_rig.environment.fog_enabled = false
 	var origin := Vector2(layout.size().x * 0.5, -60.0)
@@ -39,11 +40,11 @@ func _ready() -> void:
 		_whales.append(w)
 	var key := DirectionalLight3D.new()
 	key.rotation_degrees = Vector3(-35, 30, 0)
-	key.light_energy = 1.4
+	key.light_energy = 0.7
 	add_child(key)
 	var rim := DirectionalLight3D.new()
 	rim.rotation_degrees = Vector3(-10, 200, 0)
-	rim.light_energy = 0.6
+	rim.light_energy = 0.35
 	rim.light_color = Color(0.6, 0.85, 1.0)
 	add_child(rim)
 	var cam := Camera3D.new()
