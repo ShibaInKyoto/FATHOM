@@ -25,7 +25,10 @@ const PERSONAL_SPACE := 7.0
 const TILT := 1.05
 ## How far it banks into a turn for each radian a second it turns at.
 const BANK := 0.35
-## The disc: half its span (a wingspan of about seven metres), where the
+## How much bigger than the disc below it is drawn (and moves): a wingspan
+## of over nine metres, a wonder of the shelf.
+const SIZE := 1.35
+## The disc: half its span (before [constant SIZE]), where the
 ## wings leave the body, and its leading and trailing edges and thickness,
 ## (z, x or metres) from the midline out to the wingtip.
 const HALF_SPAN := 3.4
@@ -60,8 +63,8 @@ var _beats := 0
 func setup() -> void:
 	species = &"manta"
 	max_hp = 140.0
-	radius = 1.7
-	reach = 3.2
+	radius = 2.3
+	reach = 4.3
 	mass = 6.0
 	contact_damage = 0.0
 	salvage_drop = 4
@@ -104,7 +107,7 @@ func build_model() -> void:
 		m.set_shader_parameter(&"paint_relief", 0.003))
 	_tilt = Node3D.new()
 	# Back to the camera from the start (a specimen in the hangar never ticks).
-	_tilt.rotation.x = TILT
+	_tilt.basis = Basis(Vector3.RIGHT, TILT).scaled(Vector3.ONE * SIZE)
 	model.add_child(_tilt)
 	if _mesh == null:
 		_mesh = _build_mesh()
@@ -265,7 +268,7 @@ func behave(delta: float) -> void:
 func _pick_goal() -> void:
 	_goal_timer = level.rng.randf_range(12.0, 20.0)
 	for _i in 12:
-		var p := level.layout.random_open_point(level.rng, 4.0, PackedVector2Array([pos]), 14.0)
+		var p := level.layout.random_open_point(level.rng, 5.5, PackedVector2Array([pos]), 14.0)
 		if p != Vector2.INF and level.field.line_of_sight(pos, p, radius):
 			_goal = p
 			return
@@ -319,5 +322,5 @@ func _update_visuals(delta: float) -> void:
 	var roll := TILT * _side() - clampf(_yaw_v * BANK, -0.9, 0.9)
 	var ph := _swim_clock * TAU + _phase
 	var pitch := 0.035 * cos(ph) * _swim_power
-	_tilt.basis = Basis(Vector3.RIGHT, roll) * Basis(Vector3.BACK, pitch)
+	_tilt.basis = (Basis(Vector3.RIGHT, roll) * Basis(Vector3.BACK, pitch)).scaled(Vector3.ONE * SIZE)
 	_tilt.position = _tilt.basis.y * (-0.08 * sin(ph - 0.5) * _swim_power)

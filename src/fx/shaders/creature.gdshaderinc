@@ -169,12 +169,28 @@ uniform sampler2D paint_bottom : source_color, hint_default_black, filter_linear
 	repeat_disable;
 uniform vec4 paint_box = vec4(0.0);
 uniform float paint_relief = 0.004;
+// Or skin painted all round a body (a whale's): paint_top alone, wrapped
+// round it by UV2 (x along the body, and how far round it from the back's
+// midline as a share of the way to the belly, -1 on one flank to 1 on the
+// other); the box is then x of the tail end, -1, the length and 2. Parts
+// with UV2.y beyond 900 (jaw, flippers) keep their plain colours.
+uniform bool paint_wrap = false;
+// Light from the surface far above (0 for none): something big in the
+// sunlit blue (a whale) is lit along its back and dark beneath, so it reads
+// against the dark rock behind it, tinted by the water.
+uniform float sky_light = 0.0;
+uniform vec4 sky_tint : source_color = vec4(0.55, 0.75, 0.85, 1.0);
+#ifdef FADE
+// Fading into and out of the blue (1 solid).
+instance uniform float fade = 1.0;
+#endif
 
 varying vec3 world_pos;
 varying vec3 body_pos;
 // The skin's own coordinates: along the body, and round it from the back's
 // midline (BodyKit's UV.y), so scales keep their size all round.
 varying vec2 skin_uv;
+varying vec2 paint_uv;
 
 // A point hanging off the spine at s metres from the pivot, offset by o
 // (along and up from that spine point), with the spine bent to curvature k:
@@ -257,6 +273,7 @@ void vertex() {
 		p.x -= bell_squeeze * 0.14 * (bell_top - bell_rim) * f;
 	}
 	skin_uv = skin_on_uv ? UV : vec2(p.x, UV.y);
+	paint_uv = UV2;
 	// The spine point this vertex hangs from.
 	float ax = anchored ? UV.x + body_offset.x : p.x;
 	// Drawn through a MultiMesh (a school), each fish carries its own stroke
@@ -267,7 +284,12 @@ void vertex() {
 	p.z += sin(swim_clock * flutter_freq + phase * 2.0 + p.x * flutter_wave + p.y * 2.0) * flutter_amp * COLOR.b;
 	vec3 sw = swim_wave_at(ax, ph, power);
 	// Fins trail behind the way their root is moving.
-	p.z -= fin_lag * COLOR.b * sw.z;
+	// (Up and down for a creature that swims up and down: a whale's flukes.)
+	if (swim_vertical > 0.5) {
+		p.y -= fin_lag * COLOR.b * sw.z;
+	} else {
+		p.z -= fin_lag * COLOR.b * sw.z;
+	}
 	// A little roll with each beat, about the spine.
 	float r = swim_roll * power * sin(ph);
 	p.yz = turned(p.yz, r);
@@ -406,10 +428,15 @@ void fragment() {
 	float hgt = 0.0;
 	float bare = 1.0;
 	float px = 0.5 * (length(dFdx(body_pos)) + length(dFdy(body_pos)));
-	bool painted = paint_box.z > 0.0 && !enamel && COLOR.b < 0.001;
+	bool painted = paint_box.z > 0.0 && !enamel && COLOR.b < 0.001 && !(paint_wrap && paint_uv.y > 900.0);
 	if (painted) {
-		vec2 puv = vec2((body_pos.z - paint_box.y) / paint_box.w, (paint_box.x - body_pos.x) / paint_box.z);
-		vec4 paint = mix(texture(paint_bottom, puv), texture(paint_top, puv), smoothstep(-0.004, 0.004, body_pos.y));
+		vec4 paint;
+		if (paint_wrap) {
+			paint = texture(paint_top, (paint_uv - paint_box.xy) / paint_box.zw);
+		} else {
+			vec2 puv = vec2((body_pos.z - paint_box.y) / paint_box.w, (paint_box.x - body_pos.x) / paint_box.z);
+			paint = mix(texture(paint_bottom, puv), texture(paint_top, puv), smoothstep(-0.004, 0.004, body_pos.y));
+		}
 		base = paint.rgb;
 		hgt += (paint.a - 0.5) * 2.0 * paint_relief;
 	}
@@ -455,7 +482,14 @@ void fragment() {
 	vec2 sonar = sonar_sample(world_pos.xy);
 	emission += sonar_color.rgb * (sonar.x * 4.0 * (0.4 + fres) + marked * fres * 1.6);
 	emission += vec3(1.0, 0.85, 0.8) * hit_flash * 2.5;
+	if (sky_light > 0.0) {
+		float up = (INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).y;
+		emission += ALBEDO * sky_tint.rgb * sky_light * (0.2 + 0.8 * smoothstep(-0.35, 1.0, up));
+	}
 	EMISSION = emission;
+#ifdef FADE
+	ALPHA = fade;
+#endif
 #ifdef GLASS
 	// Clear seen face on, milky where the flesh turns away, fins thinner
 	// still; whatever glows, or is marked or struck, shows through.

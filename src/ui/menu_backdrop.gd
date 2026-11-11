@@ -4,7 +4,7 @@ extends Node3D
 ## idling in its entry chamber, a slowly drifting camera and periodic pings.
 
 ## Codex specimens too big for the viewport, and how far to shrink them.
-const SPECIMEN_SCALE: Dictionary[StringName, float] = {&"choir": 0.28}
+const SPECIMEN_SCALE: Dictionary[StringName, float] = {&"choir": 0.28, &"manta": 0.75}
 ## Specimens whose bodies take shape as they swim.
 const WARM_UP: Array[StringName] = [&"shoal"]
 

@@ -19,6 +19,8 @@ func _ready() -> void:
 
 
 func direct(_dt: float) -> void:
+	# (Watching, not fighting: whatever drifts by does it no harm.)
+	sub.run.hull = sub.stats.max_hull
 	sub.vel = Vector2.ZERO
 	sub.lamp_on = true
 	sub.aim = Vector2(0.0, -1.0)
