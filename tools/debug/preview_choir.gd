@@ -3,12 +3,15 @@ extends "res://tools/debug/preview_stage.gd"
 ## song waves rolling out across its arena, the sub answering them with
 ## pings and the voice organs opening. With "reach" the organs are silenced at
 ## once, to show the heart surging forward and a tentacle slamming the arena;
-## with "duet", the song's last part.
-## Usage: xvfb-run godot --path . res://tools/debug/preview_choir.tscn -- <out_dir> [seed] [zoom] [reach|duet]
+## with "duet", the song's last part. "film" last saves every frame from two
+## and a half seconds in, for twelve seconds.
+## Usage: xvfb-run godot --path . res://tools/debug/preview_choir.tscn -- <out_dir> [seed] [zoom] [reach|duet|call]
+## [film]
 
 var _choir: ChoirBoss
 var _ping_at := 3.0
 var _part := ""
+var _film := false
 
 
 func _ready() -> void:
@@ -26,9 +29,14 @@ func _ready() -> void:
 	add_hud()
 	shot_prefix = "choir"
 	shot_times = [4.0, 6.5, 8.8, 10.2, 12.5]
-	_part = args[3] if args.size() > 3 else ""
+	_part = args[3] if args.size() > 3 and args[3] != "call" else ""
 	if _part != "":
 		shot_times = [3.5, 5.3, 6.4, 7.0, 9.0]
+	_film = args.has("film")
+	if _film:
+		shot_times.clear()
+		for i in 360:
+			shot_times.append(2.5 + i / 30.0)
 
 
 func direct(_dt: float) -> void:
@@ -53,7 +61,14 @@ func direct(_dt: float) -> void:
 			_choir.begin_duet()
 	if _choir.part != ChoirBoss.Part.CALL:
 		sub.aim = (_choir.pos - sub.pos).normalized()
-	if t >= _ping_at:
+	if _film:
+		# Filmed, it answers each wave as it arrives.
+		var eta := _choir.next_arrival(sub.pos)
+		if eta < 0.15 and eta > -0.2 and t >= _ping_at:
+			_ping_at = t + 0.5
+			sub.sonar_cooldown = 0.0
+			sub.try_ping()
+	elif t >= _ping_at:
 		_ping_at += 2.6
 		sub.sonar_cooldown = 0.0
 		sub.try_ping()

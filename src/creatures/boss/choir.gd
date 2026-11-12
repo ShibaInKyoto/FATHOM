@@ -14,6 +14,13 @@ extends Entity
 ## [br]- The Duet: wounded enough, the heart falls silent and listens. Its
 ## hunters hang still. It sings on, faster and faster, and only a long run of
 ## answers in a row ends the song.
+## Its body is built by [ChoirModel]: a heart of see-through flesh behind the
+## water the sub swims in, its comb rows ever beating with rainbow light,
+## breathing slowly, squeezing and swelling as it sings while the light of
+## each song races out from its glowing chambers over its skin and down its
+## seven tentacles; the petals of its throat part whenever it lies open; in
+## the duet its light turns the colour of the answers, and when the song
+## ends its light goes out.
 
 signal defeated
 
@@ -83,14 +90,22 @@ var _last_ping := -100.0
 var _done := false
 var _t := 0.0
 var _answer_streak := 0
-var _heart: MeshInstance3D
-var _heart_mat: ShaderMaterial
+var _heart: Node3D
+var _heart_parts: Array[GeometryInstance3D] = []
+var _petals: Array[Node3D] = []
 var _light: OmniLight3D
 var _tentacles: Array[ArrayMesh] = []
+var _tentacle_nodes: Array[MeshInstance3D] = []
+## How bright each tentacle burns (1 at rest).
+var _tentacle_glow: Array[float] = []
 var _tentacle_dirs: Array[Vector2] = []
 var _hinted := false
 var _beat := 0.0
-var _tentacle_mats: Array[ShaderMaterial] = []
+## Seconds since it last sang; how far its throat's petals have parted; how
+## much of its light is left (it goes out when the song ends).
+var _song := 99.0
+var _open := 0.0
+var _fade := 1.0
 ## How far each tentacle has risen into the play plane (0 = trailing in the dark).
 var _tentacle_rise: Array[float] = []
 var _tentacle_home: Array[Vector2] = []
@@ -115,36 +130,29 @@ func setup() -> void:
 	Events.sonar_pinged.connect(_on_ping)
 
 
-## The Choir's heart: a veined, glowing bulb thirteen metres long.
-static func heart_mesh() -> ArrayMesh:
-	return MeshKit.lathe(PackedVector2Array([
-			Vector2(0.0, 0.5), Vector2(0.2, 4.0), Vector2(0.5, 5.5), Vector2(0.8, 4.5), Vector2(1.0, 1.0)]),
-		13.0, 28, 22, 1.15, 1.15, func(t: float, a: float) -> float:
-			var veins := 1.0 - smoothstep(0.0, 0.12, absf(sin(a * 5.0 + t * 9.0)))
-			return clampf(veins * 0.9 + (0.6 if t > 0.92 else 0.0), 0.0, 1.0))
-
-
-static func heart_material() -> ShaderMaterial:
-	var mat := ShaderMaterial.new()
-	mat.shader = Creature.SHADER
-	mat.set_shader_parameter(&"back_color", Color(0.18, 0.06, 0.22))
-	mat.set_shader_parameter(&"belly_color", Color(0.3, 0.12, 0.35))
-	mat.set_shader_parameter(&"glow_color", Color(1.0, 0.3, 0.85))
-	mat.set_shader_parameter(&"glow_strength", 4.5)
-	mat.set_shader_parameter(&"glow_pulse", 0.6)
-	mat.set_shader_parameter(&"rim_strength", 0.8)
-	mat.set_shader_parameter(&"swim_amp", 0.0)
-	return mat
-
-
-## A small still copy of the heart, for the codex viewport.
+## A still copy of the heart with its tentacles trailing from it, for the
+## codex viewport.
 static func specimen() -> Node3D:
-	var heart := MeshInstance3D.new()
-	heart.mesh = heart_mesh()
-	heart.material_override = heart_material()
-	heart.rotation.z = PI * 0.5
 	var holder := Node3D.new()
-	holder.add_child(heart)
+	holder.add_child(ChoirModel.build_heart())
+	for i in 5:
+		var a := PI + PI * (i + 0.5) / 5.0
+		var dir := Vector3(cos(a), sin(a), 0.0)
+		var pts := PackedVector3Array()
+		for k in 8:
+			var u := k / 7.0
+			pts.append(dir * (4.5 + u * 12.0) + Vector3(-dir.y, dir.x, 0.0) * sin(i * 1.7 + u * 4.0) * 1.5 * u
+				+ Vector3(0.0, 0.0, -2.0 * u))
+		var fine := ChoirModel.curve(pts, 30)
+		var radii := PackedFloat32Array()
+		for k in fine.size():
+			radii.append(lerpf(0.9, 0.06, float(k) / (fine.size() - 1)))
+		var mesh := ArrayMesh.new()
+		ChoirModel.tentacle_into(mesh, fine, radii, 4.5)
+		var mi := MeshInstance3D.new()
+		mi.mesh = mesh
+		mi.material_override = ChoirModel.flesh_material()
+		holder.add_child(mi)
 	var light := OmniLight3D.new()
 	light.light_color = Color(1.0, 0.35, 0.85)
 	light.omni_range = 30.0
@@ -154,14 +162,14 @@ static func specimen() -> Node3D:
 
 
 func _build_heart() -> void:
-	_heart_mat = heart_material()
-	_heart = MeshInstance3D.new()
-	_heart.mesh = heart_mesh()
-	_heart.material_override = _heart_mat
-	_heart.rotation.z = PI * 0.5
-	_heart.position = Vector3(0, 0, -9.0)
-	_heart.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_heart = ChoirModel.build_heart()
+	_heart.position = Vector3(0, 0, HEART_Z.x)
 	add_child(_heart)
+	for part: GeometryInstance3D in _heart.get_meta(&"parts"):
+		_heart_parts.append(part)
+	for pivot: Node3D in _heart.get_meta(&"petals"):
+		_petals.append(pivot)
+		_heart_parts.append(pivot.get_child(0) as GeometryInstance3D)
 	_light = OmniLight3D.new()
 	_light.light_color = Color(1.0, 0.35, 0.85)
 	_light.omni_range = 55.0
@@ -170,15 +178,6 @@ func _build_heart() -> void:
 	_light.omni_attenuation = 0.8
 	_light.position = Vector3(0, 0, -2.0)
 	add_child(_light)
-	var tentacle_mat := ShaderMaterial.new()
-	tentacle_mat.shader = Creature.SHADER
-	tentacle_mat.set_shader_parameter(&"back_color", Color(0.1, 0.04, 0.13))
-	tentacle_mat.set_shader_parameter(&"belly_color", Color(0.2, 0.08, 0.24))
-	tentacle_mat.set_shader_parameter(&"glow_color", Color(1.0, 0.35, 0.9))
-	tentacle_mat.set_shader_parameter(&"glow_strength", 1.6)
-	tentacle_mat.set_shader_parameter(&"glow_pulse", 0.8)
-	tentacle_mat.set_shader_parameter(&"rim_strength", 0.5)
-	tentacle_mat.set_shader_parameter(&"swim_amp", 0.0)
 	for i in 7:
 		var mesh := ArrayMesh.new()
 		_tentacles.append(mesh)
@@ -186,14 +185,14 @@ func _build_heart() -> void:
 		_tentacle_dirs.append(Vector2(cos(a), sin(a)))
 		_tentacle_home.append(Vector2(cos(a), sin(a)))
 		_tentacle_rise.append(0.0)
-		var mat := tentacle_mat.duplicate() as ShaderMaterial
-		_tentacle_mats.append(mat)
+		_tentacle_glow.append(1.0)
 		var mi := MeshInstance3D.new()
 		mi.mesh = mesh
-		mi.material_override = mat
+		mi.material_override = ChoirModel.flesh_material()
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		mi.top_level = true
 		add_child(mi)
+		_tentacle_nodes.append(mi)
 
 
 func _spawn_organs() -> void:
@@ -355,6 +354,7 @@ func _emit_wave(speed: float, origin := Vector2.INF) -> void:
 	_waves.append({"radius": 0.5, "speed": speed, "resolved": false, "arrived": 0.0, "deadline": -1.0, "mesh": mi,
 			"mat": mat, "origin": origin})
 	_beat = 1.0
+	_song = 0.0
 	Audio.play(&"choir_wave", -1.0, randf_range(0.9, 1.1))
 	level.emit_noise(origin, 20.0, self)
 	if origin != pos:
@@ -535,18 +535,17 @@ func _tick_slam(delta: float) -> void:
 		return
 	_slam_t += delta
 	var i := _slam
-	var mat := _tentacle_mats[i]
 	if _slam_t < SLAM_TRACK:
 		if sub and sub.alive:
 			_slam_angle = (sub.pos - pos).angle()
 		var k := _slam_t / SLAM_TRACK
 		_tentacle_rise[i] = k * 0.6
 		_tentacle_dirs[i] = _tentacle_dirs[i].slerp(Vector2.from_angle(_slam_angle), 1.0 - exp(-6.0 * delta))
-		mat.set_shader_parameter(&"glow_strength", lerpf(1.6, 3.5, k))
+		_tentacle_glow[i] = lerpf(1.0, 2.2, k)
 	elif _slam_t < SLAM_TRACK + SLAM_LOCK:
 		# Locked on: it stops following and flares.
 		_tentacle_dirs[i] = _tentacle_dirs[i].slerp(Vector2.from_angle(_slam_angle), 1.0 - exp(-12.0 * delta))
-		mat.set_shader_parameter(&"glow_strength", 6.0 + 2.0 * sin(_slam_t * 40.0))
+		_tentacle_glow[i] = 3.8 + 1.2 * sin(_slam_t * 40.0)
 	elif _slam_t < SLAM_TRACK + SLAM_LOCK + SLAM_TIME:
 		var k := (_slam_t - SLAM_TRACK - SLAM_LOCK) / SLAM_TIME
 		_tentacle_rise[i] = lerpf(0.6, 1.0, k)
@@ -558,12 +557,12 @@ func _tick_slam(delta: float) -> void:
 				sub.take_damage(SLAM_DAMAGE, pos, self)
 				sub.vel += (sub.pos - pos).normalized() * 10.0
 	elif _slam_t < SLAM_TRACK + SLAM_LOCK + SLAM_TIME + SLAM_HOLD:
-		mat.set_shader_parameter(&"glow_strength", 2.0)
+		_tentacle_glow[i] = 1.3
 	else:
 		var k := clampf((_slam_t - SLAM_TRACK - SLAM_LOCK - SLAM_TIME - SLAM_HOLD) / 1.2, 0.0, 1.0)
 		_tentacle_rise[i] = 1.0 - k
 		_tentacle_dirs[i] = Vector2.from_angle(_slam_angle).slerp(_tentacle_home[i], k)
-		mat.set_shader_parameter(&"glow_strength", lerpf(2.0, 1.6, k))
+		_tentacle_glow[i] = lerpf(1.3, 1.0, k)
 		if k >= 1.0:
 			_slam = -1
 			_slam_timer = SLAM_EVERY * level.rng.randf_range(0.8, 1.2)
@@ -623,8 +622,7 @@ func _defeat() -> void:
 	var tween := create_tween()
 	tween.tween_property(_light, ^"light_energy", 6.0, 1.0)
 	tween.tween_property(_light, ^"light_energy", 0.0, 4.0)
-	tween.parallel().tween_method(func(v: float) -> void:
-		_heart_mat.set_shader_parameter(&"glow_strength", v), 3.5, 0.2, 4.0)
+	tween.parallel().tween_property(self, ^"_fade", 0.12, 4.0)
 	if not Game.meta.logs_found.has(String(SignalLogs.FINAL.id)):
 		Game.meta.logs_found.append(String(SignalLogs.FINAL.id))
 	get_tree().create_timer(2.0).timeout.connect(func() -> void:
@@ -634,27 +632,74 @@ func _defeat() -> void:
 
 func _animate(delta: float) -> void:
 	_beat = maxf(_beat - delta * 2.5, 0.0)
-	var s := 1.0 + 0.04 * sin(_t * 1.3) + (0.0 if _done else 0.06 * _beat)
+	_song += delta
+	# It breathes slowly; each time it sings it squeezes, then swells.
+	var s := 1.0 + 0.03 * sin(_t * 1.3) + (0.0 if _done else 0.07 * _beat * (1.0 - 2.0 * _beat))
 	_heart.scale = Vector3(s, s, s)
+	_heart.rotation = Vector3(0.0, sin(_t * 0.21) * 0.08, sin(_t * 0.3) * 0.04)
+	var boost := 1.0
+	var tint := 0.0
 	if not _done and part == Part.DUET:
 		# The longer the duet runs, the more its light takes the colour of the answers.
 		var k := clampf(float(duet) / DUET_NEED, 0.0, 1.0)
+		tint = k
 		_light.light_energy = 1.2 + k * 2.0 + sin(_t * 2.0) * 0.3
 		_light.light_color = Color(1.0, 0.35, 0.85).lerp(Color(0.5, 1.0, 1.0), k)
 	elif not _done:
 		_light.light_energy = 1.2 + (1.5 if vulnerable > 0.0 else 0.0) + sin(_t * 2.0) * 0.3
 		_light.light_color = Color(1.0, 0.95, 0.7) if vulnerable > 0.0 else Color(1.0, 0.35, 0.85)
+		boost = 1.5 if vulnerable > 0.0 and part == Part.REACH else 1.0
+	else:
+		tint = 1.0 if duet >= DUET_NEED else 0.0
 	_heart.position.z = lerpf(HEART_Z.x, HEART_Z.y, _heart_k)
+	# Its throat parts whenever it lies open to the harpoon; listening in the
+	# duet it stays a little parted; and when the song ends it opens.
+	var want := 0.0
+	if _done:
+		want = 0.7
+	elif part == Part.REACH and vulnerable > 0.0:
+		want = 1.0
+	elif part == Part.DUET:
+		want = 0.25
+	_open = lerpf(_open, want, 1.0 - exp(-(7.0 if want > _open else 2.5) * delta))
+	for i in _petals.size():
+		var a := TAU * i / _petals.size()
+		var flutter := 1.0 + 0.08 * sin(_t * 3.0 + i * 1.9)
+		_petals[i].basis = Basis(Vector3.BACK, a + PI) * Basis(Vector3.UP, -_open * 1.15 * flutter)
+	var glow := boost * _fade
+	var tint_color := Color(0.5, 1.0, 1.0, tint)
+	for part_mesh in _heart_parts:
+		part_mesh.set_instance_shader_parameter(&"song", _song)
+		part_mesh.set_instance_shader_parameter(&"glow_boost", glow)
+		part_mesh.set_instance_shader_parameter(&"tint", tint_color)
+	# Laid open, its chambers blaze gold behind the parted petals.
+	var core := _heart_parts[0]
+	core.set_instance_shader_parameter(&"tint", Color(1.0, 0.72, 0.3, 0.8 * _open) if part == Part.REACH
+		and not _done else tint_color)
+	core.set_instance_shader_parameter(&"flare", 0.5 * _open if part == Part.REACH and not _done else 0.0)
 	# Tentacles trail from the heart into the dark, swaying slowly; one about
-	# about to slam rises into the water the sub swims in.
+	# to slam rises into the water the sub swims in.
 	for i in _tentacles.size():
 		var flat := _tentacle_points(i)
 		var pts := PackedVector3Array()
-		var radii := PackedFloat32Array()
 		var rise := _tentacle_rise[i]
 		for k in flat.size():
 			var t := k / 13.0
 			var z := lerpf(-9.0, -7.0 + sin(i + _t * 0.4) * 1.2, t)
 			pts.append(Vector3(flat[k].x, flat[k].y, lerpf(z, lerpf(-4.0, 0.0, t), rise)))
-			radii.append(lerpf(0.95, 0.08, t) * (1.0 + rise * 0.4))
-		MeshKit.tube(_tentacles[i], pts, radii, 8, 0.6)
+		var fine := ChoirModel.curve(pts, 44)
+		var radii := PackedFloat32Array()
+		for k in fine.size():
+			radii.append(lerpf(0.95, 0.08, float(k) / (fine.size() - 1)) * (1.0 + rise * 0.4))
+		ChoirModel.tentacle_into(_tentacles[i], fine, radii, 5.0, _t + i * 0.7)
+		var node := _tentacle_nodes[i]
+		node.set_instance_shader_parameter(&"song", _song)
+		node.set_instance_shader_parameter(&"glow_boost", _tentacle_glow[i] * _fade)
+		node.set_instance_shader_parameter(&"tint", tint_color)
+		# Rising to strike, it lights up all along.
+		node.set_instance_shader_parameter(&"flare", clampf((_tentacle_glow[i] - 1.0) / 3.0, 0.0, 1.0) * _fade)
+
+
+## Seconds since it last sang (its voice organs sing with it).
+func song_age() -> float:
+	return _song
