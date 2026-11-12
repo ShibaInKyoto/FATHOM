@@ -45,6 +45,17 @@ const SIDES := 26
 const HEAD_RINGS := 30
 ## Body samples between two segments of the rope.
 const SUBDIVIDE := 3
+## How fast she can swing her head round (radians a second), and faster
+## still while she turns on something she has heard.
+const TURN_MAX := 2.4
+const AIM_TURN_MAX := 4.2
+## How much room a bend of her body needs, as a share of her girth there:
+## no joint folds tighter than that.
+const BEND_ROOM := 1.35
+## The most her roll twists from one segment to the next (radians).
+const TWIST_MAX := 0.7
+## How quickly a segment rolls over once it has come round.
+const ROLL_RATE := 6.0
 ## Gill slits each side: how many, where the first is, how far apart, and
 ## how far round from the back their tops and bottoms are (radians).
 const GILLS := 4
@@ -59,10 +70,6 @@ const PROWL_SPEED := 5.0
 const LUNGE_SPEED: Array[float] = [24.0, 27.0, 30.0]
 const STUCK_TIME: Array[float] = [4.2, 3.6, 3.0]
 const REST: Array[float] = [1.6, 1.1, 0.7]
-
-static var _skin_tex: ImageTexture
-static var _head_mesh: ArrayMesh
-static var _jaw_mesh: ArrayMesh
 
 var state := State.DORMANT
 var phase := 0
@@ -91,7 +98,19 @@ var _wave := 0.0
 var _wave_amp := 0.35
 var _wave_rate := 2.2
 var _rear := 0.0
-var _coil := 1.0
+## Where her head points (radians, in the plane) and how fast it is
+## swinging; how far she has rolled over to keep her back up as she comes
+## round, and how far each segment of her has rolled (the head's roll
+## passed down her as she swims on through the place she turned); and how
+## far back each segment has slid to pass behind the rest where she crosses
+## herself.
+var _heading := NAN
+var _heading_v := 0.0
+var _flip := 0.0
+var _flip_v := 0.0
+var _rolls := PackedFloat32Array()
+var _roll_to := PackedFloat32Array()
+var _depth := PackedFloat32Array()
 var _gape := 0.05
 var _gill_open := 0.06
 var _listen := 0.3
@@ -101,8 +120,6 @@ var _listen := 0.3
 func setup() -> void:
 	species = &"mother"
 	title = "THE BLIND MOTHER"
-	# Her coils are laid out from her facing: her head turns with it at once.
-	turn_rate = -1.0
 	max_hp = 280.0
 	radius = 2.3
 	mass = 60.0
@@ -118,7 +135,11 @@ func setup() -> void:
 	_orbit = level.rng.randf() * TAU
 	# Coiled on the lair floor until something wakes her.
 	segments.resize(SEGMENTS)
+	_rolls.resize(SEGMENTS)
+	_roll_to.resize(SEGMENTS)
+	_depth.resize(SEGMENTS)
 	_lay_coil()
+	_separate(0.0)
 	_rebuild_body()
 
 
@@ -135,7 +156,7 @@ func build_model() -> void:
 		# Her skin's pattern rides on its own coordinates (she is rebuilt
 		# every frame): wrinkles and blotches, and fine pits.
 		m.set_shader_parameter(&"skin_on_uv", true)
-		m.set_shader_parameter(&"skin_tex", _skin())
+		m.set_shader_parameter(&"skin_tex", MotherModel.skin())
 		m.set_shader_parameter(&"skin_tex_scale", 0.42)
 		m.set_shader_parameter(&"skin_tex_depth", 0.03)
 		m.set_shader_parameter(&"skin_tex_shade", 0.5)
@@ -160,9 +181,9 @@ func build_model() -> void:
 		m.set_shader_parameter(&"flutter_amp", 0.012)
 		m.set_shader_parameter(&"flutter_freq", 7.0)
 		m.set_shader_parameter(&"flutter_wave", 30.0), &"gills")
-	if _head_mesh == null:
-		_head_mesh = _head_parts()
-		_jaw_mesh = _jaw_parts()
+	if MotherModel.head_mesh == null:
+		MotherModel.head_mesh = MotherModel.head_parts()
+		MotherModel.jaw_mesh = MotherModel.jaw_parts()
 	# The body and skull, one skin rebuilt every frame (see _rebuild_body).
 	_body = MeshInstance3D.new()
 	_body.mesh = _body_mesh
@@ -171,8 +192,8 @@ func build_model() -> void:
 	_body.extra_cull_margin = 40.0
 	model.add_child(_body)
 	visuals.append(_body)
-	_head = add_visual(_head_mesh, mat)
-	_jaw = add_visual(_jaw_mesh, mat, Transform3D(Basis(), HINGE))
+	_head = add_visual(MotherModel.head_mesh, mat)
+	_jaw = add_visual(MotherModel.jaw_mesh, mat, Transform3D(Basis(), HINGE))
 	var cheeks := MeshInstance3D.new()
 	cheeks.mesh = _cheek_mesh
 	cheeks.material_override = mat
@@ -198,165 +219,18 @@ func build_model() -> void:
 		eye.material_override = milk
 		eye.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var a := PI * 0.36 if sgn > 0.0 else TAU - PI * 0.36
-		var n := _head_normal(1.55, a)
+		var n := MotherModel.head_normal(1.55, a)
 		# Flush with the skin, a clouded lens half sunk in it.
 		eye.transform = Transform3D(Basis.looking_at(-n, Vector3.UP).scaled(Vector3(1.0, 0.8, 0.3)),
-			_head_point(1.55, a) - n * 0.01)
+			MotherModel.head_point(1.55, a) - n * 0.01)
 		model.add_child(eye)
 	# The gills: glowing frills behind each slit, and the flaps over them,
 	# each hinged at its front edge.
-	_gills = add_visual(_gill_frills(), gill_mat)
+	_gills = add_visual(MotherModel.gill_frills(), gill_mat)
 	for sgn: float in [1.0, -1.0]:
 		for k in GILLS:
 			_flaps.append(_flap(k, sgn, mat))
 	_rebuild_cheeks()
-
-
-## Her skin's pattern: deep wrinkles running round her, and soft darker
-## blotches; seamless, built once.
-static func _skin() -> ImageTexture:
-	if _skin_tex:
-		return _skin_tex
-	var wrinkles := FastNoiseLite.new()
-	wrinkles.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-	wrinkles.fractal_type = FastNoiseLite.FRACTAL_RIDGED
-	wrinkles.fractal_octaves = 3
-	wrinkles.frequency = 0.025
-	wrinkles.seed = 31
-	var blotches := FastNoiseLite.new()
-	blotches.frequency = 0.012
-	blotches.fractal_octaves = 3
-	blotches.seed = 77
-	var size := 256
-	var img := Image.create(size, size, true, Image.FORMAT_L8)
-	for y in size:
-		for x in size:
-			# Sampled on a torus, so the pattern repeats without a seam.
-			var u := TAU * x / size
-			var v := TAU * y / size
-			var r := size / TAU
-			var w := wrinkles.get_noise_3d(cos(u) * r, sin(u) * r, v * r * 0.35)
-			var b := blotches.get_noise_3d(cos(u) * r, sin(u) * r + 40.0, cos(v) * r + sin(v) * r)
-			var h := 0.55 + 0.32 * w - 0.35 * smoothstep(0.05, 0.4, b)
-			img.set_pixel(x, y, Color(clampf(h, 0.0, 1.0), 0.0, 0.0))
-	img.generate_mipmaps()
-	_skin_tex = ImageTexture.create_from_image(img)
-	return _skin_tex
-
-
-## The point on her head's skin at [param x], [param a] radians round from
-## the back's midline (towards +Z first), as the head is lofted.
-static func _head_point(x: float, a: float) -> Vector3:
-	var hw := BodyKit.at(HEAD, x, 1)
-	var top := BodyKit.at(HEAD, x, 2)
-	var low := BodyKit.at(HEAD, x, 3)
-	var spine := BodyKit.at(HEAD, x, 4)
-	var sc := signf(cos(a)) * pow(absf(cos(a)), 0.85)
-	var ss := signf(sin(a)) * pow(absf(sin(a)), 0.85)
-	return Vector3(x, spine + sc * (top if cos(a) >= 0.0 else low), ss * hw)
-
-
-## Which way the skin faces there.
-static func _head_normal(x: float, a: float) -> Vector3:
-	var e := 0.01
-	var along := _head_point(x + e, a) - _head_point(x - e, a)
-	var round := _head_point(x, a + e) - _head_point(x, a - e)
-	return round.cross(along).normalized()
-
-
-## The rigid parts of the head: the tube nostrils on the snout, long
-## sensory feelers trailing from beside them (swaying more towards their
-## tips), and the fangs down the upper jaw.
-static func _head_parts() -> ArrayMesh:
-	var parts := []
-	for sgn: float in [1.0, -1.0]:
-		var base := _head_point(2.55, PI * 0.3) * Vector3(1.0, 1.0, sgn)
-		var tube := ArrayMesh.new()
-		MeshKit.tube(tube, PackedVector3Array([base, base + Vector3(0.12, 0.1, 0.03 * sgn),
-			base + Vector3(0.22, 0.16, 0.05 * sgn)]), PackedFloat32Array([0.07, 0.06, 0.05]), 8)
-		parts.append([MeshKit.painted(tube, func(_v: Vector3) -> Color: return Color(0.0, 0.3, 0.0))])
-		for k in 2:
-			var root := _head_point(2.4 - k * 0.32, PI * (0.56 + k * 0.06)) * Vector3(1.0, 1.0, sgn)
-			var length := 2.6 - k * 0.7
-			var pts := PackedVector3Array()
-			var radii := PackedFloat32Array()
-			for i in 15:
-				var f := i / 14.0
-				# Forward and out from the snout, then drooping and trailing
-				# back beneath her chin.
-				pts.append(root + Vector3(0.45 * f - length * 0.75 * f * f, -0.9 * f * f + 0.15 * f,
-					(0.3 + 0.2 * f) * f * sgn))
-				radii.append(lerpf(0.04, 0.006, pow(f, 0.8)))
-			var feeler := ArrayMesh.new()
-			MeshKit.tube(feeler, pts, radii, 6)
-			parts.append([MeshKit.painted(feeler, func(v: Vector3) -> Color:
-				return Color(0.0, 0.4, clampf(root.distance_to(v) / length * 1.4, 0.0, 1.0)))])
-		# Sensory pores in rows over the snout and along the lips, glowing
-		# when she listens.
-		var pore := MeshKit.ball(0.035, 1.0, 6, 4)
-		for row: Vector2 in [Vector2(0.62, 0.0), Vector2(0.78, 0.04), Vector2(0.3, 0.02)]:
-			for i in 7:
-				var x := lerpf(0.9, 2.6, i / 6.0) + row.y * i
-				var a := PI * row.x if sgn > 0.0 else TAU - PI * row.x
-				parts.append([pore, Transform3D(Basis(), _head_point(x, a) - _head_normal(x, a) * 0.012)])
-		for t: Array in BodyKit.teeth_row(_upper_lip(0.5, sgn), _upper_lip(2.72, sgn), 15, 0.42,
-				Vector3(0.1, -1.0, -0.3 * sgn), 51 if sgn > 0.0 else 52):
-			parts.append([BodyKit.enamel(t[0]), t[1]])
-	return MeshKit.merge(parts)
-
-
-## The lower jaw (jaw space): long, deep at the hinge, fangs along its rim
-## leaning in, a chin jutting a little past the snout.
-static func _jaw_parts() -> ArrayMesh:
-	var parts := [[BodyKit.body(JAW, 40, 24)]]
-	for sgn: float in [1.0, -1.0]:
-		for t: Array in BodyKit.teeth_row(_jaw_rim(0.45, sgn), _jaw_rim(2.7, sgn), 13, 0.4,
-				Vector3(-0.2, 1.0, -0.35 * sgn), 53 if sgn > 0.0 else 54):
-			parts.append([BodyKit.enamel(t[0]), t[1], (t[1] as Transform3D).origin.x])
-	return BodyKit.merged(parts)
-
-
-static func _upper_lip(x: float, sgn: float) -> Vector3:
-	return Vector3(x, BodyKit.at(HEAD, x, 4) - BodyKit.at(HEAD, x, 3) * 0.8, BodyKit.at(HEAD, x, 1) * 0.74 * sgn)
-
-
-static func _jaw_rim(u: float, sgn: float) -> Vector3:
-	return Vector3(u, BodyKit.at(JAW, u, 4) + BodyKit.at(JAW, u, 2) * 0.8, BodyKit.at(JAW, u, 1) * 0.86 * sgn)
-
-
-## The gills, glowing: behind each slit a ruffled frill lying just under
-## the skin, hidden while the flap over it is shut.
-static func _gill_frills() -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var cols := 10
-	var rows := 4
-	var at := 0
-	for sgn: float in [1.0, -1.0]:
-		for k in GILLS:
-			var x0 := GILL_X + k * GILL_STEP
-			for r in rows + 1:
-				for c in cols + 1:
-					var u := float(r) / rows
-					var w := float(c) / cols
-					var a := lerpf(GILL_A.x, GILL_A.y, w)
-					var x := x0 + 0.15 * u
-					var n := _head_normal(x, a) * Vector3(1.0, 1.0, sgn)
-					var ruffle := 0.05 * (0.5 + 0.5 * sin(w * 38.0 + k)) * sin(PI * u)
-					var p := _head_point(x, a) * Vector3(1.0, 1.0, sgn) + n * (0.004 + ruffle * (0.3 + 0.7 * u))
-					st.set_normal(n)
-					st.set_color(Color(0.4 + 0.6 * sin(PI * u), 0.5, 0.4 * u))
-					st.add_vertex(p)
-			for r in rows:
-				for c in cols:
-					var a := at + r * (cols + 1) + c
-					var quad := [a, a + cols + 1, a + 1, a + 1, a + cols + 1, a + cols + 2]
-					if sgn < 0.0:
-						quad = [a, a + 1, a + cols + 1, a + 1, a + cols + 2, a + cols + 1]
-					for q: int in quad:
-						st.add_index(q)
-			at += (rows + 1) * (cols + 1)
-	return st.commit()
 
 
 ## A gill flap on side [param sgn]: a curved plate of skin lying on the neck
@@ -364,12 +238,12 @@ static func _gill_frills() -> ArrayMesh:
 ## by its rotation about its hinge to open).
 func _flap(k: int, sgn: float, mat: Material) -> Node3D:
 	var x0 := GILL_X + k * GILL_STEP
-	var top := _head_point(x0, GILL_A.x) * Vector3(1.0, 1.0, sgn)
-	var bottom := _head_point(x0, GILL_A.y) * Vector3(1.0, 1.0, sgn)
+	var top := MotherModel.head_point(x0, GILL_A.x) * Vector3(1.0, 1.0, sgn)
+	var bottom := MotherModel.head_point(x0, GILL_A.y) * Vector3(1.0, 1.0, sgn)
 	var hinge := (top + bottom) * 0.5
 	var axis := (bottom - top).normalized()
-	var trail := _head_point(x0 + 0.16, (GILL_A.x + GILL_A.y) * 0.5) * Vector3(1.0, 1.0, sgn) - hinge
-	var outward := _head_normal(x0 + 0.08, (GILL_A.x + GILL_A.y) * 0.5) * Vector3(1.0, 1.0, sgn)
+	var trail := MotherModel.head_point(x0 + 0.16, (GILL_A.x + GILL_A.y) * 0.5) * Vector3(1.0, 1.0, sgn) - hinge
+	var outward := MotherModel.head_normal(x0 + 0.08, (GILL_A.x + GILL_A.y) * 0.5) * Vector3(1.0, 1.0, sgn)
 	if axis.cross(trail).dot(outward) < 0.0:
 		axis = -axis
 	var st := SurfaceTool.new()
@@ -382,8 +256,8 @@ func _flap(k: int, sgn: float, mat: Material) -> Node3D:
 				var u := float(r) / rows
 				var a := lerpf(GILL_A.x - 0.04, GILL_A.y + 0.04, float(c) / cols)
 				var x := x0 - 0.01 + 0.165 * u
-				var n := _head_normal(x, a) * Vector3(1.0, 1.0, sgn)
-				var p := _head_point(x, a) * Vector3(1.0, 1.0, sgn) + n * (0.035 + 0.025 * u)
+				var n := MotherModel.head_normal(x, a) * Vector3(1.0, 1.0, sgn)
+				var p := MotherModel.head_point(x, a) * Vector3(1.0, 1.0, sgn) + n * (0.035 + 0.025 * u)
 				st.set_normal(n if side == 0 else -n)
 				# Its free edge rimmed with the glow of the gill under it.
 				st.set_color(Color(0.6 * smoothstep(0.6, 1.0, u), smoothstep(0.1, -0.7, cos(a)), 0.0))
@@ -438,7 +312,7 @@ func behave(delta: float) -> void:
 			seek(target, PROWL_SPEED * (1.0 + phase * 0.2), 1.5, delta)
 		State.AIM:
 			vel = vel.lerp(Vector2.ZERO, 1.0 - exp(-4.0 * delta))
-			facing = facing.slerp((_target - pos).normalized(), 1.0 - exp(-8.0 * delta)).normalized()
+			_turn_towards((_target - pos).normalized(), 8.0, delta)
 			if _timer <= 0.0:
 				_lunge()
 		State.LUNGE:
@@ -466,6 +340,8 @@ func behave(delta: float) -> void:
 func tick(delta: float) -> void:
 	super.tick(delta)
 	_follow_body()
+	_pass_roll(delta)
+	_separate(delta)
 	_rebuild_body()
 
 
@@ -583,7 +459,6 @@ func _update_visuals(delta: float) -> void:
 	_wave_rate = lerpf(_wave_rate, rate, k)
 	_rear = lerpf(_rear, rear, k)
 	_wave += _wave_rate * delta
-	_coil = maxf(_coil - delta * 0.5, 0.0) if state != State.DORMANT else _coil
 	model.basis = (model.basis * extra).scaled(Vector3.ONE * SIZE * _shrink)
 	_jaw.rotation.z = -_gape
 	for f in _flaps:
@@ -661,24 +536,135 @@ func _enrage() -> void:
 func _follow_body() -> void:
 	if state == State.DORMANT:
 		return
-	segments[0] = pos + facing * NECK_X * SIZE
+	var face := _face()
+	segments[0] = pos + face * NECK_X * SIZE
 	var dt := get_physics_process_delta_time() if is_inside_tree() else 1.0 / 60.0
-	var lead := -facing
+	var lead := -face
 	for i in range(1, SEGMENTS):
 		var to := segments[i] - segments[i - 1]
 		var d := to.length()
 		var spacing := SPACING * (1.0 - 0.3 * _rear * (1.0 - smoothstep(4.0, 12.0, float(i))))
 		if d > spacing:
 			segments[i] = segments[i - 1] + to / d * spacing
-		# A gentle stiffness: slack loops straighten out as she swims, and
-		# no joint folds back on itself.
+		# A gentle stiffness: slack loops straighten out as she swims.
 		var straight := segments[i - 1] + lead * minf(d, spacing)
 		segments[i] = segments[i].lerp(straight, 1.0 - exp(-0.7 * dt))
+		# And no joint bends tighter than her girth there allows, or her
+		# skin would pinch into a kink on the inside of the bend.
+		var dir := segments[i] - segments[i - 1]
+		var length := dir.length()
+		if length > 0.001:
+			var most := clampf(spacing / (BEND_ROOM * _girth(float(i) / (SEGMENTS - 1))), 0.12, 1.2)
+			var bend := lead.angle_to(dir)
+			if absf(bend) > most:
+				segments[i] = segments[i - 1] + lead.rotated(signf(bend) * most) * length
 		lead = (segments[i] - segments[i - 1]).normalized()
 		var p := segments[i]
 		var push := level.field.sample(p)
 		if push < 0.6:
 			segments[i] = p + level.field.normal(p) * (0.6 - push)
+
+
+## Her girth (radius, metres) [param t] of the way from her neck to her tail.
+static func _girth(t: float) -> float:
+	return lerpf(NECK_R, 0.2, pow(clampf(t, 0.0, 1.0), 0.9)) * SIZE
+
+
+## Which way her head points, as drawn.
+func _face() -> Vector2:
+	return Vector2.from_angle(_heading) if not is_nan(_heading) else facing
+
+
+## Turns her, never faster than a beast her size can swing round (faster
+## while she turns on a sound), and always round in the plane: never the
+## instant about-face of a fish turning through the depth.
+func _turn_towards(dir: Vector2, rate: float, delta: float) -> void:
+	var most := (AIM_TURN_MAX if state == State.AIM else TURN_MAX) * delta
+	var angle := facing.angle_to(dir)
+	facing = facing.rotated(clampf(angle * (1.0 - exp(-rate * delta)), -most, most)).normalized()
+
+
+## Her head follows where she faces on a spring, round in the plane; as it
+## comes round past straight up or down she rolls over along her length, so
+## her back stays up and her jaw below.
+func _turn_body(delta: float) -> void:
+	var want := facing.angle()
+	if is_nan(_heading) or delta <= 0.0:
+		_heading = want
+		_heading_v = 0.0
+		_flip = 0.0 if facing.x >= 0.0 else PI
+		_rolls.fill(_flip)
+		_roll_to.fill(_flip)
+	else:
+		var target := _heading + wrapf(want - _heading, -PI, PI)
+		var h := _spring(_heading, _heading_v, target, 11.0, delta)
+		_heading = wrapf(h.x, -PI, PI)
+		_heading_v = h.y
+		var c := cos(_heading)
+		var flip_to := _flip
+		if c > 0.3:
+			flip_to = 0.0
+		elif c < -0.3:
+			flip_to = PI
+		var f := _spring(_flip, _flip_v, flip_to, 7.0, delta)
+		_flip = f.x
+		_flip_v = f.y
+	model.basis = Basis(Vector3.BACK, _heading) * Basis(Vector3.RIGHT, _flip)
+
+
+## Her roll travels down her with the turn: each segment rolls over to keep
+## its own back up once it has come round past straight up or down itself,
+## so she rolls only where she turns; and never twists more than a little
+## from the one ahead, so a roll is a gentle corkscrew along her, never a
+## pinch. (Coiled asleep, she lies as she lay down.)
+func _pass_roll(delta: float) -> void:
+	_rolls[0] = _flip
+	if state == State.DORMANT:
+		return
+	var ease := 1.0 - exp(-ROLL_RATE * delta)
+	for k in range(1, SEGMENTS):
+		var ahead := (segments[k - 1] - segments[k]).normalized()
+		if ahead.x > 0.3:
+			_roll_to[k] = 0.0
+		elif ahead.x < -0.3:
+			_roll_to[k] = PI
+		_rolls[k] = lerpf(_rolls[k], _roll_to[k], ease)
+		_rolls[k] = clampf(_rolls[k], _rolls[k - 1] - TWIST_MAX, _rolls[k - 1] + TWIST_MAX)
+
+
+## Where her body crosses over itself, the part further down it slides back
+## behind the rest (and her head is always in front), easing in and out, so
+## she never passes through herself; each segment's place is spread to its
+## neighbours so the body slopes back smoothly.
+func _separate(delta: float) -> void:
+	var want := PackedFloat32Array()
+	want.resize(SEGMENTS)
+	want.fill(0.0)
+	var face := _face()
+	var head := [pos, pos + face * 1.6 * SIZE, pos + face * 3.2 * SIZE]
+	for j in range(3, SEGMENTS):
+		var rj := _girth(float(j) / (SEGMENTS - 1))
+		for h: Vector2 in head:
+			var need := rj + NECK_R * SIZE * 0.9
+			var d := h.distance_to(segments[j])
+			if d < need:
+				want[j] = minf(want[j], -sqrt(need * need - d * d))
+		for i in j - 3:
+			var need := (rj + _girth(float(i) / (SEGMENTS - 1))) * 1.05
+			var d := segments[i].distance_to(segments[j])
+			if d < need:
+				want[j] = minf(want[j], want[i] - sqrt(need * need - d * d))
+	for _pass in 3:
+		var spread := want.duplicate()
+		for k in range(1, SEGMENTS - 1):
+			spread[k] = minf(want[k], 0.25 * want[k - 1] + 0.5 * want[k] + 0.25 * want[k + 1])
+		want = spread
+	for k in SEGMENTS:
+		if delta <= 0.0:
+			_depth[k] = want[k]
+		else:
+			var rate := 6.0 if want[k] < _depth[k] else 1.5
+			_depth[k] = lerpf(_depth[k], want[k], 1.0 - exp(-rate * delta))
 
 
 ## Asleep: coiled on the lair floor from her neck, round and round, each
@@ -701,9 +687,7 @@ func _lay_coil() -> void:
 func _rebuild_body() -> void:
 	if model == null:
 		return
-	var face := Vector2(model.basis.x.x, model.basis.x.y).normalized()
-	if face == Vector2.ZERO:
-		face = facing
+	var face := _face()
 	var neck := pos + face * NECK_X * SIZE
 	# Along the rope from the neck to the tail, in samples.
 	var rope := PackedVector2Array()
@@ -731,7 +715,10 @@ func _rebuild_body() -> void:
 		var p := rope[i] + across * sin(dist[i] * TAU / 9.0 - _wave) * amp
 		var w := 1.0 - smoothstep(0.0, 4.5, dist[i])
 		p = p.lerp(neck - face * dist[i], w)
-		waved[i] = Vector3(p.x, p.y, -_coil * float(i) / n * 3.5)
+		# Back from the play plane wherever she crosses herself.
+		var at := float(i) / SUBDIVIDE
+		var k := mini(int(at), SEGMENTS - 2)
+		waved[i] = Vector3(p.x, p.y, lerpf(_depth[k], _depth[k + 1], at - k))
 	# Into the head's space (the model as it stands this frame).
 	var to_local := Transform3D(model.basis, model.position).affine_inverse()
 	var pts := PackedVector3Array()
@@ -740,7 +727,9 @@ func _rebuild_body() -> void:
 		pts[i] = to_local * (waved[n - 1 - i] - Vector3(pos.x, pos.y, 0.0))
 	pts[n - 1] = Vector3(NECK_X, 0.0, 0.0)
 	var scale := SIZE
-	# Each section's back carried down from the head's, so it never flips.
+	# Each section's back carried down from the head's, so it never flips,
+	# then turned about her length by how much less (or more) it has rolled
+	# over than her head.
 	var tangents := PackedVector3Array()
 	tangents.resize(n)
 	for i in n:
@@ -752,7 +741,10 @@ func _rebuild_body() -> void:
 	for i in range(n - 1, -1, -1):
 		var b := carried - tangents[i] * carried.dot(tangents[i])
 		carried = b.normalized() if b.length_squared() > 1e-6 else carried
-		backs[i] = carried
+		var at := float(n - 1 - i) / SUBDIVIDE
+		var k := mini(int(at), SEGMENTS - 2)
+		var twist := lerpf(_rolls[k], _rolls[k + 1], at - k) - _flip
+		backs[i] = carried.rotated(tangents[i], twist) if absf(twist) > 0.001 else carried
 	var grid: Array[PackedVector3Array] = []
 	var along := PackedFloat32Array()
 	var fins: Array[PackedVector3Array] = [PackedVector3Array(), PackedVector3Array(), PackedVector3Array(),
@@ -785,7 +777,7 @@ func _rebuild_body() -> void:
 		var x := lerpf(NECK_X, HEAD[HEAD.size() - 1][0], float(x_ring + 1) / HEAD_RINGS)
 		var ring := PackedVector3Array()
 		for j in SIDES + 1:
-			ring.append(_head_point(x, TAU * j / SIDES))
+			ring.append(MotherModel.head_point(x, TAU * j / SIDES))
 		grid.append(ring)
 		along.append(HEAD[HEAD.size() - 1][0] - x)
 	_commit_body(grid, along, fins, n)
@@ -843,7 +835,7 @@ func _commit_body(grid: Array[PackedVector3Array], along: PackedFloat32Array, fi
 					uv2s[v] = Vector2(0.0, 99.0)
 					v += 1
 	if _body_indices.is_empty():
-		_body_indices = _indices(rings, body_rings)
+		_body_indices = MotherModel.indices(rings, body_rings)
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = verts
@@ -854,26 +846,6 @@ func _commit_body(grid: Array[PackedVector3Array], along: PackedFloat32Array, fi
 	arrays[Mesh.ARRAY_INDEX] = _body_indices
 	_body_mesh.clear_surfaces()
 	_body_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-
-
-## The triangles: the same every frame.
-static func _indices(rings: int, body_rings: int) -> PackedInt32Array:
-	var out := PackedInt32Array()
-	var row := SIDES + 1
-	for i in rings - 1:
-		for j in SIDES:
-			var a := i * row + j
-			out.append_array([a, a + row, a + 1, a + 1, a + row, a + row + 1])
-	var base := rings * row
-	for f in 2:
-		for face in 2:
-			var b := base + (f * 2 + face) * body_rings * 2
-			for i in body_rings - 1:
-				var a := b + i * 2
-				var flip := (face == 1) != (f == 1)
-				out.append_array([a, a + 1, a + 2, a + 1, a + 3, a + 2] if not flip
-					else [a, a + 2, a + 1, a + 1, a + 2, a + 3])
-	return out
 
 
 ## The corners of the mouth: skin from the upper lip down to the lower jaw's
@@ -892,8 +864,8 @@ func _rebuild_cheeks() -> void:
 			for j in cols + 1:
 				var f := j / float(cols)
 				var u := 1.1 * t * (1.0 - 0.4 * sin(PI * f) * t)
-				var rim := HINGE + rot * _jaw_rim(u, sgn)
-				var lip := _upper_lip(HINGE.x + u + 0.2, sgn)
+				var rim := HINGE + rot * MotherModel.jaw_rim(u, sgn)
+				var lip := MotherModel.upper_lip(HINGE.x + u + 0.2, sgn)
 				var p := lip.lerp(rim, f)
 				p.z += sgn * sin(PI * f) * (0.04 + 0.15 * _gape) * sin(PI * 0.5 * t)
 				grid.append(p)
@@ -923,7 +895,7 @@ func _rebuild_cheeks() -> void:
 func reveal() -> void:
 	state = State.PROWL
 	_lay_coil()
-	_coil = 0.6
+	_separate(0.0)
 	_update_visuals(0.0)
 	_gape = 0.3
 	_gill_open = 0.25
