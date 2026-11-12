@@ -76,8 +76,8 @@ instance uniform float bell_squeeze = 0.0;
 // has morphed towards it (may overshoot a little as it wobbles).
 instance uniform float puff = 0.0;
 // Walking legs (BodyKit.legged): each leg's vertices carry its hip (UV.x,
-// UV.y, UV2.x) and its place in the gait (UV2.y: side times one plus its
-// phase; 0 for anything not a leg). The gait clock turns them over: each
+// UV.y, UV2.x) and its place in the gait (UV2.y: side times a thousand
+// plus its phase; anything else is not a leg). The gait clock turns them over: each
 // swings fore and aft about its hip and lifts its foot as it swings
 // forward, so a wave of steps runs down each side. [member stride] is the
 // swing (radians; 0 for a creature with no legs), [member leg_lift] the
@@ -172,8 +172,10 @@ uniform float paint_relief = 0.004;
 // Or skin painted all round a body (a whale's): paint_top alone, wrapped
 // round it by UV2 (x along the body, and how far round it from the back's
 // midline as a share of the way to the belly, -1 on one flank to 1 on the
-// other); the box is then x of the tail end, -1, the length and 2. Parts
-// with UV2.y beyond 900 (jaw, flippers) keep their plain colours.
+// other, or 0 to 1 from the back to the belly on both flanks alike); the
+// box is then x of the tail end, -1 (or 0), the length and 2 (or 1). Parts
+// with UV2.y beyond 900 either way (a jaw, flippers, legs) keep their plain
+// colours.
 uniform bool paint_wrap = false;
 // A row of glowing pores down each flank (a lateral line), for a body whose
 // UV2 carries how far along it a point is (x) and how far round from the
@@ -245,9 +247,9 @@ void vertex() {
 		NORMAL = normalize(mix(NORMAL, CUSTOM1.xyz, puff));
 	}
 	vec3 p = VERTEX + body_offset;
-	if (stride > 0.0 && UV2.y != 0.0) {
+	if (stride > 0.0 && abs(UV2.y) >= 1000.0) {
 		float side = sign(UV2.y);
-		float ph = gait + abs(UV2.y);
+		float ph = gait + abs(UV2.y) - 1000.0;
 		vec3 hip = vec3(UV.x, UV.y, UV2.x);
 		vec3 r = p - hip;
 		float swing = sin(ph) * stride * gait_amp;
@@ -434,7 +436,7 @@ void fragment() {
 	float hgt = 0.0;
 	float bare = 1.0;
 	float px = 0.5 * (length(dFdx(body_pos)) + length(dFdy(body_pos)));
-	bool painted = paint_box.z > 0.0 && !enamel && COLOR.b < 0.001 && !(paint_wrap && paint_uv.y > 900.0);
+	bool painted = paint_box.z > 0.0 && !enamel && COLOR.b < 0.001 && !(paint_wrap && abs(paint_uv.y) > 900.0);
 	if (painted) {
 		vec4 paint;
 		if (paint_wrap) {

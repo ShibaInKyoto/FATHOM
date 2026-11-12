@@ -10,6 +10,15 @@ extends Guardian
 ## tempered against the heat for a while. While it hunts it pays the vents
 ## no mind; left to patrol, it waits for a rumbling vent to blow over before
 ## crossing it. Lure it across a vent as it erupts, then strike while it burns.
+## Its model is built by [IroncladModel]. It walks its seven pairs of legs in
+## a ripple down each side, in time with its pace, the body bobbing a little
+## with each step and chewing as it goes, feeling about with its long
+## feelers; it turns round on the spot through the depth, rears up on its
+## hind legs with its front legs pawing and its mandibles agape, and crushes
+## down. Scalded, its shell splits open, the plates lifting over the
+## blazing flesh beneath while it shudders and scrabbles; building up to
+## spit, its plates heave and its chimneys flare. Asleep it lies low on
+## splayed legs; dead it rolls onto its back, legs curling.
 
 enum State { DORMANT, CRAWL, REAR, SLAM, SCALDED, SPIT, DEAD }
 
@@ -60,8 +69,26 @@ var _spit_cd := 3.0
 var _was_exposed := false
 var _taught_heat := false
 var _shrink := 1.0
-var _legs: MeshInstance3D
 var _shell: MeshInstance3D
+var _feelers: Array[MeshInstance3D] = []
+var _jaws: Array[MeshInstance3D] = []
+## The walk: the gait clock, how hard it walks, how far its legs fold in
+## (out, below 0); how far it has sunk down on them, and how far its shell
+## has split open.
+var _gait := 0.0
+var _gait_amp := 0.0
+var _tuck := 0.0
+var _crouch := 0.0
+var _open := 0.0
+## How far its head is raised (radians), and how fast; how far it has
+## rolled over onto its back; how wide its mandibles are open; the kick of
+## spitting.
+var _lean := 0.0
+var _lean_v := 0.0
+var _over := 0.0
+var _over_v := 0.0
+var _jaw := 0.0
+var _recoil := 0.0
 ## The lowest the body ever rides: just above the lair's lowest floor away
 ## from the fissure, so it bridges the drop instead of climbing down into it.
 var _lowest := -INF
@@ -106,42 +133,32 @@ func setup() -> void:
 
 func build_model() -> void:
 	var mat := species_material(func(m: ShaderMaterial) -> void:
-		m.set_shader_parameter(&"back_color", Color(0.2, 0.19, 0.2))
-		m.set_shader_parameter(&"belly_color", Color(0.32, 0.26, 0.22))
-		m.set_shader_parameter(&"glow_color", Color(1.0, 0.45, 0.12))
-		m.set_shader_parameter(&"glow_strength", 1.2)
-		m.set_shader_parameter(&"metallic", 0.55)
-		m.set_shader_parameter(&"roughness", 0.4)
-		m.set_shader_parameter(&"rim_strength", 0.45)
-		m.set_shader_parameter(&"body_length", 4.2)
-		m.set_shader_parameter(&"swim_amp", 0.0))
-	# Eleven overlapping plates: ridges in the profile, molten seams between
-	# them (the glow mask) that blaze when the heat cracks the shell.
-	var profile := PackedVector2Array()
-	for i in 45:
-		var t := i / 44.0
-		var plate := absf(sin(t * PI * 11.0))
-		profile.append(Vector2(t, maxf(pow(sin(t * PI), 0.55) * 1.05 * (0.86 + 0.14 * plate), 0.08)))
-	var shell := MeshKit.lathe(profile, 4.2, 18, 88, 0.62, 1.0, func(t: float, a: float) -> float:
-		var seam := 1.0 - smoothstep(0.0, 0.3, absf(sin(t * PI * 11.0)))
-		return seam if cos(a) > -0.3 and t > 0.06 and t < 0.94 else 0.0)
-	# Tail fans and a pair of long, swept antennae.
-	var uropod := MeshKit.fin(PackedVector2Array([Vector2(0, 0), Vector2(-0.9, 0.25), Vector2(-1.1, -0.05),
-		Vector2(-0.4, -0.2)]), 0.06)
-	var antenna := MeshKit.spike(0.05, 2.6, 0.0, 4)
-	_shell = add_visual(MeshKit.merge([[shell],
-		[uropod, Transform3D(Basis(Vector3.UP, 0.4), Vector3(-2.0, -0.1, 0.45))],
-		[uropod, Transform3D(Basis(Vector3.UP, -0.4), Vector3(-2.0, -0.1, -0.45))],
-		[antenna, Transform3D(Basis(Vector3.BACK, 0.35) * Basis(Vector3.UP, 0.35), Vector3(2.0, 0.1, 0.3))],
-		[antenna, Transform3D(Basis(Vector3.BACK, 0.35) * Basis(Vector3.UP, -0.35), Vector3(2.0, 0.1, -0.3))]]), mat)
-	var legs := []
-	for i in 7:
-		var x := -1.4 + i * 0.47
-		for z: float in [-0.75, 0.75]:
-			legs.append([MeshKit.spike(0.07, 0.9, 0.0, 4), Transform3D(Basis(Vector3.BACK, -PI * 0.5 - 0.35) *
-				Basis(Vector3.UP, signf(z) * 0.5), Vector3(x, -0.35, z))])
-	_legs = add_visual(MeshKit.merge(legs), mat)
-	add_eyes(Vector3(1.85, 0.2, 0.42), 0.13, Color(0.05, 0.05, 0.06), 0.0)
+		m.set_shader_parameter(&"back_color", Color(0.1, 0.095, 0.09))
+		m.set_shader_parameter(&"belly_color", Color(0.5, 0.45, 0.31))
+		m.set_shader_parameter(&"glow_color", Color(1.0, 0.42, 0.1))
+		m.set_shader_parameter(&"glow_strength", 1.6)
+		m.set_shader_parameter(&"metallic", 0.35)
+		m.set_shader_parameter(&"roughness", 0.42)
+		m.set_shader_parameter(&"rim_strength", 0.3)
+		m.set_shader_parameter(&"body_length", 4.7)
+		m.set_shader_parameter(&"swim_amp", 0.0)
+		m.set_shader_parameter(&"tooth_color", Color(0.05, 0.045, 0.04))
+		m.set_shader_parameter(&"stride", 0.3)
+		m.set_shader_parameter(&"leg_lift", 0.28)
+		m.set_shader_parameter(&"paint_top", IroncladModel.SKIN)
+		m.set_shader_parameter(&"paint_wrap", true)
+		m.set_shader_parameter(&"paint_box", IroncladModel.PAINT_BOX)
+		m.set_shader_parameter(&"paint_relief", 0.006)
+		# The long feelers quiver towards their tips.
+		m.set_shader_parameter(&"flutter_amp", 0.05)
+		m.set_shader_parameter(&"flutter_freq", 2.2)
+		m.set_shader_parameter(&"flutter_wave", 1.5))
+	_shell = add_visual(IroncladModel.mesh(), mat)
+	for sgn: float in [1.0, -1.0]:
+		var side := Vector3(1.0, 1.0, sgn)
+		_feelers.append(add_visual(IroncladModel.feeler(sgn), mat,
+			Transform3D(Basis(), IroncladModel.FEELER_ROOT * side)))
+		_jaws.append(add_visual(IroncladModel.mandible(sgn), mat, Transform3D(Basis(), IroncladModel.JAW_ROOT * side)))
 
 
 func think() -> void:
@@ -264,7 +281,12 @@ func _crawl(delta: float) -> void:
 		_stride = 0.0
 		Audio.play_at(&"plate_step", pos + Vector2(0.0, -RIDE), -4.0, 0.08)
 	var slope := clampf((want_y - pos.y) * 0.25, -0.35, 0.35)
-	facing = facing.slerp(Vector2(heading, slope * heading).normalized(), 1.0 - exp(-5.0 * delta)).normalized()
+	var want := Vector2(heading, slope * heading).normalized()
+	# Turning back, it turns round on the spot (see _turn_body), never
+	# rearing up over the top.
+	if want.x * facing.x < 0.0:
+		facing.x = -facing.x
+	facing = facing.slerp(want, 1.0 - exp(-5.0 * delta)).normalized()
 
 
 ## The loudest recent noise it can hear, or INF. The vents' roar is the
@@ -327,6 +349,9 @@ func take_damage(amount: float, from: Vector2, kind: StringName = &"") -> void:
 		deflect(from, "Its plates turn everything. Lure it into a vent's eruption to crack the shell.", 0.5)
 		return
 	super.take_damage(amount, from, kind)
+	if kind == &"vent":
+		# The heat shows in its blazing seams, not as a blow.
+		_flash = minf(_flash, 0.2)
 	var frac := hp / max_hp
 	var want := 0 if frac > 0.66 else (1 if frac > 0.33 else 2)
 	if alive and state != State.DEAD and want > phase:
@@ -362,19 +387,174 @@ func _crack() -> void:
 
 
 func _update_visuals(delta: float) -> void:
-	super._update_visuals(delta)
-	model.basis = model.basis.scaled(Vector3.ONE * SIZE * _shrink)
-	var glow := 0.4 + 0.15 * sin(_t * 1.5)
+	var speed := absf(vel.x) if state == State.CRAWL else vel.length()
+	var amp := 0.0
+	var pace := 1.0
+	var tuck := 0.0
+	var crouch := 0.0
+	var open := 0.0
+	var jaw := 0.0
+	var glow := 0.45 + 0.12 * sin(_t * 1.5)
+	match state:
+		State.DORMANT:
+			# Sunk low on splayed legs, the heat in its seams breathing slowly.
+			crouch = 1.0
+			tuck = -0.7
+			glow = 0.3 + 0.12 * sin(_t * 0.8)
+		State.CRAWL:
+			amp = clampf(speed / 2.0, 0.0, 1.0)
+			pace = 1.0 + speed * 4.0
+			jaw = 0.08 + 0.1 * maxf(sin(_t * 4.0), 0.0) * amp
+		State.REAR:
+			# Up on its hind legs, the front ones pawing, mandibles agape.
+			amp = 0.8
+			pace = 11.0
+			tuck = -0.35
+			jaw = 0.8
+			glow = 1.4
+		State.SLAM:
+			amp = 0.3
+			pace = 6.0
+			tuck = -0.5
+			jaw = 1.0
+		State.SCALDED:
+			# Scrabbling, sagging in the heat.
+			amp = 0.6
+			pace = 14.0
+			crouch = 0.45
+			tuck = -0.45
+			jaw = 0.7
+		State.SPIT:
+			# The plates heave as the pressure builds.
+			open = 0.16 + 0.1 * sin(_t * 14.0)
+			crouch = 0.25
+			tuck = -0.25
+			glow = 1.8 + 0.6 * sin(_t * 18.0)
+		State.DEAD:
+			var left := clampf(_timer / 3.0, 0.0, 1.0)
+			amp = 0.5 * left
+			pace = 5.0
+			tuck = 1.0
+			jaw = 0.5
+			glow = 0.5 * left
 	if exposed > 0.0:
+		open = maxf(open, 0.9 + 0.1 * sin(_t * 9.0))
 		glow = 3.2 + 0.9 * sin(_t * 11.0)
-	elif state == State.REAR:
-		glow = 1.4
-	elif state == State.SPIT:
-		glow = 1.8 + 0.6 * sin(_t * 18.0)
-	_shell.set_instance_shader_parameter(&"glow_boost", glow)
-	# Legs paddle while it walks.
-	var stride := clampf(absf(vel.x) / 3.0, 0.0, 1.0)
-	_legs.rotation.z = sin(_t * 9.0) * 0.18 * stride
+	_gait += delta * pace
+	var ease := 1.0 - exp(-6.0 * delta)
+	_gait_amp = lerpf(_gait_amp, amp, ease)
+	_tuck = lerpf(_tuck, tuck, ease)
+	_crouch = lerpf(_crouch, crouch, 1.0 - exp(-3.0 * delta))
+	_open = lerpf(_open, open, 1.0 - exp(-(10.0 if open > _open else 2.5) * delta))
+	_jaw = lerpf(_jaw, jaw, 1.0 - exp(-8.0 * delta))
+	_recoil = maxf(_recoil - delta * 0.6, 0.0)
+	super._update_visuals(delta)
+	var s := SIZE * _shrink
+	model.basis = model.basis.scaled(Vector3.ONE * s)
+	# Standing on the floor (RIDE below its middle), raised or lowered about
+	# its hind feet (its front feet, head down) so they stay put; sunk on its
+	# legs; bobbing with its steps; on its back, lying on its shell.
+	var turned := Basis(Vector3.UP, _yaw)
+	var pivot := Vector3(-1.5 if _lean > 0.0 else 1.6, IroncladModel.FLOOR, 0.0)
+	var lift := (turned * pivot - turned * Basis(Vector3.BACK, _lean) * pivot) * s
+	var y := -RIDE - IroncladModel.FLOOR * s - _crouch * 0.28 * s + sin(_gait * 2.0) * 0.02 * s * _gait_amp
+	y += (1.0 - cos(_over)) * 0.12 * s
+	var shake := sin(_t * 47.0) * 0.04 * s if state == State.SCALDED else 0.0
+	model.position = Vector3(shake, y, 0.0) + lift
+	for v in visuals:
+		v.set_instance_shader_parameter(&"gait", _gait)
+		v.set_instance_shader_parameter(&"gait_amp", _gait_amp)
+		v.set_instance_shader_parameter(&"leg_tuck", _tuck)
+		v.set_instance_shader_parameter(&"glow_boost", glow)
+	_shell.set_instance_shader_parameter(&"puff", _open)
+	_pose_feelers()
+	for k in 2:
+		var sgn := 1.0 if k == 0 else -1.0
+		var chew := sin(_t * 9.0 + k * PI) * 0.05 * _gait_amp if state == State.CRAWL else 0.0
+		_jaws[k].basis = Basis(Vector3.UP, -(_jaw * 0.45 + chew) * sgn)
+
+
+## Its long feelers sweep about as it walks; raised and spread as it rears,
+## laid back asleep, thrashing scalded, drooping dead.
+func _pose_feelers() -> void:
+	var raise := 0.06 + 0.06 * sin(_t * 1.7)
+	var spread := 0.05 * sin(_t * 0.9)
+	match state:
+		State.DORMANT:
+			raise = -0.08 + 0.03 * sin(_t * 0.6)
+			spread = -0.1
+		State.REAR, State.SLAM:
+			raise = 0.3
+			spread = 0.25
+		State.SCALDED:
+			raise = 0.15 + 0.2 * sin(_t * 13.0)
+			spread = 0.2 * sin(_t * 9.0)
+		State.SPIT:
+			raise = 0.12
+			spread = 0.15
+		State.DEAD:
+			raise = -0.3
+			spread = 0.3
+	for k in 2:
+		var sgn := 1.0 if k == 0 else -1.0
+		var own := sin(_t * 1.3 + k * 2.1) * 0.06
+		_feelers[k].basis = Basis(Vector3.UP, (spread + own) * sgn) * Basis(Vector3.BACK, -(raise + own * 0.5))
+
+
+## Faces its way along the floor: turning back, it turns round on the spot
+## through the depth; its head rises and falls with the floor's slope, rears
+## up and crushes down; dead, it rolls over onto its back.
+func _turn_body(delta: float) -> void:
+	if facing.x < -0.2:
+		_yaw_target = -PI
+	elif facing.x > 0.2:
+		_yaw_target = 0.0
+	var lean := _lean_target()
+	var over := PI if state == State.DEAD else 0.0
+	if is_nan(_elev) or delta <= 0.0:
+		_elev = 0.0
+		_yaw = _yaw_target
+		_yaw_v = 0.0
+		_lean = lean
+		_lean_v = 0.0
+		_over = over
+		_over_v = 0.0
+	else:
+		var y := _spring(_yaw, _yaw_v, _yaw_target, 5.0, delta)
+		_yaw = y.x
+		_yaw_v = y.y
+		var l := _spring(_lean, _lean_v, lean, 18.0 if state == State.SLAM else 7.0, delta)
+		_lean = l.x
+		_lean_v = l.y
+		var o := _spring(_over, _over_v, over, 2.5, delta)
+		_over = o.x
+		_over_v = o.y
+	model.basis = Basis(Vector3.UP, _yaw) * Basis(Vector3.BACK, _lean) * Basis(Vector3.RIGHT, _over)
+
+
+## How far its head should be raised now.
+func _lean_target() -> float:
+	var elev := atan2(facing.y, absf(facing.x))
+	match state:
+		State.REAR:
+			return clampf(elev * 0.5 + 0.3, 0.25, 0.65)
+		State.SLAM:
+			return clampf(atan2(_slam_dir.y, absf(_slam_dir.x)) - 0.3, -0.45, 0.7)
+		State.SPIT:
+			return clampf(elev * 0.5, -0.2, 0.45) + _recoil
+		State.DEAD, State.DORMANT:
+			return 0.0
+	return clampf(elev, -0.45, 0.5) + _recoil
+
+
+## Shown as a specimen (the codex): up on its legs, its shell shut.
+func reveal() -> void:
+	state = State.CRAWL
+	_crouch = 0.0
+	_tuck = 0.0
+	_gait_amp = 0.0
+	_elev = NAN
+	_update_visuals(0.0)
 
 
 func _awaken() -> void:
@@ -400,9 +580,13 @@ func _slam() -> void:
 	level.emit_noise(pos, 14.0, self)
 
 
-## Where the scalding water leaves its shell.
+## Where the scalding water leaves its shell: the mouth of its tallest
+## chimney.
 func _spout() -> Vector2:
-	return pos + Vector2(0.0, 1.4 * SIZE)
+	if model == null:
+		return pos + Vector2(0.0, 1.4 * SIZE)
+	var mouth := model.transform * IroncladModel.chimney_mouth(0)
+	return pos + Vector2(mouth.x, mouth.y)
 
 
 func _begin_spit() -> void:
@@ -420,7 +604,9 @@ func _spit() -> void:
 	if sub == null or not sub.alive:
 		return
 	var aim := (sub.pos - _spout()).normalized()
+	_recoil = 0.18
 	Audio.play_at(&"vent_erupt", pos, -2.0, 0.05, 1.5)
+	Fx.silt(level, _spout(), 1.2, Color(1.0, 0.55, 0.25))
 	for i in phase + 1:
 		var glob := ScaldGlob.new()
 		glob.pos = _spout()

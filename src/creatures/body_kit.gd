@@ -9,6 +9,9 @@ extends RefCounted
 ## the body bends it turns with that section as one rigid piece instead of
 ## being bent along its own length (see [method placed]).
 
+## A walking leg's mark in UV2.y (see [method legged]).
+const LEG_MARK := 1000.0
+
 
 ## A body lofted through [param stations], each [x, half width, height above
 ## the spine, depth below it, spine height] (x from tail to nose), smoothly
@@ -287,7 +290,7 @@ static func morph(from: ArrayMesh, to: ArrayMesh) -> ArrayMesh:
 ## [param mesh] (a leg, in model space) marked as a walking leg for
 ## creature.gdshader: hinged at [param hip], on side [param side] (+1 or -1)
 ## at [param phase] (radians) in the gait. It hangs from its hip's place on
-## the spine.
+## the spine. (UV2.y: the side times [constant LEG_MARK] plus the phase.)
 static func legged(mesh: ArrayMesh, hip: Vector3, phase: float, side: float) -> ArrayMesh:
 	var arrays := mesh.surface_get_arrays(0)
 	var n := (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
@@ -296,7 +299,7 @@ static func legged(mesh: ArrayMesh, hip: Vector3, phase: float, side: float) -> 
 	uv.resize(n)
 	uv2.resize(n)
 	uv.fill(Vector2(hip.x, hip.y))
-	uv2.fill(Vector2(hip.z, side * (1.0 + fposmod(phase, TAU))))
+	uv2.fill(Vector2(hip.z, side * (LEG_MARK + fposmod(phase, TAU))))
 	arrays[Mesh.ARRAY_TEX_UV] = uv
 	arrays[Mesh.ARRAY_TEX_UV2] = uv2
 	var out := ArrayMesh.new()
