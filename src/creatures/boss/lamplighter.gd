@@ -522,7 +522,10 @@ func behave(delta: float) -> void:
 					_swallow_flare()
 		State.DAZZLED:
 			lock_facing = true
-			vel = vel.lerp(-facing * 2.5, 1.0 - exp(-2.0 * delta))
+			# Reeling from the light: a jolt back as it strikes her, then she
+			# hangs there dazed, sinking a little, until she shakes it off.
+			var reel := exp(-(DAZZLE_TIME[phase] - _timer) * 3.0)
+			vel = vel.lerp(-facing * 2.5 * reel + Vector2(0.0, -0.35), 1.0 - exp(-3.0 * delta))
 			jaw_target = 0.85 + 0.15 * sin(_t * 11.0)
 			lure_target = 0.3 + 0.7 * absf(sin(_t * 17.0))
 			if _timer <= 0.0:

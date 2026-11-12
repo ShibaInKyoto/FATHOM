@@ -220,14 +220,14 @@ func behave(delta: float) -> void:
 				_target = wander_point(pos, 10.0)
 		State.WINDUP:
 			_timer -= delta
-			# Track the target while winding up, drifting backwards slightly.
+			# Track the target while winding up, coiling back a little.
 			if is_instance_valid(_prey) and _prey.alive:
 				_target = _prey.pos
 			elif level.player and level.player.alive:
 				_target = level.player.pos
 			var to := (_target - pos).normalized()
 			_turn_towards(to, 10.0, delta)
-			vel = vel.lerp(-to * 1.5, 1.0 - exp(-4.0 * delta))
+			vel = vel.lerp(-to * 0.7, 1.0 - exp(-4.0 * delta))
 			_set_glow(1.0 + (1.0 - _timer / WINDUP_TIME) * 3.0)
 			if _timer <= 0.0:
 				state = State.DASH

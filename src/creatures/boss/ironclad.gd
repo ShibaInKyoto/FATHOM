@@ -403,7 +403,9 @@ func _update_visuals(delta: float) -> void:
 			glow = 0.3 + 0.12 * sin(_t * 0.8)
 		State.CRAWL:
 			amp = clampf(speed / 2.0, 0.0, 1.0)
-			pace = 1.0 + speed * 4.0
+			# A step for every 1.1 m or so it walks (as far as its feet
+			# sweep), so its feet stay planted on the floor.
+			pace = 0.4 + speed * 2.8
 			jaw = 0.08 + 0.1 * maxf(sin(_t * 4.0), 0.0) * amp
 		State.REAR:
 			# Up on its hind legs, the front ones pawing, mandibles agape.

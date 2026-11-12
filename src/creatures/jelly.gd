@@ -24,6 +24,9 @@ const OUTER := [Vector2(TOP_X, 0.0), Vector2(0.985, 0.2), Vector2(0.93, 0.45), V
 ## Pulses a second, and the bell squeeze over one (0..1 of the cycle): it
 ## snaps shut in the first third and relaxes over the rest.
 const PULSE_RATE := 2.2 / TAU
+## The share of each pulse its bell spends snapping shut (the stroke that
+## drives it).
+const SQUEEZE := 0.28
 
 var _pulse_t := 0.0
 var _drift := Vector2.ZERO
@@ -240,8 +243,7 @@ static func _revolve(profile: Array, sides: int) -> ArrayMesh:
 
 func behave(delta: float) -> void:
 	_pulse_t += delta
-	var pulse := maxf(sin(_pulse_t * 2.2), 0.0)
-	var desired := _drift + Vector2(0, pulse * 1.2 - 0.2)
+	var desired := _drift + Vector2(0.0, -0.12)
 	var sub := level.player
 	if sub and sub.illuminates(pos, 2.0) and pos.distance_to(sub.pos) < 16.0:
 		desired += (sub.pos - pos).normalized() * 1.4
@@ -249,6 +251,10 @@ func behave(delta: float) -> void:
 	if flare:
 		desired += (flare.pos - pos).normalized() * 1.8
 	steer(desired, 0.8, delta)
+	# Each squeeze of its bell drives it up (as the bell is drawn: see
+	# _update_visuals); between squeezes it coasts, and sinks back a little.
+	if fposmod(_pulse_t * PULSE_RATE, 1.0) < SQUEEZE:
+		vel.y += 1.6 * delta
 	if level.field.sample(pos) < radius + 1.5:
 		var n := level.field.normal(pos)
 		if _drift.dot(n) < 0.0:
@@ -286,7 +292,7 @@ func _update_visuals(delta: float) -> void:
 	super._update_visuals(delta)
 	# The bell snaps shut as the pulse drives it up, then slowly relaxes.
 	var cycle := fposmod(_pulse_t * PULSE_RATE, 1.0)
-	var squeeze := smoothstep(0.0, 0.28, cycle) if cycle < 0.28 else 1.0 - smoothstep(0.28, 0.95, cycle)
+	var squeeze := smoothstep(0.0, SQUEEZE, cycle) if cycle < SQUEEZE else 1.0 - smoothstep(SQUEEZE, 0.95, cycle)
 	# The tentacles trail behind as it drifts (the model's +Y is the world's
 	# left: see Creature.upright).
 	var trail := clampf(vel.x * 0.07, -0.14, 0.14)

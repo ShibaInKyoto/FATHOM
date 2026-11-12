@@ -322,7 +322,9 @@ func _update_visuals(delta: float) -> void:
 	match state:
 		State.CRAWL:
 			amp = clampf(speed / 1.2, 0.0, 1.0)
-			_gait += delta * (1.5 + speed * 7.0)
+			# A step for every 0.19 m or so it crawls (as far as its feet
+			# sweep), so its feet stay planted on the rock.
+			_gait += delta * (1.0 + speed * 15.5)
 		State.LEAP:
 			amp = 0.25
 			_gait += delta * 4.0

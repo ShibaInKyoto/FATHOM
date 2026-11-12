@@ -31,6 +31,9 @@ var _flare: Flare
 var _announced := false
 var _jaw: MeshInstance3D
 var _t := 0.0
+## Where it wants to go: it turns its body that way and swims the way it
+## points (see [method steer]).
+var _want := Vector2.ZERO
 
 
 ## How close this Stalker is to attacking (0 calm .. 1 hunting), for the
@@ -60,6 +63,7 @@ func setup() -> void:
 	flex = 1.0
 	body_span = BODY_LENGTH
 	super.setup()
+	lock_facing = true
 	_target = _patrol_point()
 
 
@@ -254,6 +258,9 @@ func behave(delta: float) -> void:
 			if _timer <= 0.0:
 				state = State.PATROL
 				_target = _patrol_point()
+	# It turns at its own pace towards where it wants to go.
+	if _want.length_squared() > 0.04:
+		_turn_towards(_want.normalized(), _turn_speed, delta)
 	# Even at rest the mouth hangs a little open, the teeth showing.
 	_jaw.rotation.z = lerpf(_jaw.rotation.z, -(jaw_open + REST_GAPE), 1.0 - exp(-8.0 * delta))
 
@@ -264,8 +271,26 @@ func on_touch_player(sub: Submarine) -> void:
 	_bite_cooldown = 1.6
 	sub.take_damage(contact_damage, pos, self)
 	Audio.play_at(&"stalker_bite", pos, 2.0)
-	# Peel away after a bite so the player has a window to react.
-	vel = (pos - sub.pos).normalized() * 6.0
+	# Pushes off after a bite (and has to come round again), so the player
+	# has a window to react.
+	vel = (pos - sub.pos).normalized() * 3.0
+
+
+## A beast this size swims the way it points: wanting to go another way, it
+## turns its body first, and drives through the water only as far as its
+## body points that way (barely at all mid-turn, as it swings round through
+## the depth); its fins steer it a little whatever way it points.
+func steer(desired: Vector2, agility: float, delta: float) -> void:
+	desired += avoid_walls(desired) * maxf(desired.length(), 2.0)
+	_want = desired
+	var speed := desired.length()
+	var b := model.global_basis.x.normalized() if model else Vector3(facing.x, facing.y, 0.0)
+	# Seen side on, its body shortens as it turns towards the camera.
+	var body := Vector2(b.x, b.y)
+	var drive := Vector2.ZERO
+	if speed > 0.001 and body.length() > 0.05:
+		drive = body * maxf(body.normalized().dot(desired / speed), 0.0) * speed
+	vel = vel.lerp(drive.lerp(desired, 0.2), 1.0 - exp(-agility * delta))
 
 
 func on_damaged(amount: float, from: Vector2) -> void:
