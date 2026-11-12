@@ -16,6 +16,8 @@ const POWER_GRACE := 10.0
 const AIM_TURN_RATE := 12.0
 ## How far out along the aim a gamepad's crosshair sits.
 const RETICLE_REACH := 9.0
+## Directions round the hull its outline is measured in (see [method hull_reach]).
+const HULL_DIRECTIONS := 72
 
 var level: Level
 var run: RunState
@@ -60,6 +62,11 @@ var _mouse_point := Vector2.INF
 var _beam_mesh: CylinderMesh
 
 var _yaw := 0.0
+## How far the hull (equipment and all) reaches from the model's origin in
+## each of [constant HULL_DIRECTIONS] directions round it, seen side on (its
+## own X and Y) and seen nose on (its Z and Y). Measured when first needed.
+var _side_reach := PackedFloat32Array()
+var _end_reach := PackedFloat32Array()
 var _invulnerable := 0.0
 var _since_damage := 99.0
 var _noise_timer := 0.0
@@ -191,6 +198,70 @@ func launch_point(id: StringName, reach: float) -> Vector2:
 
 func set_camera(cam: Camera3D) -> void:
 	_camera = cam
+
+
+## How far from [member pos] the hull reaches towards [param dir] (a unit
+## vector in the play plane), as the sub is turned and tilted right now: what
+## an oncoming wave touches first.
+func hull_reach(dir: Vector2) -> float:
+	if _side_reach.is_empty():
+		_measure_hull()
+	if model == null:
+		return _sample_reach(_side_reach, dir)
+	var xf := model.transform
+	var local := xf.basis.inverse() * Vector3(dir.x, dir.y, 0.0)
+	# Side on, or (part way through turning round) nose on.
+	var end := clampf(local.z * local.z / maxf(local.length_squared(), 1e-6), 0.0, 1.0)
+	var side := _sample_reach(_side_reach, Vector2(local.x, local.y))
+	var nose := _sample_reach(_end_reach, Vector2(local.z, local.y))
+	var scale := xf.basis.get_scale().x
+	return maxf(lerpf(side, nose, end) * scale + Vector3(dir.x, dir.y, 0.0).dot(xf.origin), RADIUS * 0.5)
+
+
+static func _sample_reach(table: PackedFloat32Array, d: Vector2) -> float:
+	if d.length_squared() < 1e-8:
+		return table[0]
+	var g := fposmod(d.angle(), TAU) / TAU * HULL_DIRECTIONS
+	var k := int(g) % HULL_DIRECTIONS
+	return lerpf(table[k], table[(k + 1) % HULL_DIRECTIONS], g - floorf(g))
+
+
+## Measures the hull's outline, side on and nose on, from the convex hulls
+## of the model's meshes.
+func _measure_hull() -> void:
+	var side := PackedVector2Array()
+	var end := PackedVector2Array()
+	if model and model.is_inside_tree():
+		var to_model := model.global_transform.affine_inverse()
+		for mi: MeshInstance3D in model.find_children("*", "MeshInstance3D", true, false):
+			if mi.mesh == null or not mi.is_visible_in_tree():
+				continue
+			var xf := to_model * mi.global_transform
+			var shape := mi.mesh.create_convex_shape(true, false)
+			for p: Vector3 in shape.points:
+				var q := xf * p
+				side.append(Vector2(q.x, q.y))
+				end.append(Vector2(q.z, q.y))
+	if side.size() < 3:
+		# No model to measure (headless tests): a hull as long as the
+		# collision circle is round, a little flatter than it is long.
+		for i in 16:
+			var a := TAU * i / 16.0
+			side.append(Vector2(cos(a) * RADIUS * 1.4, sin(a) * RADIUS * 0.6))
+			end.append(Vector2(cos(a) * RADIUS * 0.6, sin(a) * RADIUS * 0.6))
+	_side_reach = _reach_table(Geometry2D.convex_hull(side))
+	_end_reach = _reach_table(Geometry2D.convex_hull(end))
+
+
+static func _reach_table(outline: PackedVector2Array) -> PackedFloat32Array:
+	var table := PackedFloat32Array()
+	for i in HULL_DIRECTIONS:
+		var d := Vector2.from_angle(TAU * i / HULL_DIRECTIONS)
+		var best := -INF
+		for p in outline:
+			best = maxf(best, p.dot(d))
+		table.append(best)
+	return table
 
 
 func tick(delta: float) -> void:

@@ -63,7 +63,7 @@ func direct(_dt: float) -> void:
 		sub.aim = (_choir.pos - sub.pos).normalized()
 	if _film:
 		# Filmed, it answers each wave as it arrives.
-		var eta := _choir.next_arrival(sub.pos)
+		var eta := _choir.next_arrival(sub.pos, sub)
 		if eta < 0.15 and eta > -0.2 and t >= _ping_at:
 			_ping_at = t + 0.5
 			sub.sonar_cooldown = 0.0

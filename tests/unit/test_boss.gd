@@ -49,7 +49,7 @@ func test_boss_is_winnable() -> void:
 	for i in 60 * 240:
 		run.hull = sub.stats.max_hull
 		var boss := level.boss
-		if boss.active and boss.next_arrival(sub.pos) < 0.1:
+		if boss.active and boss.next_arrival(sub.pos, sub) < 0.1:
 			sub.try_ping()
 		if boss.vulnerable > 0.0:
 			answered_any = true
@@ -88,7 +88,7 @@ func test_answered_waves_cost_no_battery() -> void:
 	var before := 0.0
 	for i in 60 * 30:
 		var boss := level.boss
-		if boss.active and boss.next_arrival(sub.pos) < 0.1 and sub.sonar_cooldown <= 0.0:
+		if boss.active and boss.next_arrival(sub.pos, sub) < 0.1 and sub.sonar_cooldown <= 0.0:
 			before = run.battery
 			sub.try_ping()
 		var was := boss.vulnerable
@@ -122,7 +122,7 @@ func _answer_for(level: Level, sub: Submarine, run: RunState, seconds: float, st
 			return
 		run.hull = sub.stats.max_hull
 		var boss := level.boss
-		if boss.active and boss.next_arrival(sub.pos) < 0.1:
+		if boss.active and boss.next_arrival(sub.pos, sub) < 0.1:
 			sub.try_ping()
 		strike.call(boss)
 		sub.tick(DT)
@@ -177,7 +177,7 @@ func test_a_rising_tentacle_slams_a_sub_that_stays_on_its_line() -> void:
 	var hit := false
 	for i in int(16.0 / DT):
 		# Answer everything, so only a slam can hurt.
-		if boss.next_arrival(sub.pos) < 0.1:
+		if boss.next_arrival(sub.pos, sub) < 0.1:
 			sub.try_ping()
 		var before := run.hull
 		sub.pos = boss.pos + Vector2(0.0, -14.0)

@@ -40,10 +40,10 @@ func _draw() -> void:
 		draw_arc(reticle, 21.0, 0.0, TAU, 40, Color(col, 0.18), 1.5, true)
 
 	# The Choir's approaching song wave: a ring closing in on the submarine.
-	# Ping when it meets the inner circle.
+	# Ping when it meets the inner circle: just as the wave touches the hull.
 	var boss := hud.level.boss
 	if boss and boss.active:
-		var eta := boss.next_arrival(sub.pos)
+		var eta := boss.next_arrival(sub.pos, sub)
 		if eta < 1.4:
 			var k := clampf(eta / 1.4, 0.0, 1.0)
 			var good := absf(eta) < 0.25

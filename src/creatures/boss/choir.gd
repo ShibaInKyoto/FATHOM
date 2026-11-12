@@ -38,6 +38,11 @@ const ANSWER_GAP := 1.2
 const SUMMON_CLEARANCE := 16.0
 const SUMMON_DAZE := 1.5
 const RING_SHADER := preload("res://src/fx/shaders/song_ring.gdshader")
+## A song wave's glowing band: how wide it is (metres either side of its
+## front), and how far ahead of its front its glow reaches, which is where
+## it touches the sub.
+const RING_BAND := 0.4
+const RING_LEAD := 0.45
 ## Per phase (organs destroyed): seconds between waves, wave speed, chance of a double wave.
 const INTERVAL: Array[float] = [3.6, 3.2, 2.8, 2.5]
 const SPEED: Array[float] = [13.0, 14.5, 16.0, 17.5]
@@ -277,11 +282,11 @@ func _crowds(origin: Vector2, speed: float) -> bool:
 	var sub := level.player
 	if sub == null:
 		return false
-	var eta := sub.pos.distance_to(origin) / speed
+	var eta := _gap(sub, origin) / speed
 	for w in _waves:
 		if w.resolved:
 			continue
-		var d := sub.pos.distance_to(w.origin)
+		var d := _gap(sub, w.origin)
 		var other: float = w.arrived - level.time if w.deadline >= 0.0 else (d - w.radius) / w.speed
 		if absf(eta - other) < ANSWER_GAP:
 			return true
@@ -350,7 +355,7 @@ func _emit_wave(speed: float, origin := Vector2.INF) -> void:
 	mi.top_level = true
 	add_child(mi)
 	mi.global_position = Vector3(origin.x, origin.y, 0.4)
-	mi.scale = Vector3.ONE * 0.5
+	mi.scale = Vector3.ONE * (0.5 + RING_BAND * 4.0)
 	_waves.append({"radius": 0.5, "speed": speed, "resolved": false, "arrived": 0.0, "deadline": -1.0, "mesh": mi,
 			"mat": mat, "origin": origin})
 	_beat = 1.0
@@ -367,11 +372,16 @@ func _update_waves(delta: float) -> void:
 	for w in _waves.duplicate():
 		w.radius += w.speed * delta
 		var mi: MeshInstance3D = w.mesh
-		mi.scale = Vector3.ONE * w.radius
+		# The quad holds the band and its glow; the band's front lies at the
+		# wave's radius, as wide in metres whatever its size.
+		var span: float = w.radius + RING_BAND * 4.0
+		mi.scale = Vector3.ONE * span
+		(w.mat as ShaderMaterial).set_shader_parameter(&"front", w.radius / span)
+		(w.mat as ShaderMaterial).set_shader_parameter(&"band", RING_BAND / span)
 		var fade := clampf(1.0 - (w.radius - arena_radius * (1.0 if w.origin == pos else 1.8)) / 25.0, 0.0, 1.0)
 		(w.mat as ShaderMaterial).set_shader_parameter(&"intensity", 2.2 * fade)
 		if not w.resolved and sub and sub.alive and not _done:
-			if w.deadline < 0.0 and w.radius >= sub.pos.distance_to(w.origin):
+			if w.deadline < 0.0 and w.radius >= _gap(sub, w.origin):
 				# The wave arrives: a ping just before it counts as an answer...
 				if now - _last_ping <= ANSWER_EARLY * Settings.timing_window_mult():
 					_answer(w)
@@ -428,18 +438,28 @@ func _miss(w: Dictionary) -> void:
 
 
 ## Predicted seconds until the next unresolved wave reaches [param p]
-## (negative inside the late-answer window), or INF if none is coming.
-func next_arrival(p: Vector2) -> float:
+## (negative inside the late-answer window), or INF if none is coming. With
+## [param sub], until its glow touches the sub's hull (the moment to answer,
+## kept as the sub moves and turns).
+func next_arrival(p: Vector2, sub: Submarine = null) -> float:
 	var best := INF
 	for w in _waves:
 		if w.resolved:
 			continue
-		var d := p.distance_to(w.origin)
+		var d := _gap(sub, w.origin) if sub else p.distance_to(w.origin)
 		if w.deadline >= 0.0:
 			best = minf(best, w.arrived - level.time)
 		elif w.radius < d:
 			best = minf(best, (d - w.radius) / w.speed)
 	return best
+
+
+## How far a wave from [param origin] still has to spread before its glow
+## touches [param sub]'s hull, from where it starts.
+func _gap(sub: Submarine, origin: Vector2) -> float:
+	var to := origin - sub.pos
+	var d := to.length()
+	return d - sub.hull_reach(to / d if d > 0.001 else Vector2.RIGHT) - RING_LEAD
 
 
 func on_organ_destroyed(organ: ChoirOrgan) -> void:

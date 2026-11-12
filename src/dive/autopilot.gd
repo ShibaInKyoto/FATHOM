@@ -237,7 +237,7 @@ func _fight_boss() -> void:
 	if boss.part != _choir_part:
 		_choir_part = boss.part
 		print("AUTOPILOT: the Choir's song reached part %d at %.1f s, hull %.0f" % [boss.part, _elapsed, sub.run.hull])
-	var eta := boss.next_arrival(sub.pos)
+	var eta := boss.next_arrival(sub.pos, sub)
 	if eta < 0.12:
 		sub.try_ping()
 	# The nearest organ in sight whose standoff point (9 m off it) the hull can
