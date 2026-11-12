@@ -2,10 +2,15 @@ extends "res://tools/debug/preview_stage.gd"
 ## Debug helper: wakes the Lamplighter in the reef lair and saves screenshots
 ## of her lure in the dark, the lure going dark before a charge, and her
 ## dazzled by the lamp.
-## Usage: xvfb-run godot --path . res://tools/debug/preview_lamplighter.tscn -- <out_dir>
+## Usage: xvfb-run godot --path . res://tools/debug/preview_lamplighter.tscn -- <out_dir> [film]
+## "film" instead saves every frame for fifteen seconds as she goes through
+## her moods, side on: stalking, winding up and charging, dazzled (eyes
+## squeezed shut), guarding (eyes narrowed), and lurking with her lure dark.
 
 var _angler: Lamplighter
 var _far := Vector2.ZERO
+var _film := false
+var _beat := 0
 
 
 func _ready() -> void:
@@ -17,10 +22,17 @@ func _ready() -> void:
 	add_hud()
 	shot_prefix = "angler"
 	_angler.take_damage(0.1, _angler.pos)
+	_film = OS.get_cmdline_user_args().size() > 1 and OS.get_cmdline_user_args()[1] == "film"
+	if _film:
+		for i in 450:
+			shot_times.append(0.5 + i / 30.0)
 
 
 func direct(_dt: float) -> void:
 	sub.run.hull = sub.stats.max_hull
+	if _film:
+		_direct_film()
+		return
 	var n := shots_taken()
 	if n < 2:
 		sub.pos = _far
@@ -37,3 +49,30 @@ func direct(_dt: float) -> void:
 		shoot()
 	if shots_taken() >= 3 or t > 30.0:
 		get_tree().quit()
+
+
+## The film: the sub holds still, dark, well off to one side; she is put
+## through each of her moods in turn.
+func _direct_film() -> void:
+	sub.lamp_on = false
+	sub.vel = Vector2.ZERO
+	sub.pos = _angler.pos + Vector2(-14.0, 3.0)
+	sub.aim = (_angler.pos - sub.pos).normalized()
+	var a := _angler
+	var beats := [3.0, 5.4, 9.0, 11.5]
+	if _beat < beats.size() and t >= beats[_beat]:
+		match _beat:
+			0:
+				a.call(&"_begin_windup")
+			1:
+				a.call(&"_be_dazzled")
+			2:
+				a.call(&"_recover", 0.5)
+				a.raise_guard()
+			3:
+				a.call(&"_begin_lurk")
+		_beat += 1
+	if a.state == Lamplighter.State.STALK and _beat == 0:
+		a.set(&"_cooldown", 1.0)
+	if a.state == Lamplighter.State.STALK and _beat >= 3:
+		a.set(&"_cooldown", 1.0)

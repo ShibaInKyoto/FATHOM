@@ -10,6 +10,9 @@ extends Node3D
 ## the same way (a school is startled half way through).
 ## Usage: xvfb-run godot --path . res://tools/debug/preview_creature.tscn -- <out.png> <species>
 ## [sheet|swim|game|gameclip|stroke|clip|turnclip|wall|wallclip|wallgame] [biome index] [backdrop]
+## "moodclip" films a guardian held in place while it goes through its
+## moods (the Lamplighter: stalking, winding up and charging, dazzled,
+## guarding, lurking).
 ## "turnclip" films one swimming right, turning back left and back right
 ## again, side on, to judge how it turns. "close" looks at the front half of
 ## one from close by, at an angle round it: [yaw] [pitch] in degrees after
@@ -95,7 +98,7 @@ func _ready() -> void:
 	var count := 4
 	if _mode == "sheet":
 		count = 3
-	elif _mode == "game" or _mode == "turnclip" or _mode == "close":
+	elif _mode == "game" or _mode == "turnclip" or _mode == "close" or _mode == "moodclip":
 		count = 1
 	elif _mode == "clip":
 		count = 2
@@ -163,6 +166,12 @@ func _ready() -> void:
 		# A drifter hangs below its bell: frame the whole of it.
 		cam.position.y -= span * 0.3
 		cam.position.z *= 0.8
+	if _mode == "moodclip":
+		# A guardian put through its moods, seen three-quarter on.
+		var whole := Vector3(origin.x + span * 0.35, origin.y + span * 0.15, 0.0)
+		var eye := whole + Basis(Vector3.UP, deg_to_rad(28.0)) * Basis(Vector3.RIGHT, deg_to_rad(-8.0)) \
+			* Vector3(0.0, 0.0, span * 2.6)
+		cam.transform = Transform3D(Basis.looking_at(whole - eye, Vector3.UP), eye)
 	if _mode == "close":
 		# Close on the front half, from an angle round it (yaw, pitch).
 		var yaw := float(args[4]) if args.size() > 4 and args[4].is_valid_float() else 30.0
@@ -240,6 +249,9 @@ func _process(_delta: float) -> void:
 		cam.position = Vector3(_school.pos.x, _school.pos.y, cam.position.z)
 	for i in _crits.size():
 		var c := _crits[i]
+		if _mode == "moodclip":
+			_moods(c, dt)
+			continue
 		if _mode == "swim":
 			c.facing = c.facing.rotated(_turns[i] * dt)
 		c.vel = c.facing * (0.4 if c.upright else SPEED)
@@ -299,6 +311,8 @@ func _process(_delta: float) -> void:
 ## How many frames a clip runs: longer for the slow (a manta's beat and
 ## glide, a lure's patient wait, a colony's drift).
 func _clip_frames() -> int:
+	if _mode == "moodclip":
+		return CLIP_FRAMES * 4
 	if not _crits.is_empty() and _crits[0] is Manta:
 		return CLIP_FRAMES * 3
 	return CLIP_FRAMES * 2 if _dweller is Lurelight or _colony else CLIP_FRAMES
@@ -442,3 +456,39 @@ func _frame_colony() -> void:
 		var mid := at + pts[8] + Vector3(0.0, -1.0, 0.0)
 		cam.position = mid + Vector3(0.0, 0.0, 30.0)
 		cam.look_at(mid, Vector3.UP)
+
+
+## A guardian's moods, one after another, its behaviour running but held
+## where it is (its speed still drives its stroke).
+func _moods(c: Creature, dt: float) -> void:
+	var t := _frames * dt
+	var home: Vector2 = c.get_meta(&"home", c.pos)
+	c.set_meta(&"home", home)
+	if c is Lamplighter:
+		var a := c as Lamplighter
+		a.active = true
+		var beats := [0.5, 3.0, 6.0, 9.8, 13.0]
+		var beat: int = c.get_meta(&"beat", 0)
+		if beat < beats.size() and t >= beats[beat]:
+			match beat:
+				0:
+					a.state = Lamplighter.State.STALK
+					a.set(&"_lurk_in", INF)
+				1:
+					a.call(&"_begin_windup")
+				2:
+					a.call(&"_be_dazzled")
+				3:
+					a.call(&"_recover", 0.3)
+					a.raise_guard()
+				4:
+					a.call(&"_begin_lurk")
+			c.set_meta(&"beat", beat + 1)
+		# Nothing to look at but its own moods.
+		a.set(&"_cooldown", 1.0)
+		a.facing = Vector2.RIGHT if a.state != Lamplighter.State.CHARGE else a.facing
+	c.behave(dt)
+	c.pos = home
+	# Held facing the one way, its speed still driving its stroke.
+	c.vel = Vector2.RIGHT * c.vel.length()
+	c._update_visuals(dt)
