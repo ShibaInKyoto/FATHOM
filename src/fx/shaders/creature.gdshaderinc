@@ -175,6 +175,12 @@ uniform float paint_relief = 0.004;
 // other); the box is then x of the tail end, -1, the length and 2. Parts
 // with UV2.y beyond 900 (jaw, flippers) keep their plain colours.
 uniform bool paint_wrap = false;
+// A row of glowing pores down each flank (a lateral line), for a body whose
+// UV2 carries how far along it a point is (x) and how far round from the
+// flank's midline (y, in the same units): how far the row is off the
+// midline, how far apart the pores are, how big, and how bright (0 for
+// none). They glow with the instance's glow_boost.
+uniform vec4 pores = vec4(0.0);
 // Light from the surface far above (0 for none): something big in the
 // sunlit blue (a whale) is lit along its back and dark beneath, so it reads
 // against the dark rock behind it, tinted by the water.
@@ -482,6 +488,12 @@ void fragment() {
 	vec2 sonar = sonar_sample(world_pos.xy);
 	emission += sonar_color.rgb * (sonar.x * 4.0 * (0.4 + fres) + marked * fres * 1.6);
 	emission += vec3(1.0, 0.85, 0.8) * hit_flash * 2.5;
+	// (Only where the mesh says where its pores lie: UV2.x is how far along.)
+	if (pores.w > 0.0 && !enamel && paint_uv.x > 0.0) {
+		float da = (fract(paint_uv.x / pores.y + 0.5) - 0.5) * pores.y;
+		float pore = 1.0 - smoothstep(pores.z * 0.45, pores.z, length(vec2(da, abs(paint_uv.y) - pores.x)));
+		emission += glow_color.rgb * pore * pores.w * glow_boost * pulse;
+	}
 	if (sky_light > 0.0) {
 		float up = (INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).y;
 		emission += ALBEDO * sky_tint.rgb * sky_light * (0.2 + 0.8 * smoothstep(-0.35, 1.0, up));

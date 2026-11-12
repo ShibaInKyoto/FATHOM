@@ -7,6 +7,18 @@ extends Guardian
 ## everything. Once she has torn free she is wary of the rock for a while:
 ## her next lunges glance off it. Ping beside a wall, slip away quietly - or
 ## fire a torpedo across the lair and let her chase the blast.
+## A colossal cave eel, pale as something that has never seen light: her
+## skin ghostly grey-white and wrinkled, her eyes milky and skinned over, a
+## pair of long feelers trailing from her snout by its tube nostrils. Down
+## each flank runs the line of pores she listens with, glowing faintly, and
+## flaring when she hears something. Behind her head four gill slits each
+## side, their flaps shut over glowing gills; they breathe a little as she
+## prowls, flare as she listens, and gape wide, the gills blazing, when she
+## is wedged in the rock. A ribbon fin runs down her back and her belly to a
+## leaf of a tail. She swims in slow waves that run down her whole length;
+## listening, she draws her head back into an S and her jaw falls open;
+## lunging she straightens and gapes; wedged, she thrashes; dead, she rolls
+## belly up as she sinks.
 
 enum State { DORMANT, PROWL, AIM, LUNGE, STUCK, RECOVER, DEAD }
 
@@ -14,6 +26,31 @@ const SEGMENTS := 32
 const SPACING := 1.15
 ## Model scale: she dwarfs everything else in the trench.
 const SIZE := 1.6
+## Model space (before [constant SIZE]): x from the neck, where the body
+## joins, to the snout. Stations as in [method BodyKit.body]: a deep,
+## muscular head tapering to a long snout, its underside cut away in front
+## by the mouth.
+const NECK_X := -1.0
+const NECK_R := 1.3
+const HEAD := [[NECK_X, NECK_R, NECK_R, NECK_R, 0.0], [-0.4, 1.16, 1.42, 1.2, 0.06], [0.3, 1.0, 1.4, 0.92, 0.1],
+	[1.0, 0.84, 1.18, 0.6, 0.11], [1.7, 0.64, 0.9, 0.38, 0.08], [2.3, 0.42, 0.58, 0.25, 0.04],
+	[2.75, 0.2, 0.29, 0.14, 0.0], [2.93, 0.04, 0.05, 0.04, -0.02]]
+## The lower jaw's hinge, and the jaw (jaw space, x from the hinge forward).
+const HINGE := Vector3(0.0, -0.66, 0.0)
+const JAW := [[-0.15, 0.78, 0.18, 0.34, -0.02], [0.5, 0.84, 0.2, 0.42, 0.0], [1.2, 0.7, 0.19, 0.38, 0.1],
+	[1.9, 0.5, 0.16, 0.3, 0.22], [2.5, 0.28, 0.12, 0.2, 0.32], [2.8, 0.06, 0.06, 0.06, 0.36]]
+## Sections round her (body and head), and rings of the head behind the
+## neck's.
+const SIDES := 26
+const HEAD_RINGS := 30
+## Body samples between two segments of the rope.
+const SUBDIVIDE := 3
+## Gill slits each side: how many, where the first is, how far apart, and
+## how far round from the back their tops and bottoms are (radians).
+const GILLS := 4
+const GILL_X := -0.86
+const GILL_STEP := 0.17
+const GILL_A := Vector2(1.2, 2.05)
 const AIM_TIME := 0.75
 const LUNGE_MAX := 2.2
 const LUNGE_DAMAGE := 32.0
@@ -22,6 +59,10 @@ const PROWL_SPEED := 5.0
 const LUNGE_SPEED: Array[float] = [24.0, 27.0, 30.0]
 const STUCK_TIME: Array[float] = [4.2, 3.6, 3.0]
 const REST: Array[float] = [1.6, 1.1, 0.7]
+
+static var _skin_tex: ImageTexture
+static var _head_mesh: ArrayMesh
+static var _jaw_mesh: ArrayMesh
 
 var state := State.DORMANT
 var phase := 0
@@ -37,8 +78,24 @@ var _t := 0.0
 var _taught_stuck := false
 var _shrink := 1.0
 var _body_mesh := ArrayMesh.new()
+var _body_indices := PackedInt32Array()
 var _body: MeshInstance3D
+var _head: MeshInstance3D
+var _jaw: MeshInstance3D
 var _gills: MeshInstance3D
+var _flaps: Array[Node3D] = []
+var _cheek_mesh := ArrayMesh.new()
+## The swim: the body's wave (how big, how fast, how far along it), how
+## far she is coiled back to listen, and the coil's depth while asleep.
+var _wave := 0.0
+var _wave_amp := 0.35
+var _wave_rate := 2.2
+var _rear := 0.0
+var _coil := 1.0
+var _gape := 0.05
+var _gill_open := 0.06
+var _listen := 0.3
+
 
 
 func setup() -> void:
@@ -60,56 +117,299 @@ func setup() -> void:
 	active_radius = 1000.0
 	_orbit = level.rng.randf() * TAU
 	# Coiled on the lair floor until something wakes her.
-	for i in SEGMENTS:
-		var a := i * 0.36
-		var r := 3.0 + i * 0.3
-		segments.append(pos + Vector2(cos(a) * r, sin(a) * r * 0.4))
+	segments.resize(SEGMENTS)
+	_lay_coil()
+	_rebuild_body()
 
 
 func build_model() -> void:
+	var glow := glow_color
 	var mat := species_material(func(m: ShaderMaterial) -> void:
-		m.set_shader_parameter(&"back_color", Color(0.07, 0.06, 0.07))
-		m.set_shader_parameter(&"belly_color", Color(0.28, 0.24, 0.22))
-		m.set_shader_parameter(&"glow_color", Color(1.0, 0.45, 0.25))
-		m.set_shader_parameter(&"glow_strength", 0.8)
-		m.set_shader_parameter(&"rim_strength", 0.35)
-		m.set_shader_parameter(&"roughness", 0.55)
-		m.set_shader_parameter(&"body_length", 3.4)
-		m.set_shader_parameter(&"swim_amp", 0.0))
-	var head := MeshKit.lathe(PackedVector2Array([Vector2(0.0, 1.35), Vector2(0.45, 1.55), Vector2(0.8, 1.25),
-		Vector2(1.0, 0.55)]), 3.4, 18, 10, 0.85, 1.0)
-	var jaw := MeshKit.lathe(PackedVector2Array([Vector2(0, 1.1), Vector2(0.7, 0.9), Vector2(1, 0.3)]), 2.4, 14, 5,
-			0.4, 0.9)
-	var teeth := []
-	for i in 9:
-		var x := -0.9 + i * 0.24
-		teeth.append([MeshKit.spike(0.08, 0.55, 0.0, 4), Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(x, 0.15, 0.6))])
-		teeth.append([MeshKit.spike(0.08, 0.55, 0.0, 4), Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(x, 0.15, -0.6))])
-	add_visual(MeshKit.merge([[head], [jaw, Transform3D(Basis(), Vector3(0.7, -0.75, 0.0))],
-		[MeshKit.merge(teeth), Transform3D(Basis(), Vector3(0.9, -0.65, 0.0))]]), mat)
-	# Milky, sightless eyes.
-	add_eyes(Vector3(1.15, 0.55, 1.05), 0.3, Color(0.82, 0.86, 0.9), 0.35)
-	# Gill sacs along both sides of the head: dim until she is stuck.
-	var sacs := []
-	for i in 3:
-		for side: float in [-1.0, 1.0]:
-			sacs.append([MeshKit.ball(0.34, 1.0), Transform3D(Basis(), Vector3(-0.9 + i * 0.55, -0.1, side * 1.25))])
-	var gill_mat := ShaderMaterial.new()
-	gill_mat.shader = Creature.SHADER
-	gill_mat.set_shader_parameter(&"back_color", Color(0.4, 0.1, 0.05))
-	gill_mat.set_shader_parameter(&"belly_color", Color(0.5, 0.15, 0.08))
-	gill_mat.set_shader_parameter(&"glow_color", Color(1.0, 0.35, 0.12))
-	gill_mat.set_shader_parameter(&"glow_strength", 3.0)
-	gill_mat.set_shader_parameter(&"swim_amp", 0.0)
-	_gills = add_visual(MeshKit.merge(sacs), gill_mat)
-	# The body is a tube rebuilt in world space every frame.
+		m.set_shader_parameter(&"back_color", Color(0.46, 0.49, 0.53))
+		m.set_shader_parameter(&"belly_color", Color(0.7, 0.69, 0.68))
+		m.set_shader_parameter(&"glow_color", glow)
+		m.set_shader_parameter(&"glow_strength", 2.2)
+		m.set_shader_parameter(&"rim_strength", 0.3)
+		m.set_shader_parameter(&"roughness", 0.5)
+		m.set_shader_parameter(&"metallic", 0.0)
+		# Her skin's pattern rides on its own coordinates (she is rebuilt
+		# every frame): wrinkles and blotches, and fine pits.
+		m.set_shader_parameter(&"skin_on_uv", true)
+		m.set_shader_parameter(&"skin_tex", _skin())
+		m.set_shader_parameter(&"skin_tex_scale", 0.42)
+		m.set_shader_parameter(&"skin_tex_depth", 0.03)
+		m.set_shader_parameter(&"skin_tex_shade", 0.5)
+		m.set_shader_parameter(&"skin_pits", 0.006)
+		m.set_shader_parameter(&"tooth_color", Color(0.78, 0.72, 0.56))
+		# Her lateral line: pores down the middle of each flank.
+		m.set_shader_parameter(&"pores", Vector4(0.0, 0.42, 0.075, 1.6))
+		m.set_shader_parameter(&"swim_amp", 0.0)
+		# Feelers and fins sway.
+		m.set_shader_parameter(&"flutter_amp", 0.14)
+		m.set_shader_parameter(&"flutter_freq", 3.0)
+		m.set_shader_parameter(&"flutter_wave", 1.4)
+		m.set_shader_parameter(&"fin_color", Color(0.62, 0.6, 0.64, 0.8)))
+	var gill_mat := species_material(func(m: ShaderMaterial) -> void:
+		m.set_shader_parameter(&"back_color", Color(0.45, 0.08, 0.06))
+		m.set_shader_parameter(&"belly_color", Color(0.6, 0.14, 0.08))
+		m.set_shader_parameter(&"glow_color", Color(1.0, 0.3, 0.1))
+		m.set_shader_parameter(&"glow_strength", 1.6)
+		m.set_shader_parameter(&"roughness", 0.25)
+		m.set_shader_parameter(&"metallic", 0.0)
+		m.set_shader_parameter(&"swim_amp", 0.0)
+		m.set_shader_parameter(&"flutter_amp", 0.012)
+		m.set_shader_parameter(&"flutter_freq", 7.0)
+		m.set_shader_parameter(&"flutter_wave", 30.0), &"gills")
+	if _head_mesh == null:
+		_head_mesh = _head_parts()
+		_jaw_mesh = _jaw_parts()
+	# The body and skull, one skin rebuilt every frame (see _rebuild_body).
 	_body = MeshInstance3D.new()
 	_body.mesh = _body_mesh
 	_body.material_override = mat
-	_body.top_level = true
 	_body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(_body)
+	_body.extra_cull_margin = 40.0
+	model.add_child(_body)
 	visuals.append(_body)
+	_head = add_visual(_head_mesh, mat)
+	_jaw = add_visual(_jaw_mesh, mat, Transform3D(Basis(), HINGE))
+	var cheeks := MeshInstance3D.new()
+	cheeks.mesh = _cheek_mesh
+	cheeks.material_override = mat
+	cheeks.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	model.add_child(cheeks)
+	visuals.append(cheeks)
+	var throat := MeshInstance3D.new()
+	throat.mesh = MeshKit.sphere(1.0, 16, 8)
+	var dark := StandardMaterial3D.new()
+	dark.albedo_color = Color(0.05, 0.01, 0.015)
+	dark.roughness = 0.9
+	dark.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	throat.material_override = dark
+	throat.transform = Transform3D(Basis().scaled(Vector3(1.1, 0.36, 0.62)), Vector3(1.0, -0.46, 0.0))
+	model.add_child(throat)
+	# Milky eyes, skinned over: she has never needed them.
+	var milk := StandardMaterial3D.new()
+	milk.albedo_color = Color(0.6, 0.64, 0.68)
+	milk.roughness = 0.55
+	for sgn: float in [1.0, -1.0]:
+		var eye := MeshInstance3D.new()
+		eye.mesh = MeshKit.sphere(0.12, 14, 8)
+		eye.material_override = milk
+		eye.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var a := PI * 0.36 if sgn > 0.0 else TAU - PI * 0.36
+		var n := _head_normal(1.55, a)
+		# Flush with the skin, a clouded lens half sunk in it.
+		eye.transform = Transform3D(Basis.looking_at(-n, Vector3.UP).scaled(Vector3(1.0, 0.8, 0.3)),
+			_head_point(1.55, a) - n * 0.01)
+		model.add_child(eye)
+	# The gills: glowing frills behind each slit, and the flaps over them,
+	# each hinged at its front edge.
+	_gills = add_visual(_gill_frills(), gill_mat)
+	for sgn: float in [1.0, -1.0]:
+		for k in GILLS:
+			_flaps.append(_flap(k, sgn, mat))
+	_rebuild_cheeks()
+
+
+## Her skin's pattern: deep wrinkles running round her, and soft darker
+## blotches; seamless, built once.
+static func _skin() -> ImageTexture:
+	if _skin_tex:
+		return _skin_tex
+	var wrinkles := FastNoiseLite.new()
+	wrinkles.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	wrinkles.fractal_type = FastNoiseLite.FRACTAL_RIDGED
+	wrinkles.fractal_octaves = 3
+	wrinkles.frequency = 0.025
+	wrinkles.seed = 31
+	var blotches := FastNoiseLite.new()
+	blotches.frequency = 0.012
+	blotches.fractal_octaves = 3
+	blotches.seed = 77
+	var size := 256
+	var img := Image.create(size, size, true, Image.FORMAT_L8)
+	for y in size:
+		for x in size:
+			# Sampled on a torus, so the pattern repeats without a seam.
+			var u := TAU * x / size
+			var v := TAU * y / size
+			var r := size / TAU
+			var w := wrinkles.get_noise_3d(cos(u) * r, sin(u) * r, v * r * 0.35)
+			var b := blotches.get_noise_3d(cos(u) * r, sin(u) * r + 40.0, cos(v) * r + sin(v) * r)
+			var h := 0.55 + 0.32 * w - 0.35 * smoothstep(0.05, 0.4, b)
+			img.set_pixel(x, y, Color(clampf(h, 0.0, 1.0), 0.0, 0.0))
+	img.generate_mipmaps()
+	_skin_tex = ImageTexture.create_from_image(img)
+	return _skin_tex
+
+
+## The point on her head's skin at [param x], [param a] radians round from
+## the back's midline (towards +Z first), as the head is lofted.
+static func _head_point(x: float, a: float) -> Vector3:
+	var hw := BodyKit.at(HEAD, x, 1)
+	var top := BodyKit.at(HEAD, x, 2)
+	var low := BodyKit.at(HEAD, x, 3)
+	var spine := BodyKit.at(HEAD, x, 4)
+	var sc := signf(cos(a)) * pow(absf(cos(a)), 0.85)
+	var ss := signf(sin(a)) * pow(absf(sin(a)), 0.85)
+	return Vector3(x, spine + sc * (top if cos(a) >= 0.0 else low), ss * hw)
+
+
+## Which way the skin faces there.
+static func _head_normal(x: float, a: float) -> Vector3:
+	var e := 0.01
+	var along := _head_point(x + e, a) - _head_point(x - e, a)
+	var round := _head_point(x, a + e) - _head_point(x, a - e)
+	return round.cross(along).normalized()
+
+
+## The rigid parts of the head: the tube nostrils on the snout, long
+## sensory feelers trailing from beside them (swaying more towards their
+## tips), and the fangs down the upper jaw.
+static func _head_parts() -> ArrayMesh:
+	var parts := []
+	for sgn: float in [1.0, -1.0]:
+		var base := _head_point(2.55, PI * 0.3) * Vector3(1.0, 1.0, sgn)
+		var tube := ArrayMesh.new()
+		MeshKit.tube(tube, PackedVector3Array([base, base + Vector3(0.12, 0.1, 0.03 * sgn),
+			base + Vector3(0.22, 0.16, 0.05 * sgn)]), PackedFloat32Array([0.07, 0.06, 0.05]), 8)
+		parts.append([MeshKit.painted(tube, func(_v: Vector3) -> Color: return Color(0.0, 0.3, 0.0))])
+		for k in 2:
+			var root := _head_point(2.4 - k * 0.32, PI * (0.56 + k * 0.06)) * Vector3(1.0, 1.0, sgn)
+			var length := 2.6 - k * 0.7
+			var pts := PackedVector3Array()
+			var radii := PackedFloat32Array()
+			for i in 15:
+				var f := i / 14.0
+				# Forward and out from the snout, then drooping and trailing
+				# back beneath her chin.
+				pts.append(root + Vector3(0.45 * f - length * 0.75 * f * f, -0.9 * f * f + 0.15 * f,
+					(0.3 + 0.2 * f) * f * sgn))
+				radii.append(lerpf(0.04, 0.006, pow(f, 0.8)))
+			var feeler := ArrayMesh.new()
+			MeshKit.tube(feeler, pts, radii, 6)
+			parts.append([MeshKit.painted(feeler, func(v: Vector3) -> Color:
+				return Color(0.0, 0.4, clampf(root.distance_to(v) / length * 1.4, 0.0, 1.0)))])
+		# Sensory pores in rows over the snout and along the lips, glowing
+		# when she listens.
+		var pore := MeshKit.ball(0.035, 1.0, 6, 4)
+		for row: Vector2 in [Vector2(0.62, 0.0), Vector2(0.78, 0.04), Vector2(0.3, 0.02)]:
+			for i in 7:
+				var x := lerpf(0.9, 2.6, i / 6.0) + row.y * i
+				var a := PI * row.x if sgn > 0.0 else TAU - PI * row.x
+				parts.append([pore, Transform3D(Basis(), _head_point(x, a) - _head_normal(x, a) * 0.012)])
+		for t: Array in BodyKit.teeth_row(_upper_lip(0.5, sgn), _upper_lip(2.72, sgn), 15, 0.42,
+				Vector3(0.1, -1.0, -0.3 * sgn), 51 if sgn > 0.0 else 52):
+			parts.append([BodyKit.enamel(t[0]), t[1]])
+	return MeshKit.merge(parts)
+
+
+## The lower jaw (jaw space): long, deep at the hinge, fangs along its rim
+## leaning in, a chin jutting a little past the snout.
+static func _jaw_parts() -> ArrayMesh:
+	var parts := [[BodyKit.body(JAW, 40, 24)]]
+	for sgn: float in [1.0, -1.0]:
+		for t: Array in BodyKit.teeth_row(_jaw_rim(0.45, sgn), _jaw_rim(2.7, sgn), 13, 0.4,
+				Vector3(-0.2, 1.0, -0.35 * sgn), 53 if sgn > 0.0 else 54):
+			parts.append([BodyKit.enamel(t[0]), t[1], (t[1] as Transform3D).origin.x])
+	return BodyKit.merged(parts)
+
+
+static func _upper_lip(x: float, sgn: float) -> Vector3:
+	return Vector3(x, BodyKit.at(HEAD, x, 4) - BodyKit.at(HEAD, x, 3) * 0.8, BodyKit.at(HEAD, x, 1) * 0.74 * sgn)
+
+
+static func _jaw_rim(u: float, sgn: float) -> Vector3:
+	return Vector3(u, BodyKit.at(JAW, u, 4) + BodyKit.at(JAW, u, 2) * 0.8, BodyKit.at(JAW, u, 1) * 0.86 * sgn)
+
+
+## The gills, glowing: behind each slit a ruffled frill lying just under
+## the skin, hidden while the flap over it is shut.
+static func _gill_frills() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var cols := 10
+	var rows := 4
+	var at := 0
+	for sgn: float in [1.0, -1.0]:
+		for k in GILLS:
+			var x0 := GILL_X + k * GILL_STEP
+			for r in rows + 1:
+				for c in cols + 1:
+					var u := float(r) / rows
+					var w := float(c) / cols
+					var a := lerpf(GILL_A.x, GILL_A.y, w)
+					var x := x0 + 0.15 * u
+					var n := _head_normal(x, a) * Vector3(1.0, 1.0, sgn)
+					var ruffle := 0.05 * (0.5 + 0.5 * sin(w * 38.0 + k)) * sin(PI * u)
+					var p := _head_point(x, a) * Vector3(1.0, 1.0, sgn) + n * (0.004 + ruffle * (0.3 + 0.7 * u))
+					st.set_normal(n)
+					st.set_color(Color(0.4 + 0.6 * sin(PI * u), 0.5, 0.4 * u))
+					st.add_vertex(p)
+			for r in rows:
+				for c in cols:
+					var a := at + r * (cols + 1) + c
+					var quad := [a, a + cols + 1, a + 1, a + 1, a + cols + 1, a + cols + 2]
+					if sgn < 0.0:
+						quad = [a, a + 1, a + cols + 1, a + 1, a + cols + 2, a + cols + 1]
+					for q: int in quad:
+						st.add_index(q)
+			at += (rows + 1) * (cols + 1)
+	return st.commit()
+
+
+## A gill flap on side [param sgn]: a curved plate of skin lying on the neck
+## over slit [param k], on a hinge along its front edge (returned, turned
+## by its rotation about its hinge to open).
+func _flap(k: int, sgn: float, mat: Material) -> Node3D:
+	var x0 := GILL_X + k * GILL_STEP
+	var top := _head_point(x0, GILL_A.x) * Vector3(1.0, 1.0, sgn)
+	var bottom := _head_point(x0, GILL_A.y) * Vector3(1.0, 1.0, sgn)
+	var hinge := (top + bottom) * 0.5
+	var axis := (bottom - top).normalized()
+	var trail := _head_point(x0 + 0.16, (GILL_A.x + GILL_A.y) * 0.5) * Vector3(1.0, 1.0, sgn) - hinge
+	var outward := _head_normal(x0 + 0.08, (GILL_A.x + GILL_A.y) * 0.5) * Vector3(1.0, 1.0, sgn)
+	if axis.cross(trail).dot(outward) < 0.0:
+		axis = -axis
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var cols := 8
+	var rows := 3
+	for side in 2:
+		for r in rows + 1:
+			for c in cols + 1:
+				var u := float(r) / rows
+				var a := lerpf(GILL_A.x - 0.04, GILL_A.y + 0.04, float(c) / cols)
+				var x := x0 - 0.01 + 0.165 * u
+				var n := _head_normal(x, a) * Vector3(1.0, 1.0, sgn)
+				var p := _head_point(x, a) * Vector3(1.0, 1.0, sgn) + n * (0.035 + 0.025 * u)
+				st.set_normal(n if side == 0 else -n)
+				# Its free edge rimmed with the glow of the gill under it.
+				st.set_color(Color(0.6 * smoothstep(0.6, 1.0, u), smoothstep(0.1, -0.7, cos(a)), 0.0))
+				st.set_uv(Vector2(HEAD[HEAD.size() - 1][0] - x, a * BodyKit.at(HEAD, x, 1) * 0.6))
+				st.add_vertex(p - hinge)
+		var base := side * (rows + 1) * (cols + 1)
+		for r in rows:
+			for c in cols:
+				var a := base + r * (cols + 1) + c
+				var quad := [a, a + 1, a + cols + 1, a + 1, a + cols + 2, a + cols + 1]
+				if (side == 0) != (sgn < 0.0):
+					quad = [a, a + cols + 1, a + 1, a + 1, a + cols + 1, a + cols + 2]
+				for q: int in quad:
+					st.add_index(q)
+	var pivot := Node3D.new()
+	pivot.position = hinge
+	pivot.set_meta(&"axis", axis)
+	model.add_child(pivot)
+	var mi := MeshInstance3D.new()
+	pivot.set_meta(&"mesh", mi)
+	mi.mesh = st.commit()
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	pivot.add_child(mi)
+	visuals.append(mi)
+	return pivot
 
 
 func think() -> void:
@@ -219,14 +519,80 @@ func is_hostile() -> bool:
 
 func _update_visuals(delta: float) -> void:
 	super._update_visuals(delta)
-	model.basis = model.basis.scaled(Vector3.ONE * SIZE * _shrink)
+	var k := 1.0 - exp(-6.0 * delta) if delta > 0.0 else 1.0
+	# What each part does in each state: the jaw, the gill flaps, the pores
+	# she listens with, the swim's wave, and how far she rears back.
+	var gape := 0.05 + 0.05 * (0.5 + 0.5 * sin(_t * 1.1))
+	var gills := 0.05 + 0.06 * (0.5 + 0.5 * sin(_t * 1.3))
+	var listen := 0.35
+	var amp := 0.45
+	var rate := 2.0 + vel.length() * 0.25
+	var rear := 0.0
 	var glow := 0.25
+	var extra := Basis(Vector3.UP, 0.05 * sin(_t * 0.9)) * Basis(Vector3.BACK, 0.04 * sin(_t * 0.7))
 	match state:
+		State.DORMANT:
+			gape = 0.04
+			listen = 0.12
+			amp = 0.08
+			rate = 0.6
 		State.AIM:
+			var into := clampf(1.0 - _timer / (AIM_TIME * (1.0 - phase * 0.15)), 0.0, 1.0)
+			gape = lerpf(0.1, 0.55, into)
+			gills = 0.28
+			listen = 1.2 + 0.6 * sin(_t * 14.0)
+			amp = 0.25
+			rate = 1.0
+			rear = into
 			glow = 1.0
+			extra = Basis(Vector3.BACK, 0.16 * into) * Basis(Vector3.RIGHT, 0.06 * sin(_t * 3.0))
+		State.LUNGE:
+			gape = 0.78
+			gills = 0.16
+			listen = 0.7
+			amp = 0.12
+			rate = 5.0
+			extra = Basis()
 		State.STUCK:
+			gape = 0.3 + 0.35 * absf(sin(_t * 5.5))
+			gills = 0.95 + 0.12 * sin(_t * 5.0)
+			listen = 0.25
+			amp = 1.1
+			rate = 7.0
 			glow = 2.6 + 0.8 * sin(_t * 9.0)
+			extra = Basis(Vector3.RIGHT, 0.14 * sin(_t * 9.0)) * Basis(Vector3.UP, 0.05 * sin(_t * 6.3))
+		State.RECOVER:
+			gape = 0.18
+			gills = 0.4
+			amp = 0.7
+			rate = 4.0
+			glow = 0.8
+		State.DEAD:
+			var gone := clampf(1.0 - _timer / 3.0, 0.0, 1.0)
+			gape = 0.45
+			gills = 0.6
+			listen = 0.0
+			amp = 0.2 * (1.0 - gone)
+			rate = 1.0
+			glow = 0.2 * (1.0 - gone)
+			extra = Basis(Vector3.RIGHT, PI * 0.9 * smoothstep(0.0, 1.0, gone))
+	_gape = lerpf(_gape, gape, 1.0 - exp(-(16.0 if gape > _gape else 6.0) * delta)) if delta > 0.0 else gape
+	_gill_open = lerpf(_gill_open, gills, k)
+	_listen = lerpf(_listen, listen, k)
+	_wave_amp = lerpf(_wave_amp, amp, 1.0 - exp(-3.0 * delta)) if delta > 0.0 else amp
+	_wave_rate = lerpf(_wave_rate, rate, k)
+	_rear = lerpf(_rear, rear, k)
+	_wave += _wave_rate * delta
+	_coil = maxf(_coil - delta * 0.5, 0.0) if state != State.DORMANT else _coil
+	model.basis = (model.basis * extra).scaled(Vector3.ONE * SIZE * _shrink)
+	_jaw.rotation.z = -_gape
+	for f in _flaps:
+		f.basis = Basis(f.get_meta(&"axis"), _gill_open)
+		(f.get_meta(&"mesh") as GeometryInstance3D).set_instance_shader_parameter(&"glow_boost", glow)
 	_gills.set_instance_shader_parameter(&"glow_boost", glow)
+	_body.set_instance_shader_parameter(&"glow_boost", _listen)
+	_head.set_instance_shader_parameter(&"glow_boost", _listen)
+	_rebuild_cheeks()
 
 
 func _awaken() -> void:
@@ -290,31 +656,279 @@ func _enrage() -> void:
 	level.add_entity(lancer)
 
 
-## Each segment follows the one ahead like a rope, with a slow travelling wave.
+## Each segment follows the one ahead like a rope; drawing back to listen,
+## the ones behind her head bunch up into an S.
 func _follow_body() -> void:
 	if state == State.DORMANT:
 		return
-	segments[0] = pos - facing * 1.6 * SIZE
+	segments[0] = pos + facing * NECK_X * SIZE
+	var dt := get_physics_process_delta_time() if is_inside_tree() else 1.0 / 60.0
+	var lead := -facing
 	for i in range(1, SEGMENTS):
 		var to := segments[i] - segments[i - 1]
 		var d := to.length()
-		if d > SPACING:
-			segments[i] = segments[i - 1] + to / d * SPACING
+		var spacing := SPACING * (1.0 - 0.3 * _rear * (1.0 - smoothstep(4.0, 12.0, float(i))))
+		if d > spacing:
+			segments[i] = segments[i - 1] + to / d * spacing
+		# A gentle stiffness: slack loops straighten out as she swims, and
+		# no joint folds back on itself.
+		var straight := segments[i - 1] + lead * minf(d, spacing)
+		segments[i] = segments[i].lerp(straight, 1.0 - exp(-0.7 * dt))
+		lead = (segments[i] - segments[i - 1]).normalized()
 		var p := segments[i]
 		var push := level.field.sample(p)
 		if push < 0.6:
 			segments[i] = p + level.field.normal(p) * (0.6 - push)
 
 
-func _rebuild_body() -> void:
-	var pts := PackedVector3Array()
-	var radii := PackedFloat32Array()
+## Asleep: coiled on the lair floor from her neck, round and round, each
+## loop a little further back.
+func _lay_coil() -> void:
+	var heading := (-facing).angle()
+	var at := pos + facing * NECK_X * SIZE
 	for i in SEGMENTS:
-		var t := float(i) / (SEGMENTS - 1)
-		var p := segments[i]
-		if i > 0 and i < SEGMENTS - 1:
-			var dir := (segments[i - 1] - segments[i + 1]).normalized()
-			p += Vector2(-dir.y, dir.x) * sin(_t * 2.2 - i * 0.45) * 0.35 * t
-		pts.append(Vector3(p.x, p.y, -0.2))
-		radii.append(lerpf(2.1, 0.35, pow(t, 0.8)) * _shrink)
-	MeshKit.tube(_body_mesh, pts, radii, 10, 0.12)
+		segments[i] = at
+		heading += 0.3 - 0.004 * i
+		at += Vector2.from_angle(heading) * SPACING
+
+
+## Rebuilds her skin, body and skull in one, in the head's own space: from
+## the tail along the rope (smoothed, a wave running down it, leaving the
+## head along its line) to the neck, then on through the skull. Her sections
+## grow flatter from side to side towards the tail; a ribbon fin runs down
+## her back and belly to a leaf of a tail; the pores of her lateral line run
+## down each flank and onto her head.
+func _rebuild_body() -> void:
+	if model == null:
+		return
+	var face := Vector2(model.basis.x.x, model.basis.x.y).normalized()
+	if face == Vector2.ZERO:
+		face = facing
+	var neck := pos + face * NECK_X * SIZE
+	# Along the rope from the neck to the tail, in samples.
+	var rope := PackedVector2Array()
+	for i in SEGMENTS - 1:
+		var p0 := segments[maxi(i - 1, 0)] if i > 0 else neck * 2.0 - segments[1]
+		var p3 := segments[mini(i + 2, SEGMENTS - 1)]
+		for sub_step in SUBDIVIDE:
+			rope.append(segments[i].cubic_interpolate(segments[i + 1], p0, p3, float(sub_step) / SUBDIVIDE))
+	rope.append(segments[SEGMENTS - 1])
+	rope[0] = neck
+	var n := rope.size()
+	var dist := PackedFloat32Array([0.0])
+	for i in range(1, n):
+		dist.append(dist[i - 1] + rope[i].distance_to(rope[i - 1]))
+	var total := maxf(dist[n - 1], 1.0)
+	# The wave, sideways in the plane, growing down the body; and near the
+	# neck the body is drawn onto the head's line.
+	var waved := PackedVector3Array()
+	waved.resize(n)
+	for i in n:
+		var t := dist[i] / total
+		var ahead := rope[maxi(i - 1, 0)] - rope[mini(i + 1, n - 1)]
+		var across := Vector2(-ahead.y, ahead.x).normalized()
+		var amp := _wave_amp * smoothstep(0.0, 0.18, t) * (0.5 + 0.5 * t)
+		var p := rope[i] + across * sin(dist[i] * TAU / 9.0 - _wave) * amp
+		var w := 1.0 - smoothstep(0.0, 4.5, dist[i])
+		p = p.lerp(neck - face * dist[i], w)
+		waved[i] = Vector3(p.x, p.y, -_coil * float(i) / n * 3.5)
+	# Into the head's space (the model as it stands this frame).
+	var to_local := Transform3D(model.basis, model.position).affine_inverse()
+	var pts := PackedVector3Array()
+	pts.resize(n)
+	for i in n:
+		pts[i] = to_local * (waved[n - 1 - i] - Vector3(pos.x, pos.y, 0.0))
+	pts[n - 1] = Vector3(NECK_X, 0.0, 0.0)
+	var scale := SIZE
+	# Each section's back carried down from the head's, so it never flips.
+	var tangents := PackedVector3Array()
+	tangents.resize(n)
+	for i in n:
+		tangents[i] = (pts[mini(i + 1, n - 1)] - pts[maxi(i - 1, 0)]).normalized()
+	tangents[n - 1] = Vector3.RIGHT
+	var backs := PackedVector3Array()
+	backs.resize(n)
+	var carried := Vector3.UP
+	for i in range(n - 1, -1, -1):
+		var b := carried - tangents[i] * carried.dot(tangents[i])
+		carried = b.normalized() if b.length_squared() > 1e-6 else carried
+		backs[i] = carried
+	var grid: Array[PackedVector3Array] = []
+	var along := PackedFloat32Array()
+	var fins: Array[PackedVector3Array] = [PackedVector3Array(), PackedVector3Array(), PackedVector3Array(),
+		PackedVector3Array()]
+	var head_len: float = HEAD[HEAD.size() - 1][0] - NECK_X
+	for i in n:
+		var back_by := dist[n - 1 - i] / scale
+		var t := back_by * scale / total
+		var r := lerpf(NECK_R, 0.2, pow(t, 0.9)) * (1.0 - 0.9 * smoothstep(0.96, 1.0, t))
+		var rh := r * lerpf(1.0, 0.62, pow(t, 0.7))
+		var side := tangents[i].cross(backs[i])
+		var ring := PackedVector3Array()
+		for j in SIDES + 1:
+			var a := TAU * j / SIDES
+			var sc := signf(cos(a)) * pow(absf(cos(a)), 0.85)
+			var ss := signf(sin(a)) * pow(absf(sin(a)), 0.85)
+			ring.append(pts[i] + backs[i] * sc * r + side * ss * rh)
+		grid.append(ring)
+		along.append(head_len + back_by)
+		# The ribbon fins: low along the back from behind the head, along the
+		# belly from half way, both rising to a leaf at the tail.
+		var tail := smoothstep(0.85, 1.0, t)
+		var dorsal := (0.08 + 0.1 * t + 0.45 * tail) * smoothstep(0.03, 0.08, t)
+		var anal := (0.06 + 0.08 * t + 0.4 * tail) * smoothstep(0.4, 0.46, t)
+		fins[0].append(pts[i] + backs[i] * r * 0.85)
+		fins[1].append(pts[i] + backs[i] * (r + dorsal))
+		fins[2].append(pts[i] - backs[i] * r * 0.85)
+		fins[3].append(pts[i] - backs[i] * (r + anal))
+	for x_ring in HEAD_RINGS:
+		var x := lerpf(NECK_X, HEAD[HEAD.size() - 1][0], float(x_ring + 1) / HEAD_RINGS)
+		var ring := PackedVector3Array()
+		for j in SIDES + 1:
+			ring.append(_head_point(x, TAU * j / SIDES))
+		grid.append(ring)
+		along.append(HEAD[HEAD.size() - 1][0] - x)
+	_commit_body(grid, along, fins, n)
+
+
+## Builds the mesh: the skin over [param grid] (its first [param body_rings]
+## rings the body's), and the fins along it.
+func _commit_body(grid: Array[PackedVector3Array], along: PackedFloat32Array, fins: Array[PackedVector3Array],
+		body_rings: int) -> void:
+	var rings := grid.size()
+	var row := SIDES + 1
+	var count := rings * row + body_rings * 8
+	var verts := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var colors := PackedColorArray()
+	var uvs := PackedVector2Array()
+	var uv2s := PackedVector2Array()
+	verts.resize(count)
+	normals.resize(count)
+	colors.resize(count)
+	uvs.resize(count)
+	uv2s.resize(count)
+	var v := 0
+	for i in rings:
+		var arcs := PackedFloat32Array([0.0])
+		for j in SIDES:
+			arcs.append(arcs[j] + grid[i][j].distance_to(grid[i][j + 1]))
+		for j in SIDES + 1:
+			var a := TAU * j / SIDES
+			var ahead := grid[mini(i + 1, rings - 1)][j] - grid[maxi(i - 1, 0)][j]
+			var round := grid[i][(j + 1) % SIDES] - grid[i][(j - 1 + SIDES) % SIDES]
+			verts[v] = grid[i][j]
+			normals[v] = round.cross(ahead).normalized()
+			colors[v] = Color(0.0, smoothstep(0.1, -0.7, cos(a)), 0.0)
+			var from_back := minf(arcs[j], arcs[SIDES] - arcs[j])
+			uvs[v] = Vector2(along[i], from_back * 0.55)
+			# For the pores of her lateral line: how far round from the
+			# flank's midline (the line itself only down the body).
+			uv2s[v] = Vector2(along[i], from_back - arcs[SIDES] * 0.25 if i < body_rings - 2 else 99.0)
+			v += 1
+	# The fins, both faces of each.
+	for f in 2:
+		var root := fins[f * 2]
+		var tip := fins[f * 2 + 1]
+		for face in 2:
+			for i in body_rings:
+				var dir := (tip[i] - root[i]).normalized()
+				var ahead := root[mini(i + 1, body_rings - 1)] - root[maxi(i - 1, 0)]
+				var nrm := ahead.cross(dir).normalized() * (1.0 if face == 0 else -1.0)
+				for e in 2:
+					verts[v] = root[i] if e == 0 else tip[i]
+					normals[v] = nrm
+					colors[v] = Color(0.0, 0.2, 0.02 if e == 0 else 0.9)
+					uvs[v] = Vector2(along[i], 0.02 * e)
+					uv2s[v] = Vector2(0.0, 99.0)
+					v += 1
+	if _body_indices.is_empty():
+		_body_indices = _indices(rings, body_rings)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_TEX_UV2] = uv2s
+	arrays[Mesh.ARRAY_INDEX] = _body_indices
+	_body_mesh.clear_surfaces()
+	_body_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+
+
+## The triangles: the same every frame.
+static func _indices(rings: int, body_rings: int) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	var row := SIDES + 1
+	for i in rings - 1:
+		for j in SIDES:
+			var a := i * row + j
+			out.append_array([a, a + row, a + 1, a + 1, a + row, a + row + 1])
+	var base := rings * row
+	for f in 2:
+		for face in 2:
+			var b := base + (f * 2 + face) * body_rings * 2
+			for i in body_rings - 1:
+				var a := b + i * 2
+				var flip := (face == 1) != (f == 1)
+				out.append_array([a, a + 1, a + 2, a + 1, a + 3, a + 2] if not flip
+					else [a, a + 2, a + 1, a + 1, a + 2, a + 3])
+	return out
+
+
+## The corners of the mouth: skin from the upper lip down to the lower jaw's
+## rim, from the hinge forward, stretching as she gapes.
+func _rebuild_cheeks() -> void:
+	var rot := Basis(Vector3.BACK, -_gape)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rows := 8
+	var cols := 5
+	var at := 0
+	for sgn: float in [1.0, -1.0]:
+		var grid := PackedVector3Array()
+		for k in rows + 1:
+			var t := k / float(rows)
+			for j in cols + 1:
+				var f := j / float(cols)
+				var u := 1.1 * t * (1.0 - 0.4 * sin(PI * f) * t)
+				var rim := HINGE + rot * _jaw_rim(u, sgn)
+				var lip := _upper_lip(HINGE.x + u + 0.2, sgn)
+				var p := lip.lerp(rim, f)
+				p.z += sgn * sin(PI * f) * (0.04 + 0.15 * _gape) * sin(PI * 0.5 * t)
+				grid.append(p)
+		for side in 2:
+			st.set_smooth_group(side + (2 if sgn < 0.0 else 0))
+			for g in grid:
+				st.set_color(Color(0.0, 0.4, 0.0) if side == 0 else Color(0.0, 1.0, 0.0))
+				st.set_uv(Vector2(g.x, 0.5))
+				st.add_vertex(g)
+			var start := at + side * grid.size()
+			var outward := (side == 0) != (sgn > 0.0)
+			for k in rows:
+				for j in cols:
+					var a := start + k * (cols + 1) + j
+					var quad := [a, a + 1, a + cols + 1, a + 1, a + cols + 2, a + cols + 1] if outward \
+						else [a, a + cols + 1, a + 1, a + 1, a + cols + 1, a + cols + 2]
+					for q: int in quad:
+						st.add_index(q)
+		at += grid.size() * 2
+	st.generate_normals()
+	_cheek_mesh.clear_surfaces()
+	st.commit(_cheek_mesh)
+
+
+## Shown as a specimen (the codex), which never moves: coiled, listening,
+## her jaw a little open.
+func reveal() -> void:
+	state = State.PROWL
+	_lay_coil()
+	_coil = 0.6
+	_update_visuals(0.0)
+	_gape = 0.3
+	_gill_open = 0.25
+	_listen = 1.0
+	_jaw.rotation.z = -_gape
+	_body.set_instance_shader_parameter(&"glow_boost", _listen)
+	_rebuild_cheeks()
+	_rebuild_body()

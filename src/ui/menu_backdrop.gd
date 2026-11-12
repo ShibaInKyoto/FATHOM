@@ -4,7 +4,7 @@ extends Node3D
 ## idling in its entry chamber, a slowly drifting camera and periodic pings.
 
 ## Codex specimens too big for the viewport, and how far to shrink them.
-const SPECIMEN_SCALE: Dictionary[StringName, float] = {&"choir": 0.28, &"manta": 0.75}
+const SPECIMEN_SCALE: Dictionary[StringName, float] = {&"choir": 0.28, &"manta": 0.75, &"mother": 0.3}
 ## Specimens whose bodies take shape as they swim.
 const WARM_UP: Array[StringName] = [&"shoal"]
 
@@ -130,6 +130,8 @@ func preview_creature(id: StringName) -> void:
 		specimen = Mimic.new()
 	elif id == &"lamplighter":
 		specimen = Lamplighter.new()
+	elif id == &"mother":
+		specimen = BlindMother.new()
 	elif id == &"ironclad":
 		specimen = Ironclad.new()
 	elif id == &"choir":
