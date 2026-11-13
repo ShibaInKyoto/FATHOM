@@ -46,6 +46,8 @@ var exit_sealed := false
 ## Where scattered boulders near the play plane sit (see [PropScatter]), so
 ## things placed on the floor later can keep clear of them.
 var boulders := PackedVector2Array()
+## Floor that set pieces keep for themselves: no props are scattered there.
+var clearings: Array[Rect2] = []
 ## The props that shut or lean aside as the sub passes (see [PropScatter]).
 var prop_life: PropLife
 var descent_marker: DescentMarker

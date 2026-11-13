@@ -61,7 +61,7 @@ static func scatter(level: Level) -> void:
 		for a in layout.anchors:
 			if rng.randf() > density or not _placement_ok(def.placement, a.normal):
 				continue
-			if a.pos.distance_to(layout.start) < 6.0:
+			if a.pos.distance_to(layout.start) < 6.0 or _in_clearing(level, a.pos):
 				continue
 			var z := rng.randf_range(def.z.x, def.z.y)
 			var base := a.pos + a.normal * surface_offset(z)
@@ -113,6 +113,13 @@ static func scatter(level: Level) -> void:
 				_add_life(level, def, mm, mine, xforms, customs, meshes[v].get_aabb().end.y)
 		if id == &"chimney":
 			_add_vent_plumes(level, xforms)
+
+
+static func _in_clearing(level: Level, p: Vector2) -> bool:
+	for r in level.clearings:
+		if r.has_point(p):
+			return true
+	return false
 
 
 ## Hands the props of [param mm] (indices [param mine] into [param xforms]
