@@ -3,13 +3,13 @@
 // y how far along its frond or tentacle it is. UV2: x the part's phase, y how
 // far it pulls in when the sub is near. CUSTOM0: xyz the part's root, w its
 // surface (PropModels' KIND constants).
-// INSTANCE_CUSTOM: x = sway phase, y = tint blend, z = brightness,
-// w = glow multiplier.
+// CUSTOM1: xyz how far the point moves when the prop shuts.
+// INSTANCE_CUSTOM: x = sway phase, y = tint blend, z = brightness, w = the
+// state PropLife keeps: how far it has shut (props that retract) or how far
+// it leans across its stalk out of the sub's way (props with a wake).
 render_mode diffuse_burley, specular_schlick_ggx, cull_disabled;
 
 #include "res://src/fx/shaders/sonar.gdshaderinc"
-
-global uniform vec3 player_pos;
 
 uniform vec3 tint_a : source_color = vec3(1.0);
 uniform vec3 tint_b : source_color = vec3(1.0);
@@ -20,16 +20,13 @@ uniform float roughness : hint_range(0.0, 1.0) = 0.8;
 uniform float metallic : hint_range(0.0, 1.0) = 0.0;
 // How far the current bends the top of the prop, and how fast it swells.
 uniform float sway = 0.0;
-uniform float sway_speed = 0.7;
+uniform float sway_speed = 0.6;
 // How far fronds, tentacles and plumes stir on their own, at their tips.
 uniform float flutter = 0.0;
-uniform float flutter_speed = 1.6;
-// How far tentacles and plumes pull in when the sub comes within shy_far,
-// fully at shy_near.
+uniform float flutter_speed = 0.9;
+// 1 = it shuts (anemones, tubeworms) as far as its state says.
 uniform float retract = 0.0;
-uniform float shy_near = 4.5;
-uniform float shy_far = 9.0;
-// How far the sub's passing pushes the prop aside (at its top).
+// How far (in metres, at its top) a stalk leans at full lean.
 uniform float wake = 0.0;
 // Light let through thin fronds and nets from behind.
 uniform float translucency = 0.0;
@@ -55,34 +52,33 @@ void vertex() {
 	obj_pos = VERTEX;
 	vec3 v = VERTEX;
 	float ph = UV2.x * 6.2831;
-	if (retract > 0.0 && UV2.y > 0.0) {
-		vec3 root = (MODEL_MATRIX * vec4(CUSTOM0.xyz, 1.0)).xyz;
-		float shy = 1.0 - smoothstep(shy_near, shy_far, length(root.xy - player_pos.xy));
-		v = mix(v, CUSTOM0.xyz, clamp(UV2.y * shy * retract, 0.0, 0.97));
+	float shut = 0.0;
+	if (retract > 0.0) {
+		// Eased between its open shape and its shut one, both built in.
+		shut = smoothstep(0.0, 1.0, clamp(INSTANCE_CUSTOM.w, 0.0, 1.0)) * retract;
+		v += CUSTOM1.xyz * shut;
 	}
 	float f = UV.y;
 	if (flutter > 0.0 && f > 0.0) {
+		// A slow stir of its own, stilled as it shuts.
 		float tt = TIME * flutter_speed + ph;
-		v += vec3(sin(tt + f * 2.5), 0.35 * sin(tt * 1.3 + f * 3.1), cos(tt * 0.83 + ph + f * 2.0)) * flutter * f * f;
+		v += vec3(sin(tt + f * 1.4), 0.0, cos(tt * 0.8 + ph + f * 1.1)) * flutter * f * f * (1.0 - shut);
 	}
-	// The current: one slow swell rolling along the zone, so a whole bed of
-	// kelp leans together, with a little chop of its own.
+	// The current: one long, slow swell rolling along the zone, so a whole
+	// bed of kelp leans together, with a slower one under it.
 	float s = sway * UV.x;
 	if (s > 0.0) {
 		vec3 origin = MODEL_MATRIX[3].xyz;
-		float w = TIME * sway_speed - origin.x * 0.12 + phase * 0.3;
-		v.x += (sin(w - v.y * 0.3) * 0.75 + sin(w * 2.7 + v.y * 0.6 + phase) * 0.25) * s;
-		v.z += cos(w * 0.7 + phase - v.y * 0.25) * s * 0.45;
+		float w = TIME * sway_speed - origin.x * 0.08 + phase * 0.2;
+		v.x += (sin(w - v.y * 0.12) * 0.75 + sin(w * 0.57 + 2.1 + phase * 0.3) * 0.25) * s;
+		v.z += sin(w * 0.43 + phase) * s * 0.3;
 	}
-	if (wake > 0.0 && UV.x > 0.0) {
-		// Parted by the hull as the sub noses through: pushed out from it,
-		// most where it passes closest, in the play plane only.
-		vec3 wp = (MODEL_MATRIX * vec4(v, 1.0)).xyz;
-		vec2 off = wp.xy - player_pos.xy;
-		float near = exp(-(dot(off, off) + wp.z * wp.z * 2.0) / 10.0);
-		vec2 push = off / max(length(off), 0.3) * wake * UV.x * near;
+	if (wake > 0.0 && INSTANCE_CUSTOM.w != 0.0) {
+		// Bent from its foot across itself, out of the hull's way.
+		vec3 up = normalize(MODEL_MATRIX[1].xyz);
+		vec3 side = normalize(vec3(up.y, -up.x, 0.0));
 		float scale2 = dot(MODEL_MATRIX[0].xyz, MODEL_MATRIX[0].xyz);
-		v += transpose(mat3(MODEL_MATRIX)) * vec3(push, 0.0) / scale2;
+		v += transpose(mat3(MODEL_MATRIX)) * side / scale2 * INSTANCE_CUSTOM.w * wake * UV.x;
 	}
 	VERTEX = v;
 	world_pos = (MODEL_MATRIX * vec4(v, 1.0)).xyz;
@@ -255,7 +251,8 @@ void fragment() {
 	BACKLIGHT = albedo * translucency;
 	float pulse = 1.0 + glow_pulse * sin(TIME * 1.7 + phase + part.x * 3.0);
 	float fres = pow(1.0 - clamp(dot(n, VIEW), 0.0, 1.0), 2.0);
-	vec3 emission = glow_color.rgb * glow * glow_strength * custom.w * pulse;
+	float glow_mult = 0.6 + 0.6 * fract(custom.x * 13.7);
+	vec3 emission = glow_color.rgb * glow * glow_strength * glow_mult * pulse;
 	emission *= mix(1.0, face_light + fres * 0.8, facet);
 	vec2 sonar = sonar_sample(world_pos.xy);
 	emission += sonar_color.rgb * (sonar.x * 2.0 + sonar.y * 0.4) * (0.3 + fres);

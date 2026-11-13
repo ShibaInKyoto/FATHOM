@@ -14,27 +14,28 @@ const ROCK_SHADER := preload("res://src/fx/shaders/rock_prop.gdshader")
 ## placement: floor / ceiling / wall / any. density: chance per anchor.
 ## Optional yaw: max spin (radians) around the up axis; default is any.
 ## sway: how far the current bends its top; flutter: how far its fronds or
-## tentacles stir; retract: how far they pull in from the sub; wake: how far
-## the sub pushes it aside in passing; glass: light through it from behind.
+## tentacles stir; retract: whether it shuts when the sub comes close; wake:
+## how far (m) the hull bends its top aside in passing (both kept by
+## [PropLife]); glass: light through it from behind.
 const DEFS: Dictionary[StringName, Dictionary] = {
 	&"kelp": {"placement": "floor", "density": 0.22, "scale": Vector2(0.6, 1.4), "z": Vector2(-4.5, 1.5),
-		"sway": 0.9, "flutter": 0.1, "wake": 1.6, "glass": 0.45, "rough": 0.55},
+		"sway": 0.4, "flutter": 0.04, "wake": 1.5, "glass": 0.45, "rough": 0.55},
 	&"rock": {"placement": "any", "density": 0.18, "scale": Vector2(0.5, 2.0), "z": Vector2(-3.0, 1.0),
 		"rough": 0.9},
 	&"coral": {"placement": "floor", "density": 0.2, "scale": Vector2(0.8, 1.6), "z": Vector2(-3.5, 0.0),
-		"sway": 0.015, "rough": 0.65},
+		"rough": 0.65},
 	&"anemone": {"placement": "wall", "density": 0.12, "scale": Vector2(0.6, 1.3), "z": Vector2(-3.0, 0.0),
-		"sway": 0.04, "flutter": 0.07, "retract": 0.9, "wake": 0.15, "glass": 0.3, "rough": 0.4},
+		"flutter": 0.025, "retract": 1.0, "glass": 0.3, "rough": 0.4},
 	&"fan": {"placement": "wall", "density": 0.12, "scale": Vector2(0.8, 1.6), "z": Vector2(-4.0, -1.0),
-		"sway": 0.14, "wake": 0.3, "glass": 0.5, "rough": 0.6, "yaw": 0.6},
+		"sway": 0.05, "glass": 0.5, "rough": 0.6, "yaw": 0.6},
 	&"crystal": {"placement": "any", "density": 0.1, "scale": Vector2(0.5, 1.5), "z": Vector2(-3.5, 0.5),
 		"rough": 0.15},
 	&"mushroom": {"placement": "floor", "density": 0.16, "scale": Vector2(1.0, 2.2), "z": Vector2(-3.0, 0.0),
-		"sway": 0.02, "glass": 0.25, "rough": 0.5},
+		"glass": 0.25, "rough": 0.5},
 	&"spine": {"placement": "floor", "density": 0.025, "scale": Vector2(0.8, 1.4), "z": Vector2(-4.0, -1.0),
 		"rough": 0.55},
 	&"tubeworm": {"placement": "floor", "density": 0.2, "scale": Vector2(0.6, 1.3), "z": Vector2(-3.0, 0.0),
-		"sway": 0.025, "flutter": 0.035, "retract": 1.0, "rough": 0.45},
+		"flutter": 0.012, "retract": 1.0, "rough": 0.45},
 	&"chimney": {"placement": "floor", "density": 0.05, "scale": Vector2(0.7, 1.4), "z": Vector2(-4.0, -1.5),
 		"rough": 0.9},
 }
@@ -74,7 +75,8 @@ static func scatter(level: Level) -> void:
 			xforms.append(Transform3D(basis, Vector3(base.x, base.y, z)))
 			if id == &"rock" and z > -2.0:
 				level.boulders.append(a.pos)
-			customs.append(Color(rng.randf(), rng.randf(), rng.randf_range(0.75, 1.15), rng.randf_range(0.6, 1.2)))
+			# (w is left for PropLife's state: shut or leaning.)
+			customs.append(Color(rng.randf(), rng.randf(), rng.randf_range(0.75, 1.15), 0.0))
 			picks.append(rng.randi() % meshes.size())
 		if xforms.is_empty():
 			continue
@@ -107,8 +109,25 @@ static func scatter(level: Level) -> void:
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if id == &"rock" or id == &"kelp" \
 				else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			level.add_child(mmi)
+			if def.get("retract", 0.0) > 0.0 or def.get("wake", 0.0) > 0.0:
+				_add_life(level, def, mm, mine, xforms, customs, meshes[v].get_aabb().end.y)
 		if id == &"chimney":
 			_add_vent_plumes(level, xforms)
+
+
+## Hands the props of [param mm] (indices [param mine] into [param xforms]
+## and [param customs]) to the level's [PropLife].
+static func _add_life(level: Level, def: Dictionary, mm: MultiMesh, mine: Array, xforms: Array[Transform3D],
+		customs: Array[Color], height: float) -> void:
+	if level.prop_life == null:
+		level.prop_life = PropLife.new()
+	var picked_xf := []
+	var picked_custom := []
+	for i: int in mine:
+		picked_xf.append(xforms[i])
+		picked_custom.append(customs[i])
+	var kind := PropLife.Kind.SHY if def.get("retract", 0.0) > 0.0 else PropLife.Kind.LEAN
+	level.prop_life.add(mm, kind, picked_xf, picked_custom, height)
 
 
 static func _placement_ok(placement: String, n: Vector2) -> bool:

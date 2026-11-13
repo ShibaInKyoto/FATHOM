@@ -9,27 +9,32 @@ var colors := PackedColorArray()
 var uvs := PackedVector2Array()
 var uv2s := PackedVector2Array()
 var custom := PackedFloat32Array()
+var shut_offsets := PackedFloat32Array()
 var indices := PackedInt32Array()
 ## The height at which the current bends a point fully.
 var sway_height := 1.0
 ## Stamped on the vertices added next: the part's phase, root and surface,
-## whether it stirs on its own (1) and how far it pulls in (0..1).
+## and whether it stirs on its own (1).
 var phase := 0.0
 var root := Vector3.ZERO
 var surface := 0.0
 var stir := 0.0
-var pull := 0.0
+## Where the vertices added next go when the prop shuts.
+var shut := Transform3D.IDENTITY
 
 
-## Adds a vertex [param along] its part (0 at its root, 1 at its tip);
-## [param pull_weight] scales how far it pulls in (default: by [param along]).
-func add(p: Vector3, n: Vector3, c: Color, along: float, pull_weight := -1.0) -> int:
+## Adds a vertex [param along] its part (0 at its root, 1 at its tip).
+## [param closed] is where it sits when the prop has shut; by default
+## [member shut] moves it there.
+func add(p: Vector3, n: Vector3, c: Color, along: float, closed := Vector3.INF) -> int:
 	verts.append(p)
 	normals.append(n)
 	colors.append(c)
 	uvs.append(Vector2(pow(clampf(p.y / sway_height, 0.0, 1.0), 1.5), along * stir))
-	uv2s.append(Vector2(phase, pull * (along if pull_weight < 0.0 else pull_weight)))
+	uv2s.append(Vector2(phase, 0.0))
 	custom.append_array([root.x, root.y, root.z, surface])
+	var to := (shut * p if closed == Vector3.INF else closed) - p
+	shut_offsets.append_array([to.x, to.y, to.z, 0.0])
 	return verts.size() - 1
 
 
@@ -50,13 +55,47 @@ func quad(a: int, b: int, c: int, d: int) -> void:
 
 
 ## A tube along [param pts] with [param radii]; [param paint] (t along it,
-## angle round it) gives its colours, [param pull_at] (t) how far each
-## ring pulls in, [param shape] (t, angle) scales its radius round about;
-## [param up0] and [param flat] flatten it across that direction.
+## angle round it) gives its colours, [param shape] (t, angle) scales its
+## radius round about; [param up0] and [param flat] flatten it across that
+## direction.
 func tube(pts: PackedVector3Array, radii: PackedFloat32Array, sides: int, paint: Callable,
-		pull_at: Callable = Callable(), shape: Callable = Callable(), up0 := Vector3.ZERO, flat := 1.0) -> void:
+		shape: Callable = Callable(), up0 := Vector3.ZERO, flat := 1.0) -> void:
+	_tube(pts, radii, sides, paint, shape, up0, flat, PackedVector3Array(), PackedFloat32Array())
+
+
+## A tube that takes another shape when the prop shuts: along
+## [param shut_pts] with [param shut_radii] (as many of each as it has).
+func tube_shutting(pts: PackedVector3Array, radii: PackedFloat32Array, shut_pts: PackedVector3Array,
+		shut_radii: PackedFloat32Array, sides: int, paint: Callable, shape: Callable = Callable()) -> void:
+	_tube(pts, radii, sides, paint, shape, Vector3.ZERO, 1.0, shut_pts, shut_radii)
+
+
+func _tube(pts: PackedVector3Array, radii: PackedFloat32Array, sides: int, paint: Callable, shape: Callable,
+		up0: Vector3, flat: float, shut_pts: PackedVector3Array, shut_radii: PackedFloat32Array) -> void:
 	var n := pts.size()
 	var start := verts.size()
+	var rings := _rings(pts, radii, sides, shape, up0, flat)
+	var shut_rings := _rings(shut_pts, shut_radii, sides, shape, up0, flat) if not shut_pts.is_empty() else []
+	for i in n:
+		var t := float(i) / (n - 1)
+		var ring: Array = rings[i]
+		for j in sides + 1:
+			var a := TAU * j / sides
+			var closed: Vector3 = (shut_rings[i][0][j] as Vector3) if not shut_rings.is_empty() else Vector3.INF
+			add(ring[0][j], ring[1][j], paint.call(t, a), t, closed)
+	var row := sides + 1
+	for i in n - 1:
+		for j in sides:
+			var a := start + i * row + j
+			quad(a, a + 1, a + row + 1, a + row)
+
+
+## The rings of points and normals round a tube along [param pts], its
+## frame carried down it so it does not twist.
+func _rings(pts: PackedVector3Array, radii: PackedFloat32Array, sides: int, shape: Callable, up0: Vector3,
+		flat: float) -> Array:
+	var n := pts.size()
+	var out := []
 	var fwd0 := (pts[1] - pts[0]).normalized()
 	var up := up0 if up0 != Vector3.ZERO else fwd0.cross(Vector3.FORWARD if absf(fwd0.z) < 0.9 else Vector3.RIGHT)
 	for i in n:
@@ -67,20 +106,19 @@ func tube(pts: PackedVector3Array, radii: PackedFloat32Array, sides: int, paint:
 		up = up.normalized()
 		var side := fwd.cross(up)
 		var t := float(i) / (n - 1)
-		var w := -1.0 if pull_at.is_null() else float(pull_at.call(t))
 		var dr := (radii[mini(i + 1, n - 1)] - radii[maxi(i - 1, 0)]) \
 			/ maxf(pts[mini(i + 1, n - 1)].distance_to(pts[maxi(i - 1, 0)]), 0.0001)
+		var ring_pts := PackedVector3Array()
+		var ring_normals := PackedVector3Array()
 		for j in sides + 1:
 			var a := TAU * j / sides
 			var s := 1.0 if shape.is_null() else float(shape.call(t, a))
 			var dir := up * cos(a) * flat + side * sin(a)
 			var nrm := (up * cos(a) / maxf(flat, 0.05) + side * sin(a)).normalized() - fwd * dr
-			add(pts[i] + dir * radii[i] * s, nrm.normalized(), paint.call(t, a), t, w)
-	var row := sides + 1
-	for i in n - 1:
-		for j in sides:
-			var a := start + i * row + j
-			quad(a, a + 1, a + row + 1, a + row)
+			ring_pts.append(pts[i] + dir * radii[i] * s)
+			ring_normals.append(nrm.normalized())
+		out.append([ring_pts, ring_normals])
+	return out
 
 
 ## A sheet through [param rows] of points, its front facing [param facing]
@@ -144,7 +182,7 @@ func disc(c: Vector3, radius: float, sides: int, rings: int, n: Vector3, paint: 
 		var r := lerpf(0.08, 1.0, float(i) / rings)
 		for j in sides + 1:
 			var a := TAU * j / sides
-			add(c + (u * cos(a) + v * sin(a)) * r * radius - n * 0.03 * radius * (1.0 - r), n, paint.call(r, a), 0.0, 1.0)
+			add(c + (u * cos(a) + v * sin(a)) * r * radius - n * 0.03 * radius * (1.0 - r), n, paint.call(r, a), 0.0)
 	var row := sides + 1
 	for i in rings:
 		for j in sides:
@@ -224,8 +262,10 @@ func commit() -> ArrayMesh:
 	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_TEX_UV2] = uv2s
 	arrays[Mesh.ARRAY_CUSTOM0] = custom
+	arrays[Mesh.ARRAY_CUSTOM1] = shut_offsets
 	arrays[Mesh.ARRAY_INDEX] = indices
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {},
-		Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
+		(Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
+		| (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM1_SHIFT))
 	return mesh

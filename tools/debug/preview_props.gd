@@ -6,8 +6,9 @@ extends Node3D
 ##        [frames] [mode]
 ## (props: comma-separated ids, default every prop the zone's biome uses;
 ## frames: how many to film of each variant, default 1; mode: "close"
-## (default), "wide" (the whole row at once) or "shy" (the sub's position
-## sweeps in to each prop and away again, for the ones that pull in)).
+## (default), "wide" (the whole row at once) or "shy" (a sub, unseen, glides
+## in to each prop over the first third, waits, then leaves: for the props
+## that shut or lean aside, run by a real [PropLife])).
 
 const SPACING := 4.2
 
@@ -18,6 +19,7 @@ var _mode := "close"
 var _cam: Camera3D
 var _lamp: SpotLight3D
 var _items: Array[Array] = []
+var _life := PropLife.new()
 
 
 func _ready() -> void:
@@ -53,7 +55,12 @@ func _ready() -> void:
 		var s := 1.0 if id != &"chimney" and id != &"spine" and id != &"kelp" else 0.55
 		var at := Vector3(x0 + i * SPACING, -1.6, 0)
 		mm.set_instance_transform(0, Transform3D(Basis(Vector3.UP, 0.4) * Basis.from_scale(Vector3.ONE * s), at))
-		mm.set_instance_custom_data(0, Color(0.37 * (i + 1), 0.5, 0.95, 1.0))
+		mm.set_instance_custom_data(0, Color(0.37 * (i + 1), 0.5, 0.95, 0.0))
+		var def: Dictionary = PropScatter.DEFS[id]
+		if def.get("retract", 0.0) > 0.0 or def.get("wake", 0.0) > 0.0:
+			var kind := PropLife.Kind.SHY if def.get("retract", 0.0) > 0.0 else PropLife.Kind.LEAN
+			_life.add(mm, kind, [mm.get_instance_transform(0)], [mm.get_instance_custom_data(0)],
+				(_items[i][1] as Mesh).get_aabb().end.y)
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
 		mmi.material_override = PropScatter.rock_material(biome) if id == &"rock" else PropScatter._material(id, biome)
@@ -98,17 +105,17 @@ func _aim(i: int) -> void:
 	_lamp.look_at(focus)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	_frames += 1
 	RenderingServer.global_shader_parameter_set(&"sonar_time", 100.0)
 	var n := maxi(_frames - 12, 0) / 2
 	var item := mini(n / _per, _items.size() - 1) if _mode != "wide" else 0
 	if _mode == "shy":
-		# In from twelve metres to the prop, then back out.
+		# In from twelve metres to beside the prop, a pause, then away.
 		var f := float(n % _per) / maxf(_per - 1, 1)
-		var reach := absf(f * 2.0 - 1.0) * 12.0
+		var reach := 12.0 - 11.0 * smoothstep(0.0, 0.3, f) + 13.0 * smoothstep(0.42, 0.62, f)
 		var at: Vector3 = _items[item][2]
-		RenderingServer.global_shader_parameter_set(&"player_pos", at + Vector3(reach, 0.0, 0.0))
+		_life.tick(delta, Vector2(at.x + reach, at.y))
 	if _frames < 12:
 		return
 	_aim(item)

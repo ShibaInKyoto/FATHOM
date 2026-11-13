@@ -8,9 +8,11 @@ extends RefCounted
 ## - COLOR: rgb albedo, a glow mask.
 ## - UV: x how far the current bends this point (0 at the base, 1 at the
 ##   top); y how far along its frond or tentacle it is, for its own stir.
-## - UV2: x the part's phase; y how far it pulls in when the sub is near.
-## - CUSTOM0: xyz the part's root (where it pulls in to, and the centre its
-##   patterns are drawn round); w its surface (see the KIND constants).
+## - UV2: x the part's phase.
+## - CUSTOM0: xyz the part's root (the centre its patterns are drawn round);
+##   w its surface (see the KIND constants).
+## - CUSTOM1: xyz how far the point moves when the prop shuts (anemones
+##   closing up, tubeworm plumes ducking into their tubes).
 
 const PLAIN := 0.0
 const POLYPS := 1.0
@@ -298,7 +300,7 @@ static func _sponges(seed_value: int) -> ArrayMesh:
 		var flesh := func(_t: float, a: float) -> Color:
 			var ridge := 0.04 * sin(a * 7.0)
 			return Color(0.78 + ridge, 0.6 + ridge, 0.55, 0.0)
-		k.tube(outer, radii, 14, flesh, Callable(), func(_t: float, a: float) -> float: return 1.0 + 0.06 * sin(a * 7.0))
+		k.tube(outer, radii, 14, flesh, func(_t: float, a: float) -> float: return 1.0 + 0.06 * sin(a * 7.0))
 		# The lip, folding over into the dark inside.
 		var top := base + lean * 0.95 * size
 		var inner := PackedVector3Array([top, top + lean * 0.03 * size, top - lean * 0.08 * size, top - lean * 0.6 * size])
@@ -327,19 +329,23 @@ static func _anemones(spots: Array, seed_value: int) -> ArrayMesh:
 		var base := Vector3(s.x, -0.04, s.z)
 		var size := s.w
 		var top := base + Vector3(0, 0.2 * size, 0)
-		var shrunk := base + Vector3(0, 0.12 * size, 0)
+		# Shut, it squats into a fat column, its rim drawn in like a purse.
+		var shut_top := base + Vector3(0, 0.15 * size, 0)
+		var pursed := 0.38
 		k.root = base
-		k.pull = 0.4
-		k.tube(PackedVector3Array([base, base + Vector3(0, 0.03, 0) * size, base + Vector3(0, 0.1, 0) * size, top]),
-			PackedFloat32Array([0.24 * size, 0.19 * size, 0.165 * size, 0.2 * size]), 16, column, Callable(),
+		k.tube_shutting(
+			PackedVector3Array([base, base + Vector3(0, 0.03, 0) * size, base + Vector3(0, 0.1, 0) * size, top]),
+			PackedFloat32Array([0.24 * size, 0.19 * size, 0.165 * size, 0.2 * size]),
+			PackedVector3Array([base, base + Vector3(0, 0.035, 0) * size, base + Vector3(0, 0.1, 0) * size, shut_top]),
+			PackedFloat32Array([0.25 * size, 0.215 * size, 0.19 * size, 0.2 * size * pursed]), 16, column,
 			func(_t: float, a: float) -> float: return 1.0 + 0.05 * sin(a * 16.0))
-		# The oral disc, its mouth at the centre, drawn in as the anemone closes.
-		k.root = shrunk
-		k.pull = 0.75
+		# The oral disc, its mouth at the centre, drawn in with the rim.
+		var purse := Basis.from_scale(Vector3(pursed, 1.0, pursed))
+		k.shut = Transform3D(purse, shut_top - purse * top)
 		k.disc(top, 0.205 * size, 18, 3, Vector3.UP, func(r: float, a: float) -> Color:
 			var ray := 0.5 + 0.5 * cos(a * 9.0)
 			return Color(0.8 + ray * 0.15, 0.62 + ray * 0.15, 0.6, 0.3 + ray * 0.4 * r))
-		k.root = shrunk
+		k.shut = Transform3D.IDENTITY
 		# Rings of tentacles, the inner ones upright, the outer ones arching out.
 		var rings := [[0.06, 12, 0.4, 0.2], [0.1, 17, 0.48, 0.5], [0.14, 22, 0.54, 0.8], [0.18, 27, 0.56, 1.1]]
 		for ring: Array in rings:
@@ -354,21 +360,28 @@ static func _anemones(spots: Array, seed_value: int) -> ArrayMesh:
 				var lift := rng.randf_range(0.5, 1.0)
 				var pts := PackedVector3Array()
 				var radii := PackedFloat32Array()
+				# Shut, each one is drawn down inside the column, out of sight.
+				var tucked := PackedVector3Array()
+				var tucked_radii := PackedFloat32Array()
 				var p := root
+				var q := shut_top + out * float(ring[0]) * size * pursed - Vector3(0, 0.01, 0)
+				var down := (Vector3.DOWN * 0.8 - out * 0.4).normalized()
 				for j in 6:
 					var t := j / 5.0
 					pts.append(p)
-					radii.append((0.019 - 0.005 * t + 0.004 * smoothstep(0.7, 0.95, t)) * size if j < 5 else 0.007 * size)
+					var r := (0.019 - 0.005 * t + 0.004 * smoothstep(0.7, 0.95, t)) * size if j < 5 else 0.007 * size
+					radii.append(r)
+					tucked.append(q)
+					tucked_radii.append(r * 0.7)
 					# Out from the disc, then arching over, the tip lifting again.
 					var bend := spread * curl * sin(t * PI * 0.8)
 					var heading := (Vector3.UP * (1.0 - bend * 0.8 + lift * t * t * 0.6) + out * (0.25 + bend)).normalized()
 					p += heading * length / 5.0
+					q += down * 0.02 * size
 				k.phase = rng.randf()
 				k.stir = 1.0
-				k.pull = 1.0
-				k.tube(pts, radii, 4, tentacle, func(t: float) -> float: return 0.4 + 0.6 * t)
+				k.tube_shutting(pts, radii, tucked, tucked_radii, 4, tentacle)
 		k.stir = 0.0
-		k.pull = 0.0
 	return k.commit()
 
 
@@ -567,11 +580,11 @@ static func _vertebra(k: PropKit, rng: RandomNumberGenerator, c: Vector3, along:
 		PackedFloat32Array([0.3 * size, 0.24 * size, 0.24 * size, 0.3 * size]), 10, bone)
 	var tip := c + up * 0.55 * size - along * 0.18 * size
 	k.tube(PackedVector3Array([c + up * 0.15 * size, c + up * 0.36 * size - along * 0.06 * size, tip]),
-		PackedFloat32Array([0.14 * size, 0.1 * size, 0.06 * size]), 6, bone, Callable(), Callable(), side, 0.45)
+		PackedFloat32Array([0.14 * size, 0.1 * size, 0.06 * size]), 6, bone, Callable(), side, 0.45)
 	for s: float in [1.0, -1.0]:
 		var wing := c + side * s * 0.42 * size + up * 0.05 * size
 		k.tube(PackedVector3Array([c + side * s * 0.15 * size, c + side * s * 0.32 * size, wing]),
-			PackedFloat32Array([0.12 * size, 0.085 * size, 0.06 * size]), 6, bone, Callable(), Callable(), up, 0.5)
+			PackedFloat32Array([0.12 * size, 0.085 * size, 0.06 * size]), 6, bone, Callable(), up, 0.5)
 	if rng.randf() < 0.3:
 		# Bone-eating worms: a tuft of red fuzz.
 		k.blob(c + up * 0.22 * size + side * 0.14 * size, Vector3(0.05, 0, 0) * size, Vector3(0, 0.035, 0) * size,
@@ -594,7 +607,7 @@ static func _rib(k: PropKit, from: Vector3, side: float, reach: float, snapped: 
 	var bone := func(t: float, _a: float) -> Color:
 		var low := smoothstep(0.35, 0.0, t)
 		return Color(0.86 - low * 0.2, 0.83 - low * 0.22, 0.74 - low * 0.22, 0.0)
-	k.tube(pts, radii, 7, bone, Callable(), Callable(), Vector3.RIGHT, 0.6)
+	k.tube(pts, radii, 7, bone, Callable(), Vector3.RIGHT, 0.6)
 
 
 # --- Vents -------------------------------------------------------------------
@@ -627,14 +640,15 @@ static func _tubeworms(seed_value: int, count: int, heights: Vector2) -> ArrayMe
 			return Color(0.42 + g * 0.46, 0.36 + g * 0.48, 0.3 + g * 0.48, 0.0))
 		var mouth := pts[6]
 		var axis := (pts[6] - pts[5]).normalized()
-		var hidden := mouth - axis * 0.3
-		k.root = hidden
+		k.root = mouth
 		k.surface = PLAIN
-		k.pull = 1.0
 		k.stir = 1.0
+		# Shut, the plume draws together and slides down into the tube.
+		var narrow := Basis.from_scale(Vector3.ONE * 0.6)
+		k.shut = Transform3D(narrow, mouth - axis * 0.34 - narrow * mouth)
 		_plume(k, rng, mouth, axis)
+		k.shut = Transform3D.IDENTITY
 		k.stir = 0.0
-		k.pull = 0.0
 	return k.commit()
 
 
@@ -644,7 +658,7 @@ static func _plume(k: PropKit, rng: RandomNumberGenerator, mouth: Vector3, axis:
 	var red := func(t: float, _a: float) -> Color:
 		return Color(0.85, 0.12 + t * 0.06, 0.08, 0.5 + t * 0.4)
 	k.tube(PackedVector3Array([mouth - axis * 0.04, mouth + axis * 0.12, mouth + axis * 0.2]),
-		PackedFloat32Array([0.05, 0.05, 0.02]), 6, red, func(t: float) -> float: return t * 0.4)
+		PackedFloat32Array([0.05, 0.05, 0.02]), 6, red)
 	var blades := 11
 	var blade := func(i: int, _j: int) -> Color: return Color(0.8, 0.08, 0.07, 0.45 + 0.12 * i)
 	for b in blades:
@@ -713,7 +727,7 @@ static func _spire(k: PropKit, noise: FastNoiseLite, base: Vector3, h: float, r0
 		# Ledges jut further on one side than the other.
 		var lop := 1.0 + ledge * 0.35 * sin(a + y * 2.0)
 		return (1.0 + noise.get_noise_3d(cos(a) * 1.5, y * 1.3, sin(a) * 1.5) * 0.3) * lop
-	k.tube(pts, radii, 14, crust, Callable(), craggy)
+	k.tube(pts, radii, 14, crust, craggy)
 	# The mouth: a rim folding into the glowing throat.
 	var axis := (pts[n] - pts[n - 1]).normalized()
 	k.tube(PackedVector3Array([top, top + axis * 0.04, top - axis * 0.1, top - axis * 0.6]),

@@ -46,6 +46,8 @@ var exit_sealed := false
 ## Where scattered boulders near the play plane sit (see [PropScatter]), so
 ## things placed on the floor later can keep clear of them.
 var boulders := PackedVector2Array()
+## The props that shut or lean aside as the sub passes (see [PropScatter]).
+var prop_life: PropLife
 var descent_marker: DescentMarker
 ## Set while a ping no hunter would follow is going out (see [method ping]).
 var silent_ping := false
@@ -140,9 +142,8 @@ func tick(delta: float) -> void:
 	time += delta
 	RenderingServer.global_shader_parameter_set(&"sonar_time", time)
 	var focus := player.pos if player else layout.start
-	# Where the sub is, for the tentacles and plumes that pull in from it.
-	RenderingServer.global_shader_parameter_set(&"player_pos",
-		Vector3(player.pos.x, player.pos.y, 0.0) if player else Vector3(0.0, 1.0e4, 0.0))
+	if prop_life and player:
+		prop_life.tick(delta, player.pos, player.vel)
 	for e in entities:
 		if e.alive and e.pos.distance_squared_to(focus) < e.active_radius * e.active_radius:
 			e.tick(delta)
