@@ -139,45 +139,48 @@ vec2 glass_hash(vec2 p) {
 	return fract(sin(p) * 43758.5453);
 }
 
-// Obsidian breaks in conchoidal scallops: shallow shell-shaped hollows of
-// different sizes, each ringed with fine ripples spreading from the point
-// it broke from, blended softly where they meet so the ridges between them
-// are sharp but rounded. Returns the slope of the surface at [param q]
-// (metres on the seam).
-vec2 conchoidal(vec2 q) {
-	vec2 cell = q * 0.95;
+// Crystal facets: the face broken into flat, sharply cut planes of
+// different sizes, each tilted its own way. Returns the facet's tilt (xy),
+// a value of its own (z, 0..1) and how near its edge the point is (w, a thin
+// line for the edges to glint).
+vec4 glass_facets(vec2 q) {
+	vec2 cell = q * 1.5;
 	vec2 i = floor(cell);
 	vec2 f = fract(cell);
-	float total = 0.0;
-	vec2 slope = vec2(0.0);
-	float best = 8.0;
-	vec2 best_r = vec2(0.0);
+	float d1 = 8.0;
+	float d2 = 8.0;
 	vec2 best_id = vec2(0.0);
 	for (int y = -1; y <= 1; y++) {
 		for (int x = -1; x <= 1; x++) {
 			vec2 g = vec2(float(x), float(y));
 			vec2 h = glass_hash(i + g);
 			vec2 r = g + h * 0.8 + 0.1 - f;
-			// Each hollow its own depth: a deeper bowl, a steeper wall.
-			float depth = 0.6 + 0.8 * fract(h.x * 7.1 + h.y * 3.3);
-			float bowl = dot(r, r) * depth;
-			// Soft minimum: the hollows meet in rounded creases.
-			float w = exp(-bowl * 14.0);
-			total += w;
-			slope += w * (-2.0 * depth) * r;
-			if (bowl < best) {
-				best = bowl;
-				best_r = r;
+			float d = dot(r, r);
+			if (d < d1) {
+				d2 = d1;
+				d1 = d;
 				best_id = i + g;
+			} else if (d < d2) {
+				d2 = d;
 			}
 		}
 	}
-	slope /= max(total, 1e-5);
-	// Its ripples, spreading from a point off to one side of it.
-	vec2 origin = best_r + (glass_hash(best_id + 7.3) - 0.5) * 0.9;
-	float rd = length(origin);
-	float ripple = cos(rd * 30.0) * exp(-rd * 1.8) * 0.05;
-	return (slope * 0.16 + (origin / max(rd, 0.001)) * ripple) * 0.95;
+	vec2 h = glass_hash(best_id + 4.7);
+	vec2 tilt = (h - 0.5) * 0.9;
+	float own = glass_hash(best_id + 9.1).x;
+	float gap = sqrt(d2) - sqrt(d1);
+	float w = max(fwidth(gap), 0.002);
+	float edge = 1.0 - smoothstep(0.015, 0.015 + w * 1.5, gap);
+	return vec4(tilt, own, edge);
+}
+
+// A glint on a facet: a tiny bright point where it catches the light.
+float glass_sparkle(vec2 q, float own) {
+	vec2 cell = q * 3.0;
+	vec2 i = floor(cell);
+	vec2 o = glass_hash(i + 2.3);
+	float d = length(fract(cell) - (0.2 + 0.6 * o));
+	return (1.0 - smoothstep(0.0, 0.06, d)) * step(0.75, o.x);
 }
 
 // The flow bands frozen through the glass, at a point within it.
@@ -304,71 +307,57 @@ void fragment() {
 	float glass_body = smoothstep(0.38, 0.72, glass);
 	if (glass > 0.001) {
 		vec2 q = seam_local(world_pos.xy);
-		vec2 conch = conchoidal(q);
-		// The surface's own frame, to tip its normal by the scallops.
+		vec4 cut = glass_facets(q);
+		// The surface's own frame, to tilt each facet its own way.
 		vec3 across = vec3(glass_axis.xy, 0.0) - n * dot(vec3(glass_axis.xy, 0.0), n);
 		across = length(across) > 0.2 ? normalize(across) : normalize(cross(n, vec3(0.0, 0.0, 1.0)) + vec3(1e-4));
 		vec3 along = normalize(cross(n, across));
 		float body = glass_body;
-		vec3 gn = normalize(n - (across * conch.x + along * conch.y) * body);
+		vec3 gn = normalize(n - (across * cut.x + along * cut.y) * body);
 		vec3 view_w = normalize(CAMERA_POSITION_WORLD - world_pos);
 		float fres = pow(1.0 - clamp(dot(gn, view_w), 0.0, 1.0), 4.0);
-		// Inside: the flow bands, seen a little way into the glass, bent by
-		// its scalloped face as light is through rippled glass.
-		vec3 into = refract(-view_w, gn, 0.66);
-		into = length(into) > 0.0 ? into : -n;
-		float depth_cos = max(-dot(into, n), 0.35);
+		// Its frozen flow bands, a little way in (they still carry the light
+		// when it rings).
 		float inner = 0.0;
 		for (int k = 1; k <= 3; k++) {
-			float dk = float(k) * 0.16;
-			// (The light within drifts slowly through it.)
-			inner += glass_bands(world_pos + into * dk / depth_cos + vec3(0.0, 0.0, TIME * 0.04))
-				* (1.0 - float(k) * 0.22);
+			inner += glass_bands(world_pos - n * float(k) * 0.16 + vec3(0.0, 0.0, TIME * 0.04)) * (1.0 - float(k) * 0.22);
 		}
 		inner /= 2.3;
-		// Translucent: through a metre of smoky glass the rock it set on
-		// shows, dim and tinted, bent by the hollows of its face; pale
-		// inclusions hang at different depths in it.
-		vec3 deep = world_pos + into * 0.9 / depth_cos;
-		vec2 uv_deep = deep.xy * tex_scale;
-		// (Blurred: seen through thick glass, what lies beneath goes soft.)
-		vec3 beneath = textureGrad(rock_albedo, uv_deep, dx_z * 6.0, dy_z * 6.0).rgb;
-		float beneath_lum = dot(beneath, vec3(0.299, 0.587, 0.114));
-		vec3 seen = vec3(beneath_lum) * vec3(0.42, 0.4, 0.56);
-		float specks = 0.0;
-		for (int k = 1; k <= 2; k++) {
-			vec3 at = world_pos + into * (0.25 + 0.3 * float(k)) / depth_cos;
-			vec2 cell = at.xy * (5.0 + 3.0 * float(k));
-			vec2 o = glass_hash(floor(cell) + float(k) * 13.0);
-			float d = length(fract(cell) - (0.2 + 0.6 * o));
-			specks += (1.0 - smoothstep(0.04, 0.11, d)) * step(0.8, o.x) * (1.0 - 0.35 * float(k));
-		}
-		vec3 obsidian = vec3(0.01, 0.009, 0.012) * (0.7 + 0.8 * inner) + seen * 0.11 + vec3(0.32, 0.31, 0.36) * specks * 0.16;
+		// Each facet its own shade of dark violet glass.
+		float shade = cut.z;
+		vec3 crystal = mix(vec3(0.01, 0.008, 0.016), vec3(0.045, 0.03, 0.075), shade);
 		// The contact: rock baked dark and smooth before it turns to glass.
 		float fused = smoothstep(0.0, 0.5, glass);
 		vec3 rock_baked = ALBEDO * mix(1.0, 0.25, fused);
-		ALBEDO = mix(rock_baked, obsidian, body);
-		ROUGHNESS = mix(mix(ROUGHNESS, 0.4, fused), 0.03, body);
-		SPECULAR = mix(0.35, 0.3, body);
+		ALBEDO = mix(rock_baked, crystal, body);
+		ROUGHNESS = mix(mix(ROUGHNESS, 0.4, fused), 0.06, body);
+		SPECULAR = mix(0.35, 0.5, body);
 		NORMAL = normalize((VIEW_MATRIX * vec4(mix(final_n, gn, body), 0.0)).xyz);
 		// A faint reflection of the vents' glow from below and of the dark
-		// above, and a violet sheen in its flow bands at a glance, so the
-		// gloss and the depth read.
+		// above, so the gloss reads.
 		vec3 refl = reflect(-view_w, gn);
 		vec3 env = mix(vec3(0.07, 0.032, 0.016), vec3(0.008, 0.01, 0.016), smoothstep(-0.4, 0.5, refl.y));
 		emission += env * fres * body * 2.2;
-		emission += glass_color * smoothstep(0.82, 0.97, inner) * fres * body * 0.035;
-		// The chamber's light behind it shows faintly through the glass,
-		// caught in its flow bands: strongest on the chamber's side, the
-		// tunnel face nearly black.
-		float behind = smoothstep(-glass_seam.w * 0.8, glass_seam.w * 0.9, q.y);
-		float crest = smoothstep(0.55, 0.95, n.z);
-		float streaks = pow(inner, 4.0);
-		float through = (0.02 + 2.6 * streaks) * (0.25 + 0.75 * behind) * crest * crest;
-		emission += glass_color * through * body * 0.85 * (1.0 - glass_ring.w);
+		// Crystal: each facet glows its own violet, brighter as it turns to a
+		// light within; their edges glint; now and then a facet sparkles.
+		// A facet flashes when it mirrors the light within towards the eye
+		// (so they flash in turn as the view moves), and a few are lit deep
+		// within whichever way they face.
+		vec3 key = normalize(vec3(-0.35, 0.55, 0.75));
+		float face = pow(max(dot(refl, key), 0.0), 28.0) * 0.9
+			+ smoothstep(0.28, 0.4, dot(cut.xy, vec2(0.71, 0.71))) * 0.2;
+		// Most facets dark glass; a few lit deep within, and those turned to
+		// the light within bright.
+		float glow_face = 0.012 + 0.25 * pow(shade, 5.0) + 0.6 * face;
+		emission += glass_color * glow_face * body * 0.55 * (1.0 - glass_ring.w);
+		// Only some edges catch the light, and those faintly.
+		float edge_glint = cut.w * step(0.45, fract(shade * 7.3));
+		emission += mix(glass_color, vec3(1.0), 0.5) * edge_glint * (0.025 + 0.18 * fres) * body * (1.0 - glass_ring.w);
+		float twinkle = pow(max(sin(TIME * (0.7 + shade) + shade * 40.0), 0.0), 24.0);
+		emission += vec3(0.9, 0.85, 1.0) * glass_sparkle(q, shade) * twinkle * body * 2.5;
 		// Its rim: a thin bright edge of glass where it meets the rock.
 		float rim = smoothstep(0.4, 0.5, glass) * (1.0 - smoothstep(0.5, 0.62, glass));
-		emission += mix(glass_color, vec3(1.0), 0.2) * rim * (0.025 + 0.14 * fres) * (1.0 - glass_ring.w);
+		emission += mix(glass_color, vec3(1.0), 0.2) * rim * (0.04 + 0.16 * fres) * (1.0 - glass_ring.w);
 
 		// Struck: a ripple of light spreads across it from the strike.
 		float age = sonar_time - glass_strike.z;
