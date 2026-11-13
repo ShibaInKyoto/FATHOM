@@ -24,6 +24,9 @@ const RESEARCH := 8
 const SHARDS := 26
 const GLOW := Color(0.72, 0.55, 1.0)
 const SHARD_SHADER := preload("res://src/fx/shaders/obsidian.gdshader")
+const CRYSTAL_SHADER := preload("res://src/fx/shaders/crystal.gdshader")
+## How close the crystals coating it grow.
+const CRYSTAL_SPACING := 0.13
 ## How far round the neck the glass seam reaches: across the way in, and
 ## beyond the rock on either face of it.
 const SEAM_MARGIN := Vector2(1.0, 0.9)
@@ -31,6 +34,9 @@ const SEAM_MARGIN := Vector2(1.0, 0.9)
 ## Hints shown once per session: on first coming near, and on the first ring.
 static var _explained := false
 static var _ring_explained := false
+## The terrain's detail noise as an image, to work out its surface here
+## exactly as the terrain shader does.
+static var _noise_img: Image
 
 ## Where the seam meets the tunnel, and the way into the rock from there.
 var wall: Vector2
@@ -48,6 +54,13 @@ var _neck: TrenchShift.Morph
 var _open := -1.0
 var _rig: Node3D
 var _light: OmniLight3D
+## The crystals over the neck (which burst with it) and those round it
+## (which stay, framing the opening), and their material.
+var _crystals_neck: MeshInstance3D
+var _crystals_rim: MeshInstance3D
+var _crystal_mat: ShaderMaterial
+## Where the neck's crystals grew (for the burst).
+var _neck_points: Array[Vector3] = []
 ## Where the last note struck the glass (metres across and along the seam
 ## from its centre) and when; when it cracked (-1 not yet).
 var _strike := Vector2.ZERO
@@ -208,7 +221,107 @@ func _build() -> void:
 			WALL * 0.5 + SEAM_MARGIN.y))
 		m.set_shader_parameter(&"glass_axis", Vector4(_tangent.x, _tangent.y, normal.x, normal.y))
 		m.set_shader_parameter(&"glass_color", GLOW)
+	_grow_crystals()
 	_apply()
+
+
+## Coats the glass with crystals, packed close like the inside of a geode,
+## each rooted in the surface the terrain draws there and growing out of it.
+func _grow_crystals() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(wall) + 31
+	var neck := GlassCrystals.Builder.new()
+	var rim := GlassCrystals.Builder.new()
+	var half := Vector2(NECK_RADIUS + SEAM_MARGIN.x, WALL * 0.5 + SEAM_MARGIN.y)
+	var across := -half.x
+	while across <= half.x:
+		var along := -half.y
+		while along <= half.y:
+			var jitter := Vector2(rng.randf_range(-0.45, 0.45), rng.randf_range(-0.45, 0.45)) * CRYSTAL_SPACING
+			var p := _seam_point(across + jitter.x, along + jitter.y)
+			along += CRYSTAL_SPACING
+			var s := level.field.sample(p)
+			var cover := _seam_mask(p, s)
+			# Thinning out towards the rim, none past it.
+			if cover < 0.62 or rng.randf() > smoothstep(0.62, 0.72, cover):
+				continue
+			var top := _surface_at(p)
+			var e := 0.08
+			var nrm := Vector3(-(_surface_at(p + Vector2(e, 0.0)) - _surface_at(p - Vector2(e, 0.0))) / (2.0 * e),
+				-(_surface_at(p + Vector2(0.0, e)) - _surface_at(p - Vector2(0.0, e))) / (2.0 * e), 1.0).normalized()
+			# Mostly small; now and then a larger one standing out of the rest.
+			var big := pow(rng.randf(), 3.0)
+			var radius := lerpf(0.035, 0.11, big) * lerpf(0.45, 1.0, smoothstep(0.62, 0.9, cover))
+			var length := radius * rng.randf_range(2.2, 3.6)
+			var tilt := Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), rng.randf_range(-1, 1)) * 0.25
+			var axis := (nrm + tilt).normalized()
+			# Rooted below the surface, so it grows out of it.
+			var base := Vector3(p.x, p.y, top) - nrm * radius * 1.6
+			var into_neck := absf(_seam_local(p).x) < NECK_RADIUS + 0.25
+			GlassCrystals.add_crystal(neck if into_neck else rim, base, axis, radius, length + radius * 1.6, rng,
+				radius > 0.06)
+			if into_neck and rng.randf() < 0.08:
+				_neck_points.append(base + axis * length * 0.5)
+		across += CRYSTAL_SPACING * 0.87
+	_crystal_mat = ShaderMaterial.new()
+	_crystal_mat.shader = CRYSTAL_SHADER
+	_crystal_mat.set_shader_parameter(&"glow_color", GLOW)
+	_crystals_neck = MeshInstance3D.new()
+	_crystals_neck.mesh = neck.commit()
+	_crystals_neck.material_override = _crystal_mat
+	_crystals_neck.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_rig.add_child(_crystals_neck)
+	_crystals_rim = MeshInstance3D.new()
+	_crystals_rim.mesh = rim.commit()
+	_crystals_rim.material_override = _crystal_mat
+	_crystals_rim.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_rig.add_child(_crystals_rim)
+
+
+## How much of the seam's glass there is at [param p] (the terrain shader's
+## seam_mask, as it is before the glass breaks).
+func _seam_mask(p: Vector2, s: float) -> float:
+	var q := _seam_local(p) / Vector2(NECK_RADIUS + SEAM_MARGIN.x, WALL * 0.5 + SEAM_MARGIN.y)
+	var wobble := _noise(p * 0.19 + Vector2(0.23, 0.57)) - 0.5
+	var r := q.length() + wobble * 0.55
+	return (1.0 - smoothstep(0.62, 1.0, r)) * smoothstep(-0.3, 0.5, -s)
+
+
+## The height of the terrain's surface at [param p], worked out exactly as
+## terrain.gdshader's relief() does, so the crystals sit in it.
+func _surface_at(p: Vector2) -> float:
+	var s := level.field.sample(p)
+	var n := _noise(p * 0.021) - 0.5
+	var n2 := _noise(p * 0.083 + Vector2(0.37, 0.71)) - 0.5
+	if s < 0.0:
+		var t := tanh(-s / 2.0)
+		var g := _seam_mask(p, s)
+		var lumps := (n * 4.0 + n2 * 0.8) * (1.0 - g * 0.85)
+		return t * (TerrainRenderer.ROCK_HEIGHT + lumps * t * t + g * 0.6)
+	var tw := tanh(s / 2.4)
+	var deep := TerrainRenderer.BACK_DEPTH + clampf(s - 4.0, 0.0, 12.0) * 0.35
+	return -tw * (deep + (n * 4.0 + n2 * 0.8) * tw * tw)
+
+
+## The terrain's detail noise at [param uv], filtered as the GPU does
+## (bilinear, repeating).
+static func _noise(uv: Vector2) -> float:
+	if _noise_img == null:
+		var tex := TerrainRenderer.detail_noise()
+		_noise_img = (tex.noise as FastNoiseLite).get_seamless_image(tex.width, tex.height)
+	var w := _noise_img.get_width()
+	var h := _noise_img.get_height()
+	var x := uv.x * w - 0.5
+	var y := uv.y * h - 0.5
+	var x0 := floori(x)
+	var y0 := floori(y)
+	var fx := x - x0
+	var fy := y - y0
+	var a := _noise_img.get_pixel(posmod(x0, w), posmod(y0, h)).r
+	var b := _noise_img.get_pixel(posmod(x0 + 1, w), posmod(y0, h)).r
+	var c := _noise_img.get_pixel(posmod(x0, w), posmod(y0 + 1, h)).r
+	var d := _noise_img.get_pixel(posmod(x0 + 1, w), posmod(y0 + 1, h)).r
+	return lerpf(lerpf(a, b, fx), lerpf(c, d, fx), fy)
 
 
 func _exit_tree() -> void:
@@ -311,6 +424,7 @@ func _shatter() -> void:
 	Fx.flash(level, pos, GLOW, 14.0, 0.5)
 	Fx.shockwave(level, pos, 7.0, GLOW, 0.7)
 	_burst()
+	_crystals_neck.visible = false
 	Events.shake_requested.emit(0.45)
 	Settings.rumble_pulse(0.3, 0.4)
 	var sub := level.player
@@ -329,13 +443,21 @@ func _burst() -> void:
 	var shapes: Array[ArrayMesh] = []
 	for k in 5:
 		shapes.append(_shard_mesh(rng))
+	# Crystals break off whole, too.
+	for k in 3:
+		var b := GlassCrystals.Builder.new()
+		GlassCrystals.add_crystal(b, Vector3(0.0, -0.6, 0.0), Vector3.UP, rng.randf_range(0.18, 0.26),
+			rng.randf_range(1.0, 1.4), rng)
+		shapes.append(b.commit())
 	for k in SHARDS:
 		var q := Vector2.from_angle(rng.randf() * TAU) * sqrt(rng.randf())
 		var p := _seam_point(q.x * NECK_RADIUS, q.y * WALL * 0.5)
 		var mi := MeshInstance3D.new()
-		mi.mesh = shapes[k % shapes.size()]
+		var shape := k % shapes.size()
+		mi.mesh = shapes[shape]
 		var m := ShaderMaterial.new()
-		m.shader = SHARD_SHADER
+		# Flakes of the glass, or whole crystals.
+		m.shader = SHARD_SHADER if shape < 5 else CRYSTAL_SHADER
 		m.set_shader_parameter(&"glow_color", GLOW)
 		mi.material_override = m
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -440,3 +562,10 @@ func _apply() -> void:
 	m.set_shader_parameter(&"glass_ring", Vector4(glow, ring if not shattered else 0.0, float(maxi(rings, 1)),
 		1.0 if shattered else 0.0))
 	m.set_shader_parameter(&"glass_strike", Vector4(_strike.x, _strike.y, _strike_time, _crack_time))
+	if _crystal_mat:
+		var at := _seam_point(_strike.x, _strike.y)
+		_crystal_mat.set_shader_parameter(&"ring", glow * 0.8)
+		_crystal_mat.set_shader_parameter(&"ringing", ring if not shattered else 0.0)
+		_crystal_mat.set_shader_parameter(&"note", float(maxi(rings, 1)))
+		_crystal_mat.set_shader_parameter(&"strike", Vector4(at.x, at.y, 0.0, _strike_time))
+		_crystal_mat.set_shader_parameter(&"crack_time", _crack_time if not shattered else -1.0)
