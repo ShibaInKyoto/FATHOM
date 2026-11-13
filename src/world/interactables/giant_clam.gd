@@ -21,10 +21,13 @@ const HEARING := 0.5
 const BITE := 10.0
 const PEARL_RESEARCH := 6
 const PEARL_SALVAGE := 8
-const SHELL := Color(0.78, 0.72, 0.66)
-const SHELL_DARK := Color(0.42, 0.36, 0.38)
 const MANTLE := Color(0.2, 0.85, 0.8)
 const PEARL := Color(1.0, 0.92, 0.98)
+const SHELL_SHADER := preload("res://src/fx/shaders/clam_shell.gdshader")
+const MANTLE_SHADER := preload("res://src/fx/shaders/clam_mantle.gdshader")
+const PEARL_SHADER := preload("res://src/fx/shaders/pearl.gdshader")
+## How long it shudders after snapping shut.
+const SHUDDER := 0.35
 
 ## Shown once per session, the first time the sub comes near one.
 static var _explained := false
@@ -34,12 +37,14 @@ var state := State.CLOSED
 var openness := 0.0
 var has_pearl := true
 var _calm := 0.0
+var _root: Node3D
 var _hinge: Node3D
 var _pearl: MeshInstance3D
-var _pearl_mat: StandardMaterial3D
-var _mantle_mat: StandardMaterial3D
+var _pearl_mat: ShaderMaterial
+var _mantle_mat: ShaderMaterial
 var _glow: OmniLight3D
 var _t := 0.0
+var _shudder := 0.0
 
 
 ## Lays clams on flat stretches of the reef floor, clear of [param avoid], the
@@ -94,75 +99,56 @@ func setup() -> void:
 	radius = 1.6
 	active_radius = 60.0
 	targetable = true
-	var root := Node3D.new()
-	root.scale = Vector3.ONE * SIZE
-	add_child(root)
-	var shell_mat := StandardMaterial3D.new()
-	shell_mat.vertex_color_use_as_albedo = true
-	shell_mat.roughness = 0.75
-	# Open, the inside of the top valve faces the camera.
-	shell_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	var valve := _valve()
+	_root = Node3D.new()
+	_root.scale = Vector3.ONE * SIZE
+	add_child(_root)
+	var seed_value := int(absf(pos.x * 13.0 + pos.y * 7.0))
+	var shell_mat := ShaderMaterial.new()
+	shell_mat.shader = SHELL_SHADER
+	shell_mat.set_shader_parameter(&"sediment_tint", level.biome.sediment_tint)
 	# The bottom valve sits on the floor; the top one hinges at the back (-X).
 	var bottom := MeshInstance3D.new()
-	bottom.mesh = valve
+	bottom.mesh = ClamModel.valve(false, seed_value)
 	bottom.material_override = shell_mat
-	bottom.transform = Transform3D(Basis(Vector3.RIGHT, PI), Vector3(0.0, 0.0, 0.0))
-	root.add_child(bottom)
+	_root.add_child(bottom)
 	_hinge = Node3D.new()
-	_hinge.position = Vector3(-1.35, 0.05, 0.0)
-	root.add_child(_hinge)
+	_hinge.position = ClamModel.HINGE
+	_root.add_child(_hinge)
 	var top := MeshInstance3D.new()
-	top.mesh = valve
+	top.mesh = ClamModel.valve(true, seed_value + 1)
 	top.material_override = shell_mat
-	top.position = Vector3(1.35, -0.05, 0.0)
+	top.position = -ClamModel.HINGE
 	_hinge.add_child(top)
-	# The frilled mantle between the valves, and the pearl in it.
-	_mantle_mat = StandardMaterial3D.new()
-	_mantle_mat.albedo_color = MANTLE.darkened(0.4)
-	_mantle_mat.emission_enabled = true
-	_mantle_mat.emission = MANTLE
-	_mantle_mat.emission_energy_multiplier = 0.0
+	# The mantle swelling out between the valves, and the pearl on its bed.
+	_mantle_mat = ShaderMaterial.new()
+	_mantle_mat.shader = MANTLE_SHADER
+	_mantle_mat.set_shader_parameter(&"hinge", ClamModel.HINGE)
 	var mantle := MeshInstance3D.new()
-	mantle.mesh = MeshKit.transformed(MeshKit.ball(1.0, 0.0, 16, 8),
-		Transform3D(Basis().scaled(Vector3(1.15, 0.16, 0.85)), Vector3.ZERO))
+	mantle.mesh = ClamModel.mantle()
 	mantle.material_override = _mantle_mat
-	root.add_child(mantle)
+	# Its curtain swings out past the valves: keep it from being culled.
+	mantle.extra_cull_margin = 2.0
+	_root.add_child(mantle)
 	_pearl = MeshInstance3D.new()
-	_pearl.mesh = MeshKit.sphere(0.27, 12, 6)
-	_pearl_mat = MeshKit.emissive_material(PEARL, 0.0)
+	_pearl.mesh = ClamModel.pearl()
+	_pearl_mat = ShaderMaterial.new()
+	_pearl_mat.shader = PEARL_SHADER
 	_pearl.material_override = _pearl_mat
 	_pearl.position = Vector3(0.35, 0.16, 0.3)
-	root.add_child(_pearl)
+	_root.add_child(_pearl)
 	_glow = OmniLight3D.new()
 	_glow.light_color = PEARL.lerp(MANTLE, 0.3)
 	_glow.omni_range = 5.0
 	_glow.light_energy = 0.0
 	_glow.position = Vector3(0.35, 0.7, 1.2)
-	root.add_child(_glow)
+	_root.add_child(_glow)
 	_calm = level.rng.randf_range(0.0, CALM_TIME)
 	_apply()
 
 
-## One valve: a broad, shallow, ribbed half-dome with its lip at y = 0.
-static func _valve() -> ArrayMesh:
-	var half := SphereMesh.new()
-	half.radius = 1.0
-	half.height = 1.0
-	half.is_hemisphere = true
-	half.radial_segments = 24
-	half.rings = 8
-	# The hemisphere rises from y = 0 to its radius: squash it to half that.
-	var dome := MeshKit.transformed(half, Transform3D(Basis().scaled(Vector3(1.4, 0.5, 1.05)), Vector3.ZERO))
-	return MeshKit.painted(dome, func(v: Vector3) -> Color:
-		# Ribs fanning out from the hinge, darker in the grooves and the lower half.
-		var rib := 0.5 + 0.5 * cos(atan2(v.z, v.x + 1.4) * 22.0)
-		var c := SHELL_DARK.lerp(SHELL, 0.55 + rib * 0.45)
-		return c.darkened(clampf(-v.y * 0.6, 0.0, 0.4)))
-
-
 func tick(delta: float) -> void:
 	_t += delta
+	_shudder = maxf(_shudder - delta, 0.0)
 	var sub := level.player
 	if not _explained and sub and sub.alive and sub.pos.distance_to(pos) < 14.0:
 		_explained = true
@@ -208,17 +194,28 @@ func _snap() -> void:
 	if state == State.CLOSING or state == State.CLOSED:
 		return
 	state = State.CLOSING
+	_shudder = SHUDDER
 	Audio.play_at(&"impact_rock", pos, -3.0, 0.1, 0.7)
 	Fx.bubble_burst(level, pos + Vector2(0.4, 0.3), 10, 0.6)
 
 
 func _apply() -> void:
-	_hinge.rotation.z = GAPE * openness
+	# Open, it breathes: the top valve rising and settling a little.
+	var breath := 1.0 + 0.04 * sin(_t * 1.1) * smoothstep(0.8, 1.0, openness)
+	var gape := GAPE * openness * breath
+	_hinge.rotation.z = gape
+	# Snapped shut, the whole shell shudders with the blow.
+	var shake := _shudder / SHUDDER
+	_root.position = Vector3(sin(_t * 70.0) * 0.04 * shake, absf(sin(_t * 55.0)) * 0.03 * shake, 0.0)
 	var glow := openness if has_pearl else 0.0
 	var pulse := 0.85 + 0.15 * sin(_t * 2.2)
 	_pearl.visible = has_pearl
-	_pearl_mat.emission_energy_multiplier = 0.4 + 5.0 * glow * pulse
-	_mantle_mat.emission_energy_multiplier = 1.2 * openness
+	_pearl_mat.set_shader_parameter(&"glow", 0.25 + 3.0 * glow * pulse)
+	_mantle_mat.set_shader_parameter(&"gape", gape)
+	# The mantle swells a moment behind the valves, and glows as it does.
+	var swell := smoothstep(0.15, 1.0, openness)
+	_mantle_mat.set_shader_parameter(&"open", swell)
+	_mantle_mat.set_shader_parameter(&"glow", 0.9 * swell)
 	_glow.light_energy = 1.8 * glow * pulse
 
 
