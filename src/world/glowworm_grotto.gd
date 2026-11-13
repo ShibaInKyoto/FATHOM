@@ -1,8 +1,10 @@
 class_name GlowwormGrotto
 extends Entity
 ## A chamber in the Midnight Caverns whose ceiling is strung with glow-worms:
-## a sky of small cold lights on silk threads in the pitch dark. They dim at
-## sound. Every noise darkens the worms within its reach, the dark spreading
+## a sky of small cold lights in the pitch dark, each worm letting down a
+## few silk snares beaded with sticky droplets that shine like strings of
+## pearls in its light, swaying slowly in the current. They dim at sound.
+## Every noise darkens the worms within its reach, the dark spreading
 ## out from it like a ripple, and they only light again after a few quiet
 ## seconds. Drift through slowly and the grotto lights your way without the
 ## lamp; race through and it goes black around you.
@@ -19,6 +21,12 @@ const DIM_RATE := 5.0
 const SPACING := 0.3
 const LIGHTS := 4
 const GLOW := Color(0.35, 1.0, 0.8)
+## How many snares each worm lets down, and how long the longest are.
+const SNARES := Vector2i(3, 6)
+const SNARE_LENGTH := 2.6
+## Droplets strung along a snare, one every this far.
+const BEAD_EVERY := 0.17
+const SHADER := preload("res://src/fx/shaders/glowworm.gdshader")
 
 ## Shown once per session, the first time the sub enters one.
 static var _explained := false
@@ -29,9 +37,10 @@ var worm_pos: Array[Vector3] = []
 var lit := PackedFloat32Array()
 var _dark_from := PackedFloat32Array()
 var _dark_until := PackedFloat32Array()
-var _drops: MultiMesh
-var _threads: MultiMesh
 var _lights: Array[OmniLight3D] = []
+## Each worm's brightness, one texel per worm, read by everything it lights.
+var _lit_image: Image
+var _lit_texture: ImageTexture
 
 
 ## Fills a roomy chamber along the main path with glow-worms; returns the
@@ -99,39 +108,67 @@ func setup() -> void:
 	_dark_from.fill(-1.0)
 	_dark_until.resize(n)
 	_dark_until.fill(-1.0)
+	_lit_image = Image.create(n, 1, false, Image.FORMAT_R8)
+	_lit_image.fill(Color.WHITE)
+	_lit_texture = ImageTexture.create_from_image(_lit_image)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(room.center)
-	var mat := ShaderMaterial.new()
-	mat.shader = preload("res://src/fx/shaders/glowworm.gdshader")
-	mat.set_shader_parameter(&"glow_color", GLOW)
-	mat.set_shader_parameter(&"energy", 4.0)
-	var thread_mat := ShaderMaterial.new()
-	thread_mat.shader = mat.shader
-	thread_mat.set_shader_parameter(&"glow_color", GLOW)
-	thread_mat.set_shader_parameter(&"energy", 0.7)
-	var drop_mesh := MeshKit.sphere(0.07, 6, 3)
+	var worms := _multimesh(QuadMesh.new(), n)
+	var snares: Array[Transform3D] = []
+	var snare_custom: Array[Color] = []
+	var beads: Array[Transform3D] = []
+	var bead_custom: Array[Color] = []
+	for i in n:
+		var top := worm_pos[i]
+		var phase := rng.randf() * TAU
+		worms.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3.ONE * rng.randf_range(0.24, 0.34)),
+			top - Vector3(0.0, 0.04, 0.0)))
+		worms.set_instance_custom_data(i, Color(i, phase, 0.0, 0.0))
+		for _k in rng.randi_range(SNARES.x, SNARES.y):
+			# Mostly short, a few long: the long ones catch the eye.
+			var length := lerpf(0.3, SNARE_LENGTH, pow(rng.randf(), 1.8))
+			var at := top + Vector3(rng.randf_range(-0.14, 0.14), -0.02, rng.randf_range(-0.1, 0.1))
+			var sway := phase + rng.randf_range(-0.4, 0.4)
+			snares.append(Transform3D(Basis.from_scale(Vector3(1.0, length, 1.0)), at))
+			snare_custom.append(Color(i, sway, length, 0.0))
+			var count := int(length / BEAD_EVERY) + 1
+			for b in count:
+				var d := length * (b + 0.6) / count + rng.randf_range(-0.03, 0.03)
+				# The last droplet on a line hangs heaviest.
+				var size := rng.randf_range(0.045, 0.07) * (1.6 if b == count - 1 else 1.0)
+				beads.append(Transform3D(Basis.from_scale(Vector3.ONE * size), at - Vector3(0.0, d, 0.0)))
+				bead_custom.append(Color(i, sway, d, 0.0))
 	var thread_mesh := CylinderMesh.new()
-	thread_mesh.top_radius = 0.011
-	thread_mesh.bottom_radius = 0.011
+	thread_mesh.top_radius = 0.006
+	thread_mesh.bottom_radius = 0.006
 	thread_mesh.height = 1.0
 	thread_mesh.radial_segments = 3
 	thread_mesh.rings = 1
-	_drops = _multimesh(drop_mesh, n)
-	_threads = _multimesh(thread_mesh, n)
-	for i in n:
-		var top := worm_pos[i]
-		var drop := rng.randf_range(0.35, 2.6)
-		var end := top - Vector3(0.0, drop, 0.0)
-		_drops.set_instance_transform(i, Transform3D(Basis(), end))
-		_threads.set_instance_transform(i, Transform3D(Basis().scaled(Vector3(1.0, drop, 1.0)), (top + end) * 0.5))
+	var threads := _multimesh(MeshKit.transformed(thread_mesh, Transform3D(Basis(), Vector3(0.0, -0.5, 0.0))),
+		snares.size())
+	for k in snares.size():
+		threads.set_instance_transform(k, snares[k])
+		threads.set_instance_custom_data(k, snare_custom[k])
+	var drops := _multimesh(QuadMesh.new(), beads.size())
+	for k in beads.size():
+		drops.set_instance_transform(k, beads[k])
+		drops.set_instance_custom_data(k, bead_custom[k])
 	var rig := Node3D.new()
 	rig.top_level = true
 	add_child(rig)
-	for mm: MultiMesh in [_drops, _threads]:
+	for part: Array in [[worms, 0, 3.0], [threads, 1, 0.5], [drops, 2, 2.2]]:
+		var mat := ShaderMaterial.new()
+		mat.shader = SHADER
+		mat.set_shader_parameter(&"glow_color", GLOW)
+		mat.set_shader_parameter(&"kind", part[1])
+		mat.set_shader_parameter(&"energy", part[2])
+		mat.set_shader_parameter(&"lit_texture", _lit_texture)
 		var mmi := MultiMeshInstance3D.new()
-		mmi.multimesh = mm
-		mmi.material_override = mat if mm == _drops else thread_mat
+		mmi.multimesh = part[0]
+		mmi.material_override = mat
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# They sway past their resting bounds.
+		mmi.extra_cull_margin = 0.6
 		rig.add_child(mmi)
 	# A few real lights so the grotto actually lights the water.
 	for k in LIGHTS:
@@ -180,10 +217,14 @@ func _on_noise(p: Vector2, noise_radius: float, _source: Node) -> void:
 
 func tick(delta: float) -> void:
 	var now := level.time
+	var changed := false
 	for i in lit.size():
 		var dark := now >= _dark_from[i] and now < _dark_until[i]
+		var was := lit[i]
 		lit[i] = move_toward(lit[i], 0.0 if dark else 1.0, delta * (DIM_RATE if dark else RELIGHT_RATE))
-	_upload()
+		changed = changed or lit[i] != was
+	if changed:
+		_upload()
 	var sub := level.player
 	if sub and sub.alive and _inside(sub.pos):
 		Wonders.witness("grotto")
@@ -210,9 +251,8 @@ func brightness() -> float:
 func _upload() -> void:
 	var n := lit.size()
 	for i in n:
-		var c := Color(lit[i], 0.0, 0.0, 0.0)
-		_drops.set_instance_custom_data(i, c)
-		_threads.set_instance_custom_data(i, c)
+		_lit_image.set_pixel(i, 0, Color(lit[i], 0.0, 0.0))
+	_lit_texture.update(_lit_image)
 	# Each light follows the worms around it.
 	for k in _lights.size():
 		var a := int(float(k) / _lights.size() * n)
