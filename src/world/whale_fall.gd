@@ -283,13 +283,13 @@ static func _mat_texture(kind: int, dark: bool, glow := false) -> ImageTexture:
 			var n := lumps.get_noise_2d(x, y) * 0.5 + 0.5
 			var c: Color
 			if dark:
-				c = Color(0.035, 0.035, 0.04, smoothstep(0.0, 0.8, edge) * (0.2 + n * 0.3))
+				c = Color(0.05, 0.045, 0.045, smoothstep(0.0, 0.9, edge) * (0.12 + n * 0.16))
 			else:
 				# Mostly a white fluff, yellowing here and there, a little orange.
 				var tone := clampf(hue.get_noise_2d(x, y) * 1.2 + 0.3, 0.0, 1.0)
 				c = Color(0.95, 0.95, 0.9).lerp(Color(0.93, 0.85, 0.5), clampf(tone * 1.4, 0.0, 1.0))
 				c = c.lerp(Color(0.9, 0.55, 0.25), clampf(tone * 2.0 - 1.5, 0.0, 1.0))
-				c.a = smoothstep(0.55, 0.75, n + edge * 0.25 - 0.1) * smoothstep(0.0, 0.45, edge) * 0.6
+				c.a = smoothstep(0.52, 0.8, n + edge * 0.25 - 0.1) * smoothstep(0.0, 0.5, edge) * 0.42
 				if glow:
 					c = Color(c.r * c.a, c.g * c.a, c.b * c.a, 1.0)
 			img.set_pixel(x, y, c)
