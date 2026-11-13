@@ -20,11 +20,13 @@ const WALL := 2.2
 const NECK_RADIUS := 2.2
 const OPEN_TIME := 0.9
 const RESEARCH := 8
-## Obsidian blades round the seam's rim.
-const BLADES := 20
-const SHARDS := 34
+## Flakes of glass the chord bursts it into.
+const SHARDS := 26
 const GLOW := Color(0.72, 0.55, 1.0)
-const SHADER := preload("res://src/fx/shaders/obsidian.gdshader")
+const SHARD_SHADER := preload("res://src/fx/shaders/obsidian.gdshader")
+## How far round the neck the glass seam reaches: across the way in, and
+## beyond the rock on either face of it.
+const SEAM_MARGIN := Vector2(1.0, 0.9)
 
 ## Hints shown once per session: on first coming near, and on the first ring.
 static var _explained := false
@@ -45,12 +47,12 @@ var _arrivals := PackedFloat32Array()
 var _neck: TrenchShift.Morph
 var _open := -1.0
 var _rig: Node3D
-## The lens of glass sealing the way, and what is left of its rim once broken.
-var _plug: MeshInstance3D
-var _broken: MeshInstance3D
-var _mat: ShaderMaterial
 var _light: OmniLight3D
-var _crack := 0.0
+## Where the last note struck the glass (metres across and along the seam
+## from its centre) and when; when it cracked (-1 not yet).
+var _strike := Vector2.ZERO
+var _strike_time := -100.0
+var _crack_time := -1.0
 var _t := 0.0
 
 
@@ -150,11 +152,6 @@ func setup() -> void:
 	Events.sonar_pinged.connect(_on_ping)
 
 
-func _exit_tree() -> void:
-	if Events.sonar_pinged.is_connected(_on_ping):
-		Events.sonar_pinged.disconnect(_on_ping)
-
-
 ## Hollows out the sealed chamber behind the seam.
 func _carve_chamber() -> void:
 	var shapes: Array[Array] = [[chamber, chamber, pocket_radius]]
@@ -192,142 +189,45 @@ func _furnish() -> void:
 		level.add_entity(bulb)
 
 
-## The seam: a lens of black volcanic glass set into the rock across the
-## way in, broken into big glossy fracture facets, bristling at its rim
-## with blades of obsidian; and, hidden until it shatters, the jagged edge
-## it will leave round the opening.
+## The seam itself is drawn by the terrain (see terrain.gdshader): the rock
+## there fused black and smooth, then obsidian, so the glass is part of the
+## wall rather than set on it. Here: the light it casts as it rings.
 func _build() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = hash(wall)
 	_rig = Node3D.new()
 	_rig.top_level = true
 	add_child(_rig)
-	_mat = ShaderMaterial.new()
-	_mat.shader = SHADER
-	_mat.set_shader_parameter(&"glow_color", GLOW)
-	_plug = MeshInstance3D.new()
-	_plug.mesh = _lens(rng)
-	_plug.material_override = _mat
-	_rig.add_child(_plug)
-	var rim := MeshInstance3D.new()
-	rim.mesh = _blades(rng, false)
-	rim.material_override = _mat
-	_rig.add_child(rim)
-	_broken = MeshInstance3D.new()
-	_broken.mesh = _blades(rng, true)
-	_broken.material_override = _mat
-	_broken.visible = false
-	_rig.add_child(_broken)
 	_light = OmniLight3D.new()
 	_light.light_color = GLOW
 	_light.omni_range = 9.0
 	var front := wall - normal * 1.2
 	_light.position = Vector3(front.x, front.y, 2.0)
 	_rig.add_child(_light)
+	if level.terrain:
+		var m := level.terrain.material
+		m.set_shader_parameter(&"glass_seam", Vector4(pos.x, pos.y, NECK_RADIUS + SEAM_MARGIN.x,
+			WALL * 0.5 + SEAM_MARGIN.y))
+		m.set_shader_parameter(&"glass_axis", Vector4(_tangent.x, _tangent.y, normal.x, normal.y))
+		m.set_shader_parameter(&"glass_color", GLOW)
 	_apply()
 
 
-## The seam's half-widths: across the way in, and along it.
-func _half_size() -> Vector2:
-	return Vector2(NECK_RADIUS + 0.4, WALL * 0.5 + 0.5)
+func _exit_tree() -> void:
+	if Events.sonar_pinged.is_connected(_on_ping):
+		Events.sonar_pinged.disconnect(_on_ping)
+	if level and is_instance_valid(level.terrain):
+		level.terrain.material.set_shader_parameter(&"glass_seam", Vector4.ZERO)
 
 
 ## Where a point [param s] across the seam and [param d] along it (from its
 ## middle) lies, in the play plane.
 func _seam_point(s: float, d: float) -> Vector2:
-	return wall + normal * (WALL * 0.5 + d) + _tangent * s
+	return pos + _tangent * s + normal * d
 
 
-## How far out of the rock towards the camera its face stands there.
-func _rock_face(p: Vector2) -> float:
-	var depth := -minf(level.field.sample(p), 0.0)
-	return TerrainRenderer.ROCK_HEIGHT * tanh(depth / 2.0) - 0.15
-
-
-## The lens: a dome over the seam's oval, flush with the rock at its edge,
-## its face broken into a few big fracture planes (each a little curved, as
-## glass breaks). UV: where on the oval (-1..1 across, -1..1 along).
-func _lens(rng: RandomNumberGenerator) -> ArrayMesh:
-	var half := _half_size()
-	# The fracture planes: a seed point each, a tilt and a lift.
-	var seeds := []
-	for k in 11:
-		var a := rng.randf() * TAU
-		var r := sqrt(rng.randf()) * 0.85
-		seeds.append([Vector2(cos(a), sin(a)) * r, Vector2(rng.randf_range(-0.9, 0.9), rng.randf_range(-0.8, 0.8)),
-			rng.randf_range(-0.3, 0.3)])
-	var rings := 14
-	var around := 40
-	var verts := PackedVector3Array()
-	var uvs := PackedVector2Array()
-	var indices := PackedInt32Array()
-	for i in rings + 1:
-		var r := float(i) / rings
-		for j in around:
-			var a := TAU * j / around
-			var q := Vector2(cos(a), sin(a)) * r
-			var p := _seam_point(q.x * half.x, q.y * half.y)
-			# The nearest fracture plane shapes the face here.
-			var best: Array = seeds[0]
-			for sd: Array in seeds:
-				if (sd[0] as Vector2).distance_squared_to(q) < (best[0] as Vector2).distance_squared_to(q):
-					best = sd
-			var off: Vector2 = q - best[0]
-			var facet: float = best[2] + off.dot(best[1]) - off.length_squared() * 0.3
-			var z := _rock_face(p) + (0.35 * (1.0 - r * r) + facet * (1.0 - pow(r, 3.0)))
-			verts.append(Vector3(p.x, p.y, z))
-			uvs.append(q)
-	for i in rings:
-		for j in around:
-			var a := i * around + j
-			var b := i * around + (j + 1) % around
-			indices.append_array([a, a + around, b, b, a + around, b + around])
-	return _commit(verts, uvs, indices)
-
-
-## Blades of obsidian round the seam's rim, standing out of the rock and
-## leaning outwards; or, [param broken], the jagged edge left round the
-## opening once the glass has gone: slivers leaning in over the hole.
-func _blades(rng: RandomNumberGenerator, broken: bool) -> ArrayMesh:
-	var half := _half_size()
-	var verts := PackedVector3Array()
-	var uvs := PackedVector2Array()
-	var indices := PackedInt32Array()
-	var count := BLADES + (10 if broken else 0)
-	for k in count:
-		var a := TAU * (k + rng.randf_range(-0.3, 0.3)) / count
-		var q := Vector2(cos(a), sin(a)) * rng.randf_range(0.9, 1.08)
-		var foot2 := _seam_point(q.x * half.x, q.y * half.y)
-		var foot := Vector3(foot2.x, foot2.y, _rock_face(foot2) - 0.2)
-		var out := (_tangent * q.x + normal * q.y).normalized() * (-1.0 if broken else 1.0)
-		var lean := rng.randf_range(0.2, 0.7) if not broken else rng.randf_range(0.5, 1.1)
-		var dir := (Vector3(out.x, out.y, 0.0) * lean + Vector3(0.0, 0.0, 1.0)).normalized()
-		var length := rng.randf_range(0.5, 1.4) * (0.7 if broken else 1.0)
-		var width := length * rng.randf_range(0.18, 0.3)
-		# A blade: a flat-faced shard narrowing to a point, a little twisted.
-		var side := dir.cross(Vector3(out.x, out.y, 0.0) if out != Vector2.ZERO else Vector3.UP).normalized()
-		side = side.rotated(dir, rng.randf_range(-0.6, 0.6))
-		var thick := dir.cross(side).normalized() * width * 0.35
-		var tip := foot + dir * length + side * width * rng.randf_range(-0.4, 0.4)
-		var start := verts.size()
-		for v: Vector3 in [foot - side * width, foot + side * width, foot + thick, foot - thick, tip]:
-			verts.append(v)
-			uvs.append(Vector2(q.x, q.y) * 1.2)
-		for t: Array in [[0, 2, 4], [2, 1, 4], [1, 3, 4], [3, 0, 4], [0, 1, 2], [0, 3, 1]]:
-			indices.append_array([start + t[0], start + t[1], start + t[2]])
-	return _commit(verts, uvs, indices)
-
-
-static func _commit(verts: PackedVector3Array, uvs: PackedVector2Array, indices: PackedInt32Array) -> ArrayMesh:
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = verts
-	arrays[Mesh.ARRAY_TEX_UV] = uvs
-	arrays[Mesh.ARRAY_INDEX] = indices
-	var st := SurfaceTool.new()
-	st.create_from_arrays(arrays)
-	st.generate_normals()
-	return st.commit()
+## [param p] in the seam's own terms: metres across and along from its middle.
+func _seam_local(p: Vector2) -> Vector2:
+	var d := p - pos
+	return Vector2(d.dot(_tangent), d.dot(normal))
 
 
 func _on_ping(origin: Vector2, ping_range: float) -> void:
@@ -377,10 +277,17 @@ func _ring() -> void:
 	rings = rings + 1 if _ringing > 0.0 else 1
 	_ringing = RING_TIME
 	_flare = 1.0
-	# The second note sets cracks running through it.
-	_crack = maxf(_crack, 0.45 if rings >= 2 else 0.0)
+	# The note strikes the face of the glass towards the sub.
+	var sub_at := level.player.pos if level.player else wall - normal * 4.0
+	var half := Vector2(NECK_RADIUS, WALL * 0.5) * 0.7
+	var towards := _seam_local(sub_at)
+	_strike = towards.normalized() * minf(towards.length(), 1.0) * half if towards != Vector2.ZERO else Vector2.ZERO
+	_strike_time = level.time
+	# The second note sets cracks running through it from there.
+	if rings == 2:
+		_crack_time = level.time
 	Audio.play_at(&"glass_ring", pos, -4.0 + rings * 1.5, 0.0, CHORD[rings - 1])
-	Fx.shockwave(level, pos, 2.5 + rings, GLOW, 0.6)
+	Fx.shockwave(level, pos, 2.0 + rings * 0.7, GLOW, 0.35)
 	if rings >= CHORD.size():
 		_shatter()
 		return
@@ -406,8 +313,6 @@ func _shatter() -> void:
 	_burst()
 	Events.shake_requested.emit(0.45)
 	Settings.rumble_pulse(0.3, 0.4)
-	_plug.visible = false
-	_broken.visible = true
 	var sub := level.player
 	if sub and sub.alive:
 		sub.run.research += RESEARCH
@@ -415,72 +320,123 @@ func _shatter() -> void:
 	Events.toast.emit("The chord shatters the glass. The chamber behind it lies open.", UiTheme.GOOD)
 
 
-## The glass bursts: shards of it fly out of the seam towards the light,
-## tumbling and glinting, still lit from within, and sink away.
+## The glass bursts: curved flakes of it fly out of the seam towards the
+## light, tumbling and flashing as they turn, lit from within and cooling as
+## they go, and sink away.
 func _burst() -> void:
-	var half := _half_size()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(wall) + 9
-	var shard_mat := ShaderMaterial.new()
-	shard_mat.shader = SHADER
-	shard_mat.set_shader_parameter(&"glow_color", GLOW)
-	shard_mat.set_shader_parameter(&"ring", 0.9)
 	var shapes: Array[ArrayMesh] = []
-	for k in 4:
+	for k in 5:
 		shapes.append(_shard_mesh(rng))
 	for k in SHARDS:
 		var q := Vector2.from_angle(rng.randf() * TAU) * sqrt(rng.randf())
-		var p := _seam_point(q.x * half.x, q.y * half.y)
+		var p := _seam_point(q.x * NECK_RADIUS, q.y * WALL * 0.5)
 		var mi := MeshInstance3D.new()
 		mi.mesh = shapes[k % shapes.size()]
-		mi.material_override = shard_mat
+		var m := ShaderMaterial.new()
+		m.shader = SHARD_SHADER
+		m.set_shader_parameter(&"glow_color", GLOW)
+		mi.material_override = m
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		level.add_child(mi)
-		var start := Vector3(p.x, p.y, _rock_face(p) + 0.3)
+		var start := Vector3(p.x, p.y, 1.6 + rng.randf_range(0.0, 0.6))
 		mi.global_position = start
-		mi.scale = Vector3.ONE * rng.randf_range(0.25, 0.6)
+		var size := rng.randf_range(0.18, 0.5) * (1.6 if k < 4 else 1.0)
+		mi.scale = Vector3.ONE * size
 		mi.rotation = Vector3(rng.randf(), rng.randf(), rng.randf()) * TAU
 		# Out of the rock, towards the camera and away from the middle.
-		var away := (_tangent * q.x + normal * q.y) * rng.randf_range(1.5, 4.0)
-		var flight := Vector3(away.x, away.y + rng.randf_range(0.0, 2.0), rng.randf_range(1.0, 3.5))
-		var time := rng.randf_range(1.6, 2.6)
+		var away := (_tangent * q.x + normal * q.y) * rng.randf_range(1.5, 4.5)
+		var flight := Vector3(away.x, away.y + rng.randf_range(0.0, 1.5), rng.randf_range(1.5, 4.0))
+		var time := rng.randf_range(2.0, 3.2)
 		var tween := mi.create_tween().set_parallel(true)
-		tween.tween_property(mi, ^"global_position", start + flight, time * 0.45).set_ease(Tween.EASE_OUT) \
+		tween.tween_property(mi, ^"global_position", start + flight, time * 0.4).set_ease(Tween.EASE_OUT) \
 			.set_trans(Tween.TRANS_CUBIC)
-		# Then it sinks, slowly.
-		tween.tween_property(mi, ^"global_position:y", start.y + flight.y - 2.5, time * 0.55).set_delay(time * 0.45) \
-			.set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_SINE)
-		tween.tween_property(mi, ^"rotation", mi.rotation + Vector3(rng.randf_range(-6, 6), rng.randf_range(-6, 6),
-			rng.randf_range(-3, 3)), time)
-		tween.tween_property(mi, ^"scale", Vector3.ONE * 0.01, 0.6).set_delay(time - 0.6)
+		# Then it sinks, slowly, rocking as it goes.
+		tween.tween_property(mi, ^"global_position:y", start.y + flight.y - 2.2, time * 0.6).set_delay(time * 0.4) \
+			.set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_SINE)
+		var spin := Vector3(rng.randf_range(-7, 7), rng.randf_range(-7, 7), rng.randf_range(-4, 4))
+		tween.tween_property(mi, ^"rotation", mi.rotation + spin, time).set_ease(Tween.EASE_OUT) \
+			.set_trans(Tween.TRANS_QUAD)
+		# Lit from within, then cooling to black glass.
+		tween.tween_method(func(v: float) -> void: m.set_shader_parameter(&"ring", v), 1.6, 0.0, time * 0.45) \
+			.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_EXPO)
+		tween.tween_property(mi, ^"scale", Vector3.ONE * 0.001, 0.5).set_delay(time - 0.5)
 		tween.chain().tween_callback(mi.queue_free)
 	for k in 5:
-		Fx.sparkle(level, _seam_point(lerpf(-half.x, half.x, k / 4.0), 0.0), GLOW)
+		Fx.sparkle(level, _seam_point(lerpf(-NECK_RADIUS, NECK_RADIUS, k / 4.0), 0.0), GLOW)
 
 
-## A shard of glass: a thin, sharp-edged flake.
+## A flake of obsidian: a few straight broken edges round a curved, thin
+## shell, thickest in the middle and sharp at its edge (about a metre across
+## before scaling, its convex face towards +Z).
 static func _shard_mesh(rng: RandomNumberGenerator) -> ArrayMesh:
+	# The outline: corners at uneven angles and reaches, joined straight.
+	var corners := rng.randi_range(4, 6)
+	var angles: Array[float] = []
+	for i in corners:
+		angles.append(TAU * (i + rng.randf_range(-0.3, 0.3)) / corners)
+	var reach: Array[float] = []
+	for i in corners:
+		reach.append(rng.randf_range(0.45, 1.0))
 	var outline := PackedVector2Array()
-	var n := rng.randi_range(4, 6)
-	for i in n:
-		var a := TAU * i / n + rng.randf_range(-0.3, 0.3)
-		outline.append(Vector2(cos(a) * rng.randf_range(0.4, 1.0), sin(a) * rng.randf_range(0.25, 0.6)))
-	return MeshKit.fin(outline, 0.08)
+	var per_edge := 4
+	for i in corners:
+		var a := Vector2.from_angle(angles[i]) * reach[i]
+		var b := Vector2.from_angle(angles[(i + 1) % corners]) * reach[(i + 1) % corners]
+		for k in per_edge:
+			outline.append(a.lerp(b, float(k) / per_edge))
+	var bend := rng.randf_range(0.14, 0.26)
+	var verts := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var indices := PackedInt32Array()
+	var rings := 3
+	var n := outline.size()
+	for face in 2:
+		var sgn := 1.0 if face == 0 else -1.0
+		var start := verts.size()
+		verts.append(Vector3(0.0, 0.0, bend * 0.5 + 0.05 * sgn))
+		normals.append(Vector3(0.0, 0.0, sgn))
+		uvs.append(Vector2.ZERO)
+		for i in range(1, rings + 1):
+			var r := float(i) / rings
+			for j in n:
+				var p := outline[j] * r
+				var d2 := p.length_squared()
+				var z := bend * 0.5 * (1.0 - d2) + 0.05 * (1.0 - r * r) * sgn
+				verts.append(Vector3(p.x, p.y, z))
+				normals.append(Vector3(p.x * bend * sgn, p.y * bend * sgn, sgn).normalized())
+				uvs.append(Vector2(r, 0.0))
+		for j in n:
+			var j1 := (j + 1) % n
+			indices.append_array([start, start + 1 + j, start + 1 + j1])
+			for i in rings - 1:
+				var a := start + 1 + i * n
+				var b := a + n
+				indices.append_array([a + j, b + j, b + j1, a + j, b + j1, a + j1])
+	# (Drawn from both sides: obsidian.gdshader culls nothing.)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
 
 
 func _apply() -> void:
-	_mat.set_shader_parameter(&"crack", _crack)
-	if shattered:
-		_light.light_energy = 0.0
-		_mat.set_shader_parameter(&"ring", 0.05 + 1.6 * _flare)
-		return
 	var ring := _ringing / RING_TIME
 	var shimmer := 0.85 + 0.15 * sin(_t * (9.0 + rings * 4.0))
-	var glow := 0.012 * (1.0 + sin(_t * 0.9)) + (0.35 + 0.35 * rings) * ring * shimmer + 1.6 * _flare
-	_mat.set_shader_parameter(&"ring", glow)
-	_mat.set_shader_parameter(&"note", float(maxi(rings, 1)))
-	_mat.set_shader_parameter(&"ringing", ring)
-	_light.light_energy = 0.05 + 0.9 * ring * rings + 2.0 * _flare
-	# Ringing, the whole seam hums.
-	var hum := 0.025 * ring * sin(_t * 70.0)
-	_rig.position = Vector3(_tangent.x, _tangent.y, 0.0) * hum
+	var glow := (0.25 + 0.3 * rings) * ring * shimmer + 1.4 * _flare
+	if shattered:
+		glow = 1.4 * _flare
+	_light.light_energy = (0.9 * ring * rings + 2.0 * _flare) if not shattered else 2.0 * _flare
+	if level.terrain == null:
+		return
+	var m := level.terrain.material
+	m.set_shader_parameter(&"glass_ring", Vector4(glow, ring if not shattered else 0.0, float(maxi(rings, 1)),
+		1.0 if shattered else 0.0))
+	m.set_shader_parameter(&"glass_strike", Vector4(_strike.x, _strike.y, _strike_time, _crack_time))
