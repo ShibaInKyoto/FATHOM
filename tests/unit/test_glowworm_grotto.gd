@@ -70,8 +70,9 @@ func test_sound_darkens_them_and_quiet_relights_them() -> void:
 	var w := grotto.worm_pos[grotto.worm_pos.size() / 2]
 	var at := Vector2(w.x, w.y - 3.0)
 	level.emit_noise(at, 30.0)
-	# The dark travels at RIPPLE_SPEED: a worm 3 m off has it after a third of a second.
-	_run(level, grotto, 0.6)
+	# The dark travels at RIPPLE_SPEED: a worm 3 m off has it after a third of a
+	# second, and has dimmed half a second later.
+	_run(level, grotto, 0.8)
 	var near := -1
 	var far := -1
 	for i in grotto.worm_pos.size():

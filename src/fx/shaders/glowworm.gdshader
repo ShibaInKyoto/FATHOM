@@ -2,8 +2,11 @@
 // they let down (kind 1) and the sticky droplets strung along them (kind 2),
 // all glowing in the worm's light and added over the dark. Each worm's
 // brightness sits in lit_texture (one texel per worm), so the grotto dims
-// worm by worm as sound ripples through it. INSTANCE_CUSTOM: x = which
-// worm, y = its sway phase, z = how far down its snare a droplet hangs.
+// worm by worm as sound ripples through it; along each snare the light is
+// a front, pulling back up from the tip to the worm as it dims and running
+// back down from the worm to the tip as it relights. INSTANCE_CUSTOM:
+// x = which worm, y = its sway phase, z = how far down its snare a droplet
+// hangs, w = (droplets) how long that snare is.
 // Worms and droplets face the camera; snares and droplets sway slowly in
 // the current, the further down, the more.
 shader_type spatial;
@@ -16,6 +19,18 @@ uniform int kind = 0;
 
 varying float bright;
 varying vec2 quad_uv;
+// How far down its snare a point is (0 at the worm, 1 at the tip), and
+// how lit its worm is.
+varying float strand;
+varying float lit_level;
+
+// The share of a snare still lit at [param lit], from the worm down, with a
+// soft edge to the front.
+const float FRONT = 0.18;
+
+float lit_to(float u, float lit) {
+	return clamp((lit * (1.0 + FRONT) - u) / FRONT, 0.0, 1.0);
+}
 
 vec3 sway(float d, float phase) {
 	float k = pow(max(d, 0.0), 1.5);
@@ -29,23 +44,26 @@ void vertex() {
 	// Each worm's light breathes a little on its own, like a star.
 	float twinkle = 0.8 + 0.2 * sin(TIME * 0.6 + worm * 2.39);
 	quad_uv = UV;
+	lit_level = lit;
 	if (kind == 1) {
 		float length_m = length(MODEL_MATRIX[1].xyz);
 		float d = -VERTEX.y * length_m;
 		VERTEX.xz += sway(d, phase).xz;
-		bright = lit * twinkle * exp(-d * 0.9);
+		strand = -VERTEX.y;
+		bright = twinkle * exp(-d * 0.9);
 	} else {
 		float d = kind == 2 ? INSTANCE_CUSTOM.z : 0.0;
 		float s = length(MODEL_MATRIX[0].xyz);
 		vec3 centre = MODEL_MATRIX[3].xyz + sway(d, phase);
 		MODELVIEW_MATRIX = VIEW_MATRIX * mat4(vec4(INV_VIEW_MATRIX[0].xyz * s, 0.0),
 			vec4(INV_VIEW_MATRIX[1].xyz * s, 0.0), vec4(INV_VIEW_MATRIX[2].xyz * s, 0.0), vec4(centre, 1.0));
-		bright = kind == 0 ? lit * twinkle : lit * twinkle * (0.3 + 0.7 * exp(-d * 0.55));
+		strand = kind == 2 ? clamp(d / max(INSTANCE_CUSTOM.w, 0.01), 0.0, 1.0) : 0.0;
+		bright = kind == 0 ? twinkle : twinkle * (0.3 + 0.7 * exp(-d * 0.55));
 	}
 }
 
 void fragment() {
-	vec3 light = glow_color.rgb * bright * energy;
+	vec3 light = glow_color.rgb * bright * energy * lit_to(strand, lit_level);
 	if (kind == 1) {
 		ALBEDO = light;
 	} else {

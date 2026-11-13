@@ -16,7 +16,9 @@ const RIPPLE_SPEED := 9.0
 ## How long a worm stays dark after the last noise reached it.
 const DARK_TIME := 4.0
 const RELIGHT_RATE := 0.3
-const DIM_RATE := 5.0
+## (Each worm's light pulls back up its snares from the tips as it dims, and
+## runs back down them from the worm as it relights.)
+const DIM_RATE := 2.0
 ## Spacing of worms along the ceiling.
 const SPACING := 0.3
 const LIGHTS := 4
@@ -137,7 +139,7 @@ func setup() -> void:
 				# The last droplet on a line hangs heaviest.
 				var size := rng.randf_range(0.045, 0.07) * (1.6 if b == count - 1 else 1.0)
 				beads.append(Transform3D(Basis.from_scale(Vector3.ONE * size), at - Vector3(0.0, d, 0.0)))
-				bead_custom.append(Color(i, sway, d, 0.0))
+				bead_custom.append(Color(i, sway, d, length))
 	var thread_mesh := CylinderMesh.new()
 	thread_mesh.top_radius = 0.006
 	thread_mesh.bottom_radius = 0.006

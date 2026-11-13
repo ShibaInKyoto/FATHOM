@@ -3,7 +3,7 @@ extends "res://tools/debug/preview_stage.gd"
 ## of its glow-worm grotto lit in the quiet, going dark around a loud noise,
 ## and lighting up again.
 ## "close" (after the zoom) shoots it from a camera up by the ceiling instead,
-## and "film" films eight seconds there, a frame every fifteenth of a second.
+## and "film" films ten seconds there, a frame every fifteenth of a second.
 ## Usage: xvfb-run godot --path . res://tools/debug/preview_grotto.tscn -- <out_dir> [seed] [zoom] [close|film]
 
 var _grotto: GlowwormGrotto
@@ -41,7 +41,7 @@ func _ready() -> void:
 		_close.current = true
 		if mode == "film":
 			shot_times = []
-			for i in 120:
+			for i in 150:
 				shot_times.append(1.5 + i / 15.0)
 
 
