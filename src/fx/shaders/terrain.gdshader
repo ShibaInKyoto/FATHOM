@@ -321,10 +321,29 @@ void fragment() {
 		float inner = 0.0;
 		for (int k = 1; k <= 3; k++) {
 			float dk = float(k) * 0.16;
-			inner += glass_bands(world_pos + into * dk / depth_cos) * (1.0 - float(k) * 0.22);
+			// (The light within drifts slowly through it.)
+			inner += glass_bands(world_pos + into * dk / depth_cos + vec3(0.0, 0.0, TIME * 0.04))
+				* (1.0 - float(k) * 0.22);
 		}
 		inner /= 2.3;
-		vec3 obsidian = vec3(0.008, 0.0075, 0.009) * (0.7 + 0.8 * inner);
+		// Translucent: through a metre of smoky glass the rock it set on
+		// shows, dim and tinted, bent by the hollows of its face; pale
+		// inclusions hang at different depths in it.
+		vec3 deep = world_pos + into * 0.9 / depth_cos;
+		vec2 uv_deep = deep.xy * tex_scale;
+		// (Blurred: seen through thick glass, what lies beneath goes soft.)
+		vec3 beneath = textureGrad(rock_albedo, uv_deep, dx_z * 6.0, dy_z * 6.0).rgb;
+		float beneath_lum = dot(beneath, vec3(0.299, 0.587, 0.114));
+		vec3 seen = vec3(beneath_lum) * vec3(0.42, 0.4, 0.56);
+		float specks = 0.0;
+		for (int k = 1; k <= 2; k++) {
+			vec3 at = world_pos + into * (0.25 + 0.3 * float(k)) / depth_cos;
+			vec2 cell = at.xy * (5.0 + 3.0 * float(k));
+			vec2 o = glass_hash(floor(cell) + float(k) * 13.0);
+			float d = length(fract(cell) - (0.2 + 0.6 * o));
+			specks += (1.0 - smoothstep(0.04, 0.11, d)) * step(0.8, o.x) * (1.0 - 0.35 * float(k));
+		}
+		vec3 obsidian = vec3(0.01, 0.009, 0.012) * (0.7 + 0.8 * inner) + seen * 0.11 + vec3(0.32, 0.31, 0.36) * specks * 0.16;
 		// The contact: rock baked dark and smooth before it turns to glass.
 		float fused = smoothstep(0.0, 0.5, glass);
 		vec3 rock_baked = ALBEDO * mix(1.0, 0.25, fused);
@@ -346,7 +365,10 @@ void fragment() {
 		float crest = smoothstep(0.55, 0.95, n.z);
 		float streaks = pow(inner, 4.0);
 		float through = (0.02 + 2.6 * streaks) * (0.25 + 0.75 * behind) * crest * crest;
-		emission += glass_color * through * body * 0.55 * (1.0 - glass_ring.w);
+		emission += glass_color * through * body * 0.85 * (1.0 - glass_ring.w);
+		// Its rim: a thin bright edge of glass where it meets the rock.
+		float rim = smoothstep(0.4, 0.5, glass) * (1.0 - smoothstep(0.5, 0.62, glass));
+		emission += mix(glass_color, vec3(1.0), 0.2) * rim * (0.025 + 0.14 * fres) * (1.0 - glass_ring.w);
 
 		// Struck: a ripple of light spreads across it from the strike.
 		float age = sonar_time - glass_strike.z;
