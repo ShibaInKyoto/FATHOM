@@ -83,5 +83,5 @@ sonar_color={
 }
 player_pos={
 "type": "vec3",
-"value": Vector3(0, 0, 0)
+"value": Vector3(0, 10000, 0)
 }
