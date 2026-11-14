@@ -307,7 +307,8 @@ func behave(delta: float) -> void:
 
 
 ## Hushed by the Choir's song passing (see [member Creature.hush_at]): every
-## fish slows to a hover, turned down towards where the song rose.
+## fish slows to a hover, turned down towards where the song rose, its
+## lights flaring.
 func _hushed(delta: float) -> void:
 	_age += delta
 	for i in fish_pos.size():
@@ -318,6 +319,10 @@ func _hushed(delta: float) -> void:
 		var depth := sin(i * 1.7) * 0.8 + sin(_age * 0.5 + _fish_phase[i] * TAU) * 0.25
 		_multimesh.set_instance_transform(i, Transform3D(_swim_fish(i, v, delta),
 			Vector3(fish_pos[i].x, fish_pos[i].y, depth)))
+	# Their lights flare as the song takes them, and dim as it lets go.
+	var held := (level.time - hush_at) / maxf(hush_end - hush_at, 0.01)
+	for vis in visuals:
+		vis.set_instance_shader_parameter(&"glow_boost", 1.0 + 4.0 * sin(clampf(held, 0.0, 1.0) * PI))
 	_update_visuals(delta)
 
 

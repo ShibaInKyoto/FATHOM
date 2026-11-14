@@ -265,6 +265,17 @@ func behave(delta: float) -> void:
 	_jaw.rotation.z = lerpf(_jaw.rotation.z, -(jaw_open + REST_GAPE), 1.0 - exp(-8.0 * delta))
 
 
+## Caught by the Choir's song: the hunt is broken off; it casts about where
+## it last had the sub, and cannot bite again at once.
+func _break_off() -> void:
+	_bite_cooldown = maxf(_bite_cooldown, 1.2)
+	if state == State.HUNT:
+		state = State.INVESTIGATE
+		var sub := level.player
+		_target = sub.pos if sub else pos
+		_timer = 4.0
+
+
 func on_touch_player(sub: Submarine) -> void:
 	if _bite_cooldown > 0.0:
 		return

@@ -9,6 +9,9 @@ extends "res://tools/debug/preview_stage.gd"
 
 var _pinged := false
 var _dark := false
+## A lancer set to strike at the sub just as the echo reaches it.
+var _lancer: Lancer
+var _struck := false
 
 
 func _ready() -> void:
@@ -27,16 +30,23 @@ func _ready() -> void:
 			shot_times.append(8.5 + i / 15.0)
 	_dark = args.has("dark")
 	if args.has("life"):
-		var spots := [[&"shoal", Vector2(7.0, 2.5)], [&"shoal", Vector2(-6.0, -2.0)], [&"lancer", Vector2(9.0, -3.0)],
+		var spots := [[&"shoal", Vector2(5.0, 2.0)], [&"shoal", Vector2(-4.0, -2.0)], [&"lancer", Vector2(-8.0, 0.5)],
 			[&"ghostfin", Vector2(-9.0, 3.0)], [&"jelly", Vector2(3.0, 5.0)]]
 		for spot: Array in spots:
 			var c: Creature = LevelPopulator.SPECIES[spot[0]].new()
 			c.pos = level.field.resolve_circle(sub.pos + (spot[1] as Vector2), 1.5)
 			level.add_entity(c)
+			if c is Lancer:
+				_lancer = c
 
 
 func direct(_dt: float) -> void:
 	sub.run.hull = sub.stats.max_hull
+	# The lancer goes for the sub just before the echo reaches it.
+	if _lancer and is_instance_valid(_lancer) and not _struck and _lancer.hush_at < INF \
+			and level.time > _lancer.hush_at - Lancer.WINDUP_TIME - 0.25:
+		_struck = true
+		_lancer.call(&"_begin_windup", sub.pos)
 	sub.run.battery = sub.stats.max_battery
 	if _dark:
 		sub.lamp_on = false

@@ -332,6 +332,13 @@ func think() -> void:
 			_wake()
 
 
+## Caught by the Choir's song: the lunge or chase is given up and it
+## settles.
+func _break_off() -> void:
+	if state == State.LUNGE or state == State.CHASE:
+		state = State.SETTLE
+
+
 ## It springs: a short rear, the jaw thrown open, and it strikes.
 func _wake() -> void:
 	alert()

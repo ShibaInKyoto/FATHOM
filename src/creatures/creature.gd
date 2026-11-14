@@ -170,6 +170,7 @@ func tick(delta: float) -> void:
 		# Its own lock on its facing, kept while the song holds it.
 		_hushing = hushed
 		if hushed:
+			_break_off()
 			_hush_lock = lock_facing
 		else:
 			lock_facing = _hush_lock
@@ -228,14 +229,24 @@ func _hold(delta: float, sub: Submarine) -> void:
 
 
 ## Hushed by the song passing: it slows to a stop, bites nothing, and (a
-## free swimmer) turns down towards where the song rose from.
+## free swimmer) turns down towards where the song rose from, shivering as
+## it takes hold.
 func _hushed(delta: float) -> void:
 	if not _hush_lock and not upright:
 		lock_facing = true
-		facing = facing.slerp((hush_from - pos).normalized(), 1.0 - exp(-9.0 * delta)).normalized()
+		var down := (hush_from - pos).normalized()
+		var held := level.time - hush_at
+		down = down.rotated(sin(held * 38.0) * 0.12 * exp(-held * 3.0))
+		facing = facing.slerp(down, 1.0 - exp(-9.0 * delta)).normalized()
 	vel = vel.lerp(Vector2.ZERO, 1.0 - exp(-9.0 * delta))
 	move_and_collide_field(delta * level.creature_pace, 0.2)
 	_update_visuals(delta)
+
+
+## Override: a pulse of the Choir's song has caught it mid-attack: give
+## the attack up (the lunge, the dash, the snap) rather than finish it after.
+func _break_off() -> void:
+	pass
 
 
 ## Breaks the trance: it notices the sub and acts on its own again.

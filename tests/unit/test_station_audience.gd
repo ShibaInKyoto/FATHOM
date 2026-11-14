@@ -190,7 +190,7 @@ func test_the_pulse_hushes_what_it_passes() -> void:
 	var audience := _audience(level)
 	_with_sub(level, parts[1], audience.pos + Vector2(0.0, -4.0))
 	# A hunter out in the gallery, swimming past.
-	var lancer: Creature = LevelPopulator.SPECIES[&"lancer"].new()
+	var lancer: Lancer = LevelPopulator.SPECIES[&"lancer"].new()
 	lancer.pos = level.field.resolve_circle(audience.pos + Vector2(-12.0, -3.0), 1.0)
 	level.add_entity(lancer)
 	lancer.vel = Vector2(4.0, 0.0)
@@ -200,10 +200,16 @@ func test_the_pulse_hushes_what_it_passes() -> void:
 	var reach := lancer.pos.distance_to(deep) / Level.ECHO_SPEED
 	var t := 0.0
 	while t < reach + Level.HUSH_TIME * 0.8:
+		if t < reach - 0.1:
+			# Mid-dash when the song reaches it.
+			lancer.state = Lancer.State.DASH
+			lancer.set(&"_timer", 5.0)
+			lancer.set(&"_dash_dir", Vector2.RIGHT)
 		lancer.tick(DT)
 		level.time += DT
 		t += DT
 	check(lancer.vel.length() < 1.0, "it stops as the pulse passes (%.2f m/s)" % lancer.vel.length())
+	check(lancer.state != Lancer.State.DASH and lancer.state != Lancer.State.WINDUP, "its attack given up")
 	check(lancer.facing.dot((deep - lancer.pos).normalized()) > 0.7, "turned down to the song")
 	check(not lancer.entranced, "only for a moment")
 	# Not while the Choir is fighting.

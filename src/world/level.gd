@@ -11,7 +11,7 @@ const SONAR_SPEED := 42.0
 ## The echo's speed (ECHO_SPEED in sonar.gdshaderinc).
 const ECHO_SPEED := 16.0
 ## How long a pulse of the Choir's song holds the creatures it passes.
-const HUSH_TIME := 0.5
+const HUSH_TIME := 1.0
 
 var layout: LevelLayout
 var field: TerrainField
@@ -61,6 +61,8 @@ var silent_ping := false
 var ping_speed := SONAR_SPEED
 
 var _pending_remove: Array[Entity] = []
+## The violet marks of the Choir's song on the creatures it holds.
+var _hush_fx: HushFx
 var _ping_slot := 0
 var _exit_triggered := false
 var _told_sealed := false
@@ -256,6 +258,12 @@ func choir_wave(origin: Vector2, reach: float) -> void:
 		c.hush_at = time + d / ECHO_SPEED
 		c.hush_end = c.hush_at + HUSH_TIME
 		c.hush_from = origin
+		if not c is Shoal:
+			if _hush_fx == null:
+				_hush_fx = HushFx.new()
+				_hush_fx.level = self
+				add_child(_hush_fx)
+			_hush_fx.mark(c)
 
 
 ## Whether [param p] is in the Choir's arena or a guardian's lair.

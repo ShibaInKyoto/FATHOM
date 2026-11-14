@@ -270,6 +270,16 @@ func _detach() -> void:
 	_cooldown = 3.0
 
 
+## Caught by the Choir's song: a leap is given up, and one clinging to the
+## hull lets go.
+func _break_off() -> void:
+	if state == State.LATCHED:
+		_detach()
+		vel = _latch_offset.normalized() * 4.0
+	elif state == State.LEAP:
+		_detach()
+
+
 func stun(duration: float) -> void:
 	super.stun(duration)
 	if state == State.LATCHED:

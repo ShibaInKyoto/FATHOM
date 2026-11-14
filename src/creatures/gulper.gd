@@ -844,6 +844,14 @@ func on_touch_player(sub: Submarine) -> void:
 		_timer = 1.2
 
 
+## Caught by the Choir's song: a windup or strike is given up, and it draws
+## back home.
+func _break_off() -> void:
+	if state == State.WINDUP or state == State.STRIKE:
+		state = State.RETRACT
+		_timer = 1.2
+
+
 func on_damaged(_amount: float, _from: Vector2) -> void:
 	state = State.HIDE
 	_timer = 4.0

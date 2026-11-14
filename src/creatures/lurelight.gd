@@ -437,6 +437,15 @@ func on_touch_player(sub: Submarine) -> void:
 		lock_facing = false
 
 
+## Caught by the Choir's song: a snap is given up, and it goes home.
+func _break_off() -> void:
+	if state == State.SNAP:
+		state = State.RETURN
+		_timer = 2.5
+		_gulp = 0.0
+		lock_facing = false
+
+
 func on_damaged(_amount: float, _from: Vector2) -> void:
 	if hp < max_hp * 0.5 and state != State.SNAP:
 		state = State.HIDE

@@ -266,6 +266,16 @@ func behave(delta: float) -> void:
 				_target = wander_point(pos, 10.0)
 
 
+## Caught by the Choir's song: a windup or dash is given up.
+func _break_off() -> void:
+	if state == State.WINDUP or state == State.DASH or state == State.INVESTIGATE:
+		_prey = null
+		state = State.RECOVER
+		lock_facing = false
+		_timer = 1.0
+		_set_glow(1.0)
+
+
 ## Snaps a fish out of the shoal and drifts while it swallows.
 func _catch() -> void:
 	_prey.lose_fish()

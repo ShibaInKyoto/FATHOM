@@ -305,6 +305,14 @@ func _focus() -> Vector2:
 	return level.player.pos if level.player else pos
 
 
+## Caught by the Choir's song: a dart is given up, and circling starts over.
+func _break_off() -> void:
+	if state == State.DART:
+		_retreat()
+	elif state == State.CIRCLE:
+		_timer = maxf(_timer, 1.5)
+
+
 func _retreat() -> void:
 	state = State.RETREAT
 	_timer = 0.8

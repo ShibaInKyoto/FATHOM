@@ -442,7 +442,9 @@ func behave(delta: float) -> void:
 func tick(delta: float) -> void:
 	# Moves the head, then (in _update_visuals) drags the chain along after it.
 	super.tick(delta)
-	_sting_along_body()
+	# Held by the Choir's song, it stings nothing.
+	if not _hushing:
+		_sting_along_body()
 
 
 func _sting_along_body() -> void:
