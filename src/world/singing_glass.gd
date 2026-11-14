@@ -34,9 +34,6 @@ const SEAM_MARGIN := Vector2(1.0, 0.9)
 ## Hints shown once per session: on first coming near, and on the first ring.
 static var _explained := false
 static var _ring_explained := false
-## The terrain's detail noise as an image, to work out its surface here
-## exactly as the terrain shader does.
-static var _noise_img: Image
 
 ## Where the seam meets the tunnel, and the way into the rock from there.
 var wall: Vector2
@@ -282,46 +279,14 @@ func _grow_crystals() -> void:
 ## seam_mask, as it is before the glass breaks).
 func _seam_mask(p: Vector2, s: float) -> float:
 	var q := _seam_local(p) / Vector2(NECK_RADIUS + SEAM_MARGIN.x, WALL * 0.5 + SEAM_MARGIN.y)
-	var wobble := _noise(p * 0.19 + Vector2(0.23, 0.57)) - 0.5
+	var wobble := TerrainRelief.noise(p * 0.19 + Vector2(0.23, 0.57)) - 0.5
 	var r := q.length() + wobble * 0.55
 	return (1.0 - smoothstep(0.62, 1.0, r)) * smoothstep(-0.3, 0.5, -s)
 
 
-## The height of the terrain's surface at [param p], worked out exactly as
-## terrain.gdshader's relief() does, so the crystals sit in it.
+## The height of the terrain's surface at [param p], glass and all.
 func _surface_at(p: Vector2) -> float:
-	var s := level.field.sample(p)
-	var n := _noise(p * 0.021) - 0.5
-	var n2 := _noise(p * 0.083 + Vector2(0.37, 0.71)) - 0.5
-	if s < 0.0:
-		var t := tanh(-s / 2.0)
-		var g := _seam_mask(p, s)
-		var lumps := (n * 4.0 + n2 * 0.8) * (1.0 - g * 0.85)
-		return t * (TerrainRenderer.ROCK_HEIGHT + lumps * t * t + g * 0.6)
-	var tw := tanh(s / 2.4)
-	var deep := TerrainRenderer.BACK_DEPTH + clampf(s - 4.0, 0.0, 12.0) * 0.35
-	return -tw * (deep + (n * 4.0 + n2 * 0.8) * tw * tw)
-
-
-## The terrain's detail noise at [param uv], filtered as the GPU does
-## (bilinear, repeating).
-static func _noise(uv: Vector2) -> float:
-	if _noise_img == null:
-		var tex := TerrainRenderer.detail_noise()
-		_noise_img = (tex.noise as FastNoiseLite).get_seamless_image(tex.width, tex.height)
-	var w := _noise_img.get_width()
-	var h := _noise_img.get_height()
-	var x := uv.x * w - 0.5
-	var y := uv.y * h - 0.5
-	var x0 := floori(x)
-	var y0 := floori(y)
-	var fx := x - x0
-	var fy := y - y0
-	var a := _noise_img.get_pixel(posmod(x0, w), posmod(y0, h)).r
-	var b := _noise_img.get_pixel(posmod(x0 + 1, w), posmod(y0, h)).r
-	var c := _noise_img.get_pixel(posmod(x0, w), posmod(y0 + 1, h)).r
-	var d := _noise_img.get_pixel(posmod(x0 + 1, w), posmod(y0 + 1, h)).r
-	return lerpf(lerpf(a, b, fx), lerpf(c, d, fx), fy)
+	return TerrainRelief.height(level.field, p, _seam_mask(p, level.field.sample(p)))
 
 
 func _exit_tree() -> void:

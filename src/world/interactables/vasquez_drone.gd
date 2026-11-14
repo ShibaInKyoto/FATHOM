@@ -2,9 +2,10 @@ class_name VasquezDrone
 extends Entity
 ## The work drone T. Vasquez took out to cut a path to the escape lock, the
 ## night the Choir sang his tunnel shut (log_09). It lies in the last Hadal
-## Trench zone, sealed into a wall behind the playfield: smooth rock has
-## flowed over its tail and cockpit like wax, and only the nose and the cutter
-## arm still reach out. One work lamp still flickers out over the tunnel, its
+## Trench zone, sealed into a wall behind the playfield (see [DroneModel]):
+## the rock has flowed over its tail and cockpit like wax, a smooth sheet
+## poured from the wall and shaped over it, and only the nose and the saw arm
+## still reach out. One work lamp still flickers out over the tunnel, its
 ## status lamp blinks and its transponder chirps.
 ## Coming alongside plays its flight recorder (a log outside the Meridian
 ## set) and drains what charge is left in its cells into the sub.
@@ -22,12 +23,15 @@ const CHIRP_PERIOD := 6.0
 ## The transponder only chirps while the sub is this close.
 const HEARING := 55.0
 const LOG_ID := &"log_drone"
-const FOAM := Color(0.8, 0.56, 0.12)
-const FRAME := Color(0.2, 0.21, 0.22)
-const STEEL := Color(0.5, 0.5, 0.48)
-const GLASS := Color(0.03, 0.04, 0.05)
 const LAMP := Color(1.0, 0.18, 0.1)
 const WORK_LIGHT := Color(1.0, 0.86, 0.6)
+const DRONE_SHADER := preload("res://src/fx/shaders/drone.gdshader")
+const FLOWSTONE_SHADER := preload("res://src/fx/shaders/flowstone.gdshader")
+## How far back along the drone (in its own metres from its middle) the
+## rock has flowed.
+const SWALLOWED_TO := 0.6
+## The grid the flowstone is shaped on, in metres.
+const FLOW_CELL := 0.06
 
 ## Where the wall surface is, on the gameplay plane, and which way it faces.
 var wall := Vector2.ZERO
@@ -35,7 +39,7 @@ var normal := Vector2.RIGHT
 var surveyed := false
 var _t := 0.0
 var _chirp_at := 1.0
-var _lamp_mat: StandardMaterial3D
+var _status := 0.0
 var _light: OmniLight3D
 var _mat: ShaderMaterial
 var _work: SpotLight3D
@@ -67,6 +71,8 @@ static func place(level: Level, rng: RandomNumberGenerator, avoid: PackedVector2
 		drone.normal = a.normal
 		drone.pos = a.pos + a.normal * 1.8
 		level.add_entity(drone)
+		# No boulders or growth over it.
+		level.clearings.append(Rect2(drone.pos - Vector2(4.5, 4.5), Vector2(9.0, 9.0)))
 		return drone
 	return null
 
@@ -90,71 +96,62 @@ func setup() -> void:
 	rig.top_level = true
 	add_child(rig)
 	var base := wall + normal * PropScatter.surface_offset(DEPTH)
-	rig.position = Vector3(base.x, base.y, DEPTH)
+	# Its far side sunk into the slope of the wall.
+	rig.position = Vector3(base.x, base.y, TerrainRelief.height(level.field, base) - 0.1)
 	rig.rotation.z = facing * (atan2(normal.y, absf(normal.x)) + rng.randf_range(-0.12, 0.22))
 	rig.scale = Vector3.ONE * SCALE
 	var model := Node3D.new()
 	model.rotation.x = rng.randf_range(-0.15, 0.1)
 	rig.add_child(model)
+	var drone_mesh := _facing(DroneModel.build(), facing)
 	var hull := MeshInstance3D.new()
-	hull.mesh = _facing(_build_drone(), facing)
+	hull.mesh = drone_mesh
 	_mat = ShaderMaterial.new()
-	_mat.shader = preload("res://src/fx/shaders/station.gdshader")
+	_mat.shader = DRONE_SHADER
 	_mat.set_shader_parameter(&"sediment_tint", level.biome.sediment_tint)
-	_mat.set_shader_parameter(&"seams", 0.0)
-	_mat.set_shader_parameter(&"metal", 0.25)
-	_mat.set_shader_parameter(&"window_color", WORK_LIGHT)
+	_mat.set_shader_parameter(&"work_light", WORK_LIGHT)
+	_mat.set_shader_parameter(&"status_light", LAMP)
 	hull.material_override = _mat
 	model.add_child(hull)
-	# The rock that grew over it, mapped like the cave walls.
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.use_custom_data = true
-	mm.mesh = _facing(_build_rock(rng), facing)
-	mm.instance_count = 1
-	mm.set_instance_transform(0, Transform3D.IDENTITY)
-	mm.set_instance_custom_data(0, Color(0.0, 0.45, 0.95, 0.0))
-	var rock := MultiMeshInstance3D.new()
-	rock.multimesh = mm
-	rock.material_override = PropScatter.rock_material(level.biome)
-	model.add_child(rock)
-	var lamp := MeshInstance3D.new()
-	lamp.mesh = MeshKit.sphere(0.07, 8, 4)
-	_lamp_mat = MeshKit.emissive_material(LAMP, 6.0)
-	lamp.material_override = _lamp_mat
-	lamp.position = Vector3(facing * 0.95, 0.72, 0.42)
-	model.add_child(lamp)
-	var plate := Label3D.new()
-	plate.text = "MD-02"
-	plate.font = UiTheme.TITLE_FONT_FILE
-	plate.font_size = 48
-	plate.outline_size = 0
-	plate.pixel_size = 0.006
-	plate.modulate = Color(0.1, 0.08, 0.05, 0.85)
-	plate.shaded = true
-	plate.position = Vector3(facing * 0.55, 0.42, 0.59)
-	model.add_child(plate)
+	model.add_child(_stencil(facing))
+	# The rock poured over it, shaped round it in world space.
+	var model_xf := Transform3D(Basis.from_euler(rig.rotation) * Basis.from_scale(rig.scale), rig.position) \
+		* Transform3D(Basis.from_euler(model.rotation), Vector3.ZERO)
+	var flow := MeshInstance3D.new()
+	flow.mesh = _flowstone(drone_mesh, model_xf, facing)
+	var rock := ShaderMaterial.new()
+	rock.shader = FLOWSTONE_SHADER
+	rock.set_shader_parameter(&"rock_albedo", TerrainRenderer.ROCK_ALBEDO)
+	rock.set_shader_parameter(&"rock_rough", TerrainRenderer.ROCK_ROUGH)
+	rock.set_shader_parameter(&"rock_tint", level.biome.rock_tint)
+	rock.set_shader_parameter(&"rock_tint_deep", level.biome.rock_tint_deep)
+	rock.set_shader_parameter(&"sediment_tint", level.biome.sediment_tint)
+	flow.material_override = rock
+	flow.top_level = true
+	add_child(flow)
+	var status := DroneModel.STATUS_LAMP
 	_light = OmniLight3D.new()
 	_light.light_color = LAMP
 	_light.omni_range = 6.0
 	_light.light_energy = 0.0
-	_light.position = Vector3(facing * 1.0, 0.9, 1.2)
-	rig.add_child(_light)
+	_light.position = Vector3(facing * status.x, status.y + 0.15, status.z + 0.5)
+	model.add_child(_light)
 	# The near work lamp, still running on the last of the cells.
+	var lamp := DroneModel.NEAR_LAMP
 	_work = SpotLight3D.new()
 	_work.light_color = WORK_LIGHT
 	_work.spot_range = 13.0
 	_work.spot_angle = 24.0
 	_work.spot_attenuation = 0.8
 	_work.light_volumetric_fog_energy = 2.5
-	_work.position = Vector3(facing * 1.4, 0.22, 0.42)
+	_work.position = Vector3(facing * (lamp.x + 0.02), lamp.y, lamp.z)
 	_work.rotation = Vector3(0.0, -facing * PI * 0.5, 0.0)
 	_work.rotate_object_local(Vector3.RIGHT, -0.12)
-	rig.add_child(_work)
+	model.add_child(_work)
 	# Its cone in the water, drawn like the sub's lamp beam.
 	var length := 8.0
 	var cone := CylinderMesh.new()
-	cone.top_radius = 0.1
+	cone.top_radius = 0.08
 	cone.bottom_radius = tan(deg_to_rad(_work.spot_angle * 0.8)) * length
 	cone.height = length
 	cone.radial_segments = 16
@@ -175,12 +172,220 @@ func setup() -> void:
 	_work.add_child(beam)
 
 
+## "MD-02" and "MERIDIAN DEEP" stencilled on the near side of the float's
+## nose, laid flush on it.
+func _stencil(facing: float) -> Node3D:
+	var marks := Node3D.new()
+	var at := DroneModel.FLOAT_AT
+	var face := at.z + DroneModel.FLOAT_HALF.z + 0.004
+	for line: Array in [["MD-02", 64, 0.0021, at.y + 0.02], ["MERIDIAN DEEP", 40, 0.00115, at.y - 0.1]]:
+		var text := Label3D.new()
+		text.text = line[0]
+		text.font = UiTheme.TITLE_FONT_FILE
+		text.font_size = line[1]
+		text.outline_size = 0
+		text.pixel_size = line[2]
+		text.modulate = Color(0.07, 0.055, 0.04, 0.9)
+		text.shaded = true
+		text.double_sided = false
+		text.alpha_cut = Label3D.ALPHA_CUT_OPAQUE_PREPASS
+		text.position = Vector3(facing * 0.93, line[3], face)
+		marks.add_child(text)
+	return marks
+
+
+## The rock that flowed over the drone (whose mesh, in world space, is
+## [param drone] moved by [param xf]): a sheet shaped on a grid over it,
+## rising out of the wall's own surface and over the drone's rear and
+## cockpit with a smoothly rounded, dripping lip where it stopped, sinking
+## back under the wall's surface everywhere else.
+func _flowstone(drone: ArrayMesh, xf: Transform3D, facing: float) -> ArrayMesh:
+	var arrays := drone.surface_get_arrays(0)
+	var src: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	var pts := PackedVector3Array()
+	pts.resize(src.size())
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	for i in src.size():
+		pts[i] = xf * src[i]
+		lo = lo.min(Vector2(pts[i].x, pts[i].y))
+		hi = hi.max(Vector2(pts[i].x, pts[i].y))
+	lo -= Vector2.ONE * 1.4
+	hi += Vector2.ONE * 1.4
+	var cell := FLOW_CELL
+	var nx := int((hi.x - lo.x) / cell) + 1
+	var ny := int((hi.y - lo.y) / cell) + 1
+	# The drone's height towards the camera over each cell.
+	var top := PackedFloat32Array()
+	top.resize(nx * ny)
+	top.fill(-INF)
+	for t in range(0, idx.size(), 3):
+		var a := pts[idx[t]]
+		var b := pts[idx[t + 1]]
+		var c := pts[idx[t + 2]]
+		# Each corner marks its own cell (for triangles smaller than a cell)...
+		for v: Vector3 in [a, b, c]:
+			var kx := clampi(roundi((v.x - lo.x) / cell), 0, nx - 1)
+			var ky := clampi(roundi((v.y - lo.y) / cell), 0, ny - 1)
+			top[ky * nx + kx] = maxf(top[ky * nx + kx], v.z)
+		# ...and every cell centre the triangle covers takes its height there.
+		var x0 := maxi(ceili((minf(a.x, minf(b.x, c.x)) - lo.x) / cell), 0)
+		var x1 := mini(floori((maxf(a.x, maxf(b.x, c.x)) - lo.x) / cell), nx - 1)
+		var y0 := maxi(ceili((minf(a.y, minf(b.y, c.y)) - lo.y) / cell), 0)
+		var y1 := mini(floori((maxf(a.y, maxf(b.y, c.y)) - lo.y) / cell), ny - 1)
+		var den := (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y)
+		if absf(den) < 1e-9:
+			continue
+		for iy in range(y0, y1 + 1):
+			for ix in range(x0, x1 + 1):
+				var px := lo.x + ix * cell
+				var py := lo.y + iy * cell
+				var wa := ((b.y - c.y) * (px - c.x) + (c.x - b.x) * (py - c.y)) / den
+				var wb := ((c.y - a.y) * (px - c.x) + (a.x - c.x) * (py - c.y)) / den
+				var wc := 1.0 - wa - wb
+				if wa < -0.001 or wb < -0.001 or wc < -0.001:
+					continue
+				var k := iy * nx + ix
+				top[k] = maxf(top[k], a.z * wa + b.z * wb + c.z * wc)
+	# The wall's surface, and the drone's way out of it.
+	var origin := Vector2(xf.origin.x, xf.origin.y)
+	var scale := xf.basis.x.length()
+	var nose3 := (xf.basis * Vector3(facing, 0.0, 0.0)).normalized()
+	var up3 := (xf.basis * Vector3(0.0, 1.0, 0.0)).normalized()
+	var nose := Vector2(nose3.x, nose3.y).normalized()
+	var up := Vector2(up3.x, up3.y).normalized()
+	var ground := PackedFloat32Array()
+	var excess := PackedFloat32Array()
+	var reach := PackedFloat32Array()
+	ground.resize(nx * ny)
+	excess.resize(nx * ny)
+	reach.resize(nx * ny)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(wall) + 5
+	var drip_phase := rng.randf() * TAU
+	for iy in ny:
+		for ix in nx:
+			var k := iy * nx + ix
+			var p := lo + Vector2(ix, iy) * cell
+			ground[k] = TerrainRelief.height(level.field, p)
+			# How far the drone stands out of the wall here, with the rock's
+			# own thickness over it.
+			excess[k] = maxf(top[k] + 0.07 - ground[k], 0.0)
+			# How far it has flowed here: up to its lip, which runs forward in
+			# tongues and drips (in the drone's own metres).
+			var lx := (p - origin).dot(nose) / scale
+			var ly := (p - origin).dot(up) / scale
+			var lip := SWALLOWED_TO + 0.1 * sin(ly * 7.0 + drip_phase) + 0.05 * sin(ly * 17.0 + drip_phase * 2.0) \
+				+ 0.38 * exp(-pow((ly - 0.62) / 0.1, 2.0)) + 0.22 * exp(-pow((ly + 0.25) / 0.07, 2.0)) \
+				+ 0.16 * exp(-pow((ly - 0.2) / 0.05, 2.0))
+			var edge := minf(minf(ix, nx - 1 - ix), minf(iy, ny - 1 - iy)) * cell
+			reach[k] = (1.0 - smoothstep(lip - 0.12, lip + 0.12, lx)) * smoothstep(0.0, 0.9, edge)
+	# Rounded as wax sets: a mound over the drone, widened and blurred so it
+	# runs down into the wall all round, never below what it covers; it
+	# follows the wall's own surface everywhere else.
+	var mound := _blur(_widen(excess, nx, ny, 3), nx, ny, 4.5)
+	var z := PackedFloat32Array()
+	var wax := PackedFloat32Array()
+	z.resize(nx * ny)
+	wax.resize(nx * ny)
+	for k in nx * ny:
+		var r := reach[k]
+		# Where it stopped, it set in a rounded bead.
+		var bead := 0.06 * sin(clampf(r, 0.0, 1.0) * PI) * smoothstep(0.02, 0.1, excess[k])
+		var h := ground[k] + maxf(mound[k], excess[k] - 0.02) + bead
+		var w := r * smoothstep(0.015, 0.12, mound[k])
+		z[k] = lerpf(ground[k] - 0.1, h, w)
+		wax[k] = w
+	var verts := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var colors := PackedColorArray()
+	var index := PackedInt32Array()
+	var slot := PackedInt32Array()
+	slot.resize(nx * ny)
+	slot.fill(-1)
+	for iy in ny:
+		for ix in nx:
+			var k := iy * nx + ix
+			var zx := z[iy * nx + mini(ix + 1, nx - 1)] - z[iy * nx + maxi(ix - 1, 0)]
+			var zy := z[mini(iy + 1, ny - 1) * nx + ix] - z[maxi(iy - 1, 0) * nx + ix]
+			slot[k] = verts.size()
+			var p := lo + Vector2(ix, iy) * cell
+			verts.append(Vector3(p.x, p.y, z[k]))
+			normals.append(Vector3(-zx / (2.0 * cell), -zy / (2.0 * cell), 1.0).normalized())
+			colors.append(Color(wax[k], 0.0, 0.0))
+	for iy in ny - 1:
+		for ix in nx - 1:
+			var a := iy * nx + ix
+			# Only where it shows above the wall.
+			if wax[a] + wax[a + 1] + wax[a + nx] + wax[a + nx + 1] < 0.002:
+				continue
+			# Clockwise as seen from +Z (Godot's front face; the grid's y runs up).
+			index.append_array([slot[a], slot[a + nx], slot[a + 1], slot[a + 1], slot[a + nx], slot[a + nx + 1]])
+	var out := []
+	out.resize(Mesh.ARRAY_MAX)
+	out[Mesh.ARRAY_VERTEX] = verts
+	out[Mesh.ARRAY_NORMAL] = normals
+	out[Mesh.ARRAY_COLOR] = colors
+	out[Mesh.ARRAY_INDEX] = index
+	var mesh := ArrayMesh.new()
+	if not index.is_empty():
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, out)
+	return mesh
+
+
+## [param values] (an [param nx] by [param ny] grid) with each cell raised
+## to the highest within [param r] cells.
+static func _widen(values: PackedFloat32Array, nx: int, ny: int, r: int) -> PackedFloat32Array:
+	var out := values.duplicate()
+	for iy in ny:
+		for ix in nx:
+			var m := values[iy * nx + ix]
+			for dy in range(-r, r + 1):
+				for dx in range(-r, r + 1):
+					var x := clampi(ix + dx, 0, nx - 1)
+					var y := clampi(iy + dy, 0, ny - 1)
+					m = maxf(m, values[y * nx + x])
+			out[iy * nx + ix] = m
+	return out
+
+
+## [param values] blurred, [param sigma] cells across.
+static func _blur(values: PackedFloat32Array, nx: int, ny: int, sigma: float) -> PackedFloat32Array:
+	var r := int(ceil(sigma * 2.0))
+	var weights := PackedFloat32Array()
+	var total := 0.0
+	for d in range(-r, r + 1):
+		var w := exp(-float(d * d) / (2.0 * sigma * sigma))
+		weights.append(w)
+		total += w
+	var pass1 := PackedFloat32Array()
+	pass1.resize(nx * ny)
+	for iy in ny:
+		for ix in nx:
+			var sum := 0.0
+			for d in range(-r, r + 1):
+				sum += values[iy * nx + clampi(ix + d, 0, nx - 1)] * weights[d + r]
+			pass1[iy * nx + ix] = sum / total
+	var out := PackedFloat32Array()
+	out.resize(nx * ny)
+	for iy in ny:
+		for ix in nx:
+			var sum := 0.0
+			for d in range(-r, r + 1):
+				sum += pass1[clampi(iy + d, 0, ny - 1) * nx + ix] * weights[d + r]
+			out[iy * nx + ix] = sum / total
+	return out
+
+
 func tick(delta: float) -> void:
 	_t += delta
 	var sub := level.player
 	if surveyed:
 		# Once the recorder has played and the cells are drained, the lamps go out.
-		_lamp_mat.emission_energy_multiplier = move_toward(_lamp_mat.emission_energy_multiplier, 0.0, delta * 2.0)
+		_status = move_toward(_status, 0.0, delta * 2.0)
+		_mat.set_shader_parameter(&"status", _status)
+		_mat.set_shader_parameter(&"console", _work_energy)
 		_light.light_energy = move_toward(_light.light_energy, 0.0, delta * 0.5)
 		_work_energy = move_toward(_work_energy, 0.0, delta * 0.35)
 		_set_work_light(_work_energy * (0.8 + 0.2 * sin(_t * 31.0)))
@@ -191,7 +396,8 @@ func tick(delta: float) -> void:
 		flicker = 0.12
 	_set_work_light(flicker)
 	var lit := fmod(_t, BLINK_PERIOD) < 0.2
-	_lamp_mat.emission_energy_multiplier = 6.0 if lit else 0.25
+	_status = 1.0 if lit else 0.0
+	_mat.set_shader_parameter(&"status", _status)
 	_light.light_energy = 1.4 if lit else 0.0
 	if _t >= _chirp_at:
 		_chirp_at = _t + CHIRP_PERIOD
@@ -207,7 +413,7 @@ func survey(sub: Submarine) -> void:
 		return
 	surveyed = true
 	Wonders.witness("drone")
-	_lamp_mat.emission_energy_multiplier = 6.0
+	_status = 1.0
 	_light.light_energy = 1.4
 	var charge := minf(CELL_CHARGE, maxf(sub.stats.max_battery - sub.run.battery, 0.0))
 	sub.run.battery += charge
@@ -228,7 +434,7 @@ func survey(sub: Submarine) -> void:
 func _set_work_light(k: float) -> void:
 	_work.light_energy = 2.2 * k
 	_beam_mat.set_shader_parameter(&"intensity", 0.04 * k)
-	_mat.set_shader_parameter(&"failing_energy", 3.0 * k)
+	_mat.set_shader_parameter(&"work", k)
 
 
 ## [param mesh] as is for [param facing] +1, or mirrored left to right for -1
@@ -273,121 +479,3 @@ static func _rewound(values: Variant) -> Variant:
 		out[i + 1] = values[i + 2]
 		out[i + 2] = values[i + 1]
 	return out
-
-
-## Uniformly coloured copy of [param mesh] at [param xf], for the station
-## shader, as a part for [method MeshKit.merge]; [param window] marks a lit
-## lens (0.5 = the failing work lamp).
-static func _part(mesh: Mesh, xf: Transform3D, color: Color, window := 0.0) -> Array:
-	var c := Color(color, window)
-	return [MeshKit.painted(MeshKit.transformed(mesh, xf), func(_v: Vector3) -> Color: return c)]
-
-
-## Cylinder of radius [param r] from [param a] to [param b].
-static func _rod(a: Vector3, b: Vector3, r: float, color: Color) -> Array:
-	var m := CylinderMesh.new()
-	m.top_radius = r
-	m.bottom_radius = r
-	m.height = a.distance_to(b)
-	m.radial_segments = 8
-	m.rings = 1
-	var y := (b - a).normalized()
-	var x := y.cross(Vector3.BACK)
-	if x.length_squared() < 0.01:
-		x = y.cross(Vector3.RIGHT)
-	x = x.normalized()
-	return _part(m, Transform3D(Basis(x, y, x.cross(y).normalized()), (a + b) * 0.5), color)
-
-
-## A small work submersible, nose along +X: buoyancy block on top, an open
-## frame with the pilot's sphere at the front, dead lamps, thruster ducts and
-## a manipulator arm ending in a rock saw.
-static func _build_drone() -> ArrayMesh:
-	var parts: Array = []
-	var c := 0.15
-	var foam := BoxMesh.new()
-	foam.size = Vector3(2.1, 0.5, 1.15)
-	parts.append(_part(foam, Transform3D(Basis(), Vector3(c, 0.42, 0.0)), FOAM))
-	var sphere := MeshKit.sphere(0.45, 16, 8)
-	parts.append(_part(sphere, Transform3D(Basis(), Vector3(c + 0.75, -0.08, 0.0)), GLASS))
-	var bezel := TorusMesh.new()
-	bezel.inner_radius = 0.4
-	bezel.outer_radius = 0.5
-	bezel.rings = 18
-	bezel.ring_segments = 6
-	parts.append(_part(bezel, Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(c + 0.92, -0.08, 0.0)), FRAME))
-	# Open frame: corner posts, bottom rails and skids.
-	for sx: float in [-0.85, 0.85]:
-		for sz: float in [-0.52, 0.52]:
-			parts.append(_rod(Vector3(c + sx, -0.55, sz), Vector3(c + sx, 0.2, sz), 0.05, FRAME))
-	for sz: float in [-0.52, 0.52]:
-		parts.append(_rod(Vector3(c - 0.95, -0.55, sz), Vector3(c + 1.05, -0.55, sz), 0.05, FRAME))
-		parts.append(_rod(Vector3(c - 0.7, -0.72, sz), Vector3(c + 0.9, -0.72, sz), 0.06, STEEL))
-		parts.append(_rod(Vector3(c + 0.9, -0.72, sz), Vector3(c + 1.12, -0.55, sz), 0.06, STEEL))
-	# Lamp cans either side of the sphere; the near one still gutters.
-	var can := CylinderMesh.new()
-	can.top_radius = 0.1
-	can.bottom_radius = 0.12
-	can.height = 0.24
-	can.radial_segments = 10
-	var lens := MeshKit.sphere(0.09, 8, 4)
-	for sz: float in [-0.42, 0.42]:
-		parts.append(_part(can, Transform3D(Basis(Vector3.BACK, -PI * 0.5), Vector3(c + 1.08, 0.22, sz)), STEEL))
-		parts.append(_part(lens, Transform3D(Basis().scaled(Vector3(0.4, 1.0, 1.0)), Vector3(c + 1.2, 0.22, sz)),
-			GLASS, 0.5 if sz > 0.0 else 0.0))
-	# Vertical thruster ducts through the buoyancy block.
-	var duct := TorusMesh.new()
-	duct.inner_radius = 0.16
-	duct.outer_radius = 0.24
-	duct.rings = 14
-	duct.ring_segments = 6
-	for sx: float in [-0.5, 0.45]:
-		parts.append(_part(duct, Transform3D(Basis(), Vector3(c + sx, 0.68, 0.0)), FRAME))
-	# Manipulator arm, reaching out from under the sphere, and its rock saw.
-	var shoulder := Vector3(c + 0.85, -0.42, 0.45)
-	var elbow := Vector3(c + 1.55, -0.08, 0.62)
-	var wrist := Vector3(c + 2.1, -0.5, 0.66)
-	var joint := MeshKit.sphere(0.1, 8, 4)
-	parts.append(_rod(shoulder, elbow, 0.07, STEEL))
-	parts.append(_rod(elbow, wrist, 0.06, STEEL))
-	for p in [shoulder, elbow, wrist]:
-		parts.append(_part(joint, Transform3D(Basis(), p), FRAME))
-	var hub := wrist + Vector3(0.14, -0.06, 0.08)
-	var blade := CylinderMesh.new()
-	blade.top_radius = 0.34
-	blade.bottom_radius = 0.34
-	blade.height = 0.035
-	blade.radial_segments = 20
-	blade.rings = 1
-	parts.append(_part(blade, Transform3D(Basis(Vector3.RIGHT, PI * 0.5), hub), STEEL))
-	var tooth := BoxMesh.new()
-	tooth.size = Vector3(0.07, 0.07, 0.04)
-	for k in 14:
-		var a := TAU * k / 14.0
-		var at := hub + Vector3(cos(a), sin(a), 0.0) * 0.36
-		parts.append(_part(tooth, Transform3D(Basis(Vector3.BACK, a + 0.6), at), FRAME))
-	parts.append(_part(joint, Transform3D(Basis().scaled(Vector3(0.8, 0.8, 1.4)), hub), FRAME))
-	return MeshKit.merge(parts)
-
-
-## The rock that flowed over the drone: a mass where it meets the wall, the
-## tail and cockpit swallowed, and a tongue creeping forward over the top.
-static func _build_rock(rng: RandomNumberGenerator) -> ArrayMesh:
-	var blob := MeshKit.ball(1.0, 0.0, 16, 10)
-	var parts: Array = []
-	for i in 6:
-		var r := rng.randf_range(1.1, 1.5)
-		parts.append([blob, Transform3D(Basis().scaled(Vector3(r, r * 1.1, r)),
-			Vector3(rng.randf_range(-2.1, -1.4), rng.randf_range(-1.2, 1.4), rng.randf_range(-1.0, 0.3)))])
-	for i in 9:
-		var r := rng.randf_range(0.45, 0.85)
-		parts.append([blob, Transform3D(Basis().scaled(Vector3(r, r * 0.9, r)),
-			Vector3(rng.randf_range(-1.2, -0.2), rng.randf_range(-0.7, 1.0), rng.randf_range(-0.6, 0.55)))])
-	for k in 3:
-		parts.append([blob, Transform3D(Basis().scaled(Vector3(0.75 - k * 0.15, 0.3 - k * 0.05, 0.7 - k * 0.1)),
-			Vector3(-0.15 + k * 0.38, 0.75 - k * 0.04, rng.randf_range(-0.2, 0.2)))])
-	var grain := FastNoiseLite.new()
-	grain.frequency = 0.7
-	return MeshKit.painted(MeshKit.merge(parts), func(v: Vector3) -> Color:
-		var g := 0.85 + grain.get_noise_3dv(v) * 0.15
-		return Color(g, g, g, 0.0))
