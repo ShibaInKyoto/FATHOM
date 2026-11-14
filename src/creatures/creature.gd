@@ -491,7 +491,7 @@ func is_hostile() -> bool:
 
 
 func on_sonar(origin: Vector2, mark_time: float) -> void:
-	var delay := pos.distance_to(origin) / Level.SONAR_SPEED
+	var delay := pos.distance_to(origin) / level.ping_speed
 	_marked = mark_time + delay
 	_mark_total = _marked
 	if not level.silent_ping:

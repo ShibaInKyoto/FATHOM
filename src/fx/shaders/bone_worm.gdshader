@@ -31,5 +31,5 @@ void fragment() {
 	ROUGHNESS = 0.5;
 	float breathe = 0.8 + 0.2 * sin(TIME * 1.1 + phase);
 	vec2 sonar = sonar_sample(world_pos.xy);
-	EMISSION = plume * glow * red * breathe + sonar_color.rgb * (sonar.x * 2.0 + sonar.y * 0.4) * 0.3;
+	EMISSION = plume * glow * red * breathe + sonar_hue(world_pos.xy) * (sonar.x * 2.0 + sonar.y * 0.4) * 0.3;
 }

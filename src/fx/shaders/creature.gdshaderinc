@@ -488,7 +488,7 @@ void fragment() {
 
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 2.5);
 	vec2 sonar = sonar_sample(world_pos.xy);
-	emission += sonar_color.rgb * (sonar.x * 4.0 * (0.4 + fres) + marked * fres * 1.6);
+	emission += sonar_hue(world_pos.xy) * (sonar.x * 4.0 * (0.4 + fres) + marked * fres * 1.6);
 	emission += vec3(1.0, 0.85, 0.8) * hit_flash * 2.5;
 	// (Only where the mesh says where its pores lie: UV2.x is how far along.)
 	if (pores.w > 0.0 && !enamel && paint_uv.x > 0.0) {

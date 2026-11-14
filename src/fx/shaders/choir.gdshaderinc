@@ -173,7 +173,7 @@ void fragment() {
 		NORMAL = choir_bumped(NORMAL, VERTEX, relief);
 	}
 	vec2 sonar = sonar_sample(world_pos.xy);
-	em += sonar_color.rgb * (sonar.x * 3.0 * (0.4 + fres) + marked * fres * 1.6);
+	em += sonar_hue(world_pos.xy) * (sonar.x * 3.0 * (0.4 + fres) + marked * fres * 1.6);
 	em += vec3(1.0, 0.9, 0.95) * hit_flash * 2.0;
 	ALBEDO = base * (1.0 + veins * 0.6);
 	ROUGHNESS = roughness;

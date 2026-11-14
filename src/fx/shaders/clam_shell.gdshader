@@ -61,5 +61,5 @@ void fragment() {
 		ROUGHNESS = 0.18;
 		SPECULAR = 0.7;
 	}
-	EMISSION = sonar_color.rgb * (sonar.x * 2.0 + sonar.y * 0.4) * (0.3 + fres);
+	EMISSION = sonar_hue(world_pos.xy) * (sonar.x * 2.0 + sonar.y * 0.4) * (0.3 + fres);
 }

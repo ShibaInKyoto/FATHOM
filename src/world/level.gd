@@ -8,6 +8,8 @@ signal exit_reached
 ## How long a noise event stays audible to creatures (seconds).
 const NOISE_LIFETIME := 0.35
 const SONAR_SPEED := 42.0
+## The echo's speed (ECHO_SPEED in sonar.gdshaderinc).
+const ECHO_SPEED := 16.0
 
 var layout: LevelLayout
 var field: TerrainField
@@ -53,6 +55,8 @@ var prop_life: PropLife
 var descent_marker: DescentMarker
 ## Set while a ping no hunter would follow is going out (see [method ping]).
 var silent_ping := false
+## How fast the ping under way travels (the echo's is slower).
+var ping_speed := SONAR_SPEED
 
 var _pending_remove: Array[Entity] = []
 var _ping_slot := 0
@@ -103,6 +107,7 @@ func build(zone_layout: LevelLayout, quality: int, pressure_level := 0, zone_eve
 
 	for i in 4:
 		RenderingServer.global_shader_parameter_set(StringName("sonar_ping%d" % i), Vector4(0, 0, -100, 0))
+	RenderingServer.global_shader_parameter_set(&"echo_ping", Vector4(0, 0, -100, 0))
 	RenderingServer.global_shader_parameter_set(&"sonar_time", 0.0)
 
 
@@ -206,11 +211,17 @@ func loudest_noise_at(p: Vector2, hearing := 1.0, ignore: Node = null) -> Varian
 ## Fires a sonar ping: drives the terrain shader and marks entities in range.
 ## A [param silent] ping (a whale's clicks, the echo from below) charts and
 ## marks like any other, but no hunter turns towards it.
-func ping(origin: Vector2, ping_range: float, mark_time: float, silent := false) -> void:
+## [param echo]: the Hadal Trench's echo, drawn as its own slowed, violet
+## wave (see sonar.gdshaderinc) and marking what it reaches at its own pace.
+func ping(origin: Vector2, ping_range: float, mark_time: float, silent := false, echo := false) -> void:
 	silent_ping = silent
-	var slot := StringName("sonar_ping%d" % _ping_slot)
-	_ping_slot = (_ping_slot + 1) % 4
-	RenderingServer.global_shader_parameter_set(slot, Vector4(origin.x, origin.y, time, ping_range))
+	ping_speed = ECHO_SPEED if echo else SONAR_SPEED
+	if echo:
+		RenderingServer.global_shader_parameter_set(&"echo_ping", Vector4(origin.x, origin.y, time, ping_range))
+	else:
+		var slot := StringName("sonar_ping%d" % _ping_slot)
+		_ping_slot = (_ping_slot + 1) % 4
+		RenderingServer.global_shader_parameter_set(slot, Vector4(origin.x, origin.y, time, ping_range))
 	for e in entities:
 		if e.alive and e.pos.distance_to(origin) < ping_range:
 			e.on_sonar(origin, mark_time)
@@ -221,6 +232,7 @@ func ping(origin: Vector2, ping_range: float, mark_time: float, silent := false)
 			Events.toast.emit("Sonar contact: the descent", UiTheme.GOOD)
 			Audio.play(&"sonar_contact", -4.0))
 	silent_ping = false
+	ping_speed = SONAR_SPEED
 	Events.sonar_pinged.emit(origin, ping_range)
 
 

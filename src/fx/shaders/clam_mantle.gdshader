@@ -79,5 +79,5 @@ void fragment() {
 	SPECULAR = 0.6;
 	vec2 sonar = sonar_sample(world_pos.xy);
 	EMISSION = (base * (0.35 + 0.65 * streak) + spot * eyes) * glow * COLOR.rgb
-		+ sonar_color.rgb * (sonar.x * 2.0 + sonar.y * 0.4) * 0.3;
+		+ sonar_hue(world_pos.xy) * (sonar.x * 2.0 + sonar.y * 0.4) * 0.3;
 }

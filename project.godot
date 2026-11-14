@@ -81,6 +81,14 @@ sonar_color={
 "type": "color",
 "value": Color(0.25, 0.95, 1, 1)
 }
+echo_ping={
+"type": "vec4",
+"value": Vector4(0, 0, -100, 0)
+}
+echo_color={
+"type": "color",
+"value": Color(0.78, 0.5, 1, 1)
+}
 player_pos={
 "type": "vec3",
 "value": Vector3(0, 0, 0)

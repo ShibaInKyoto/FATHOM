@@ -42,5 +42,5 @@ void fragment() {
 	vec2 sonar = sonar_sample(world_pos.xy);
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 2.0);
 	EMISSION = window_color * (steady * steady_energy + failing * failing_energy)
-		+ sonar_color.rgb * (sonar.x * 2.0 + sonar.y * 0.4) * (0.3 + fres);
+		+ sonar_hue(world_pos.xy) * (sonar.x * 2.0 + sonar.y * 0.4) * (0.3 + fres);
 }

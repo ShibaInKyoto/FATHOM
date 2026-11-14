@@ -96,5 +96,5 @@ void fragment() {
 		glow += mix(glow_color, vec3(1.0), 0.6) * crack * (1.5 + 2.0 * ring);
 	}
 	vec2 sonar = sonar_sample(world_pos.xy);
-	EMISSION = glow + sonar_color.rgb * (sonar.x * 2.0 + sonar.y * 0.4) * (0.3 + fres);
+	EMISSION = glow + sonar_hue(world_pos.xy) * (sonar.x * 2.0 + sonar.y * 0.4) * (0.3 + fres);
 }
