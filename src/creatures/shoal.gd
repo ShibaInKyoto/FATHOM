@@ -306,6 +306,21 @@ func behave(delta: float) -> void:
 		v.set_instance_shader_parameter(&"glow_boost", 1.0 + _panic * 2.0)
 
 
+## Hushed by the Choir's song passing (see [member Creature.hush_at]): every
+## fish slows to a hover, turned down towards where the song rose.
+func _hushed(delta: float) -> void:
+	_age += delta
+	for i in fish_pos.size():
+		var down := (hush_from - fish_pos[i]).normalized()
+		var v := fish_vel[i].lerp(down * 0.35, 1.0 - exp(-8.0 * delta))
+		fish_vel[i] = v
+		fish_pos[i] += v * delta
+		var depth := sin(i * 1.7) * 0.8 + sin(_age * 0.5 + _fish_phase[i] * TAU) * 0.25
+		_multimesh.set_instance_transform(i, Transform3D(_swim_fish(i, v, delta),
+			Vector3(fish_pos[i].x, fish_pos[i].y, depth)))
+	_update_visuals(delta)
+
+
 ## Paces fish [param i]'s own stroke: faster the faster it goes, harder
 ## when the school bolts, its body curled into the turn it is swimming; and
 ## turns it, round through the depth when it turns back (see creature.gd).

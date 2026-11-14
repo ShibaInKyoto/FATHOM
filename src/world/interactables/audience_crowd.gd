@@ -8,7 +8,7 @@ extends Node3D
 ## pulses rise from, so a pulse reaches each tier all at once: as it passes,
 ## the tier's lights flare, its fish jolt up and beat their fins, then turn
 ## to the new tone, tier after tier up the dome. They part round the sub and
-## close behind it; when the audience wakes they bolt and are gone.
+## close behind it.
 ## Only drawn: they bite nothing and are not targets.
 
 ## Kinds of fish: how each is scaled (x along the body, y its depth), and
@@ -34,7 +34,6 @@ const JOLT_DAMP := 3.2
 const MAKE_WAY := 2.6
 ## Seconds a pulse keeps a fish moving after it passes.
 const ACTIVE := 3.5
-const SCATTER_TIME := 3.0
 
 static var _mesh: ArrayMesh
 
@@ -63,11 +62,8 @@ var _tiers := 0
 ## Each tier's distance from [member origin], and the furthest fish's.
 var _tier_dist := PackedFloat32Array()
 var _furthest := 0.0
-## When the last pulse began (in level time), and when the crowd bolted.
+## When the last pulse began (in level time).
 var _pulse_at := -100.0
-var _scatter_at := -1.0
-var _scatter_from := Vector2.ZERO
-var _vel := PackedVector3Array()
 var _clock := 0.0
 var _dirty := true
 
@@ -123,7 +119,6 @@ func gather(level: Level, from: Vector2, station: Vector2, radii: Vector2, focus
 			_elev.append(atan2(h.y, absf(h.x)))
 			_elev_to.append(_elev[_elev.size() - 1])
 			_aside.append(Vector3.ZERO)
-			_vel.append(Vector3.ZERO)
 		_tiers += 1
 		_tier_dist.append(r)
 		r += TIER_STEP
@@ -202,25 +197,10 @@ static func arrival(from: Vector2, p: Vector2) -> float:
 	return p.distance_to(from) / Level.ECHO_SPEED
 
 
-## The audience has woken: every fish bolts away from [param from].
-func scatter(now: float, from: Vector2) -> void:
-	if _scatter_at >= 0.0:
-		return
-	_scatter_at = now
-	_scatter_from = from
-	for i in home.size():
-		var away := Vector2(home[i].x, home[i].y) - from
-		var dir := (away.normalized() + Vector2(0.0, 0.4)).normalized()
-		_vel[i] = Vector3(dir.x, dir.y, 0.0) * (2.0 + _phase[i] * 2.0)
-
-
 func tick(delta: float, now: float, sub: Vector2) -> void:
 	_clock += delta
 	for mmi in _mmi:
 		mmi.set_instance_shader_parameter(&"swim_clock", _clock)
-	if _scatter_at >= 0.0:
-		_bolt(delta, now)
-		return
 	var since := now - _pulse_at
 	# Each tier's lights flare as the pulse passes it.
 	for t in _tiers:
@@ -269,26 +249,6 @@ func _place(i: int, p: Vector3, power: float) -> void:
 	var b := Basis(Vector3.UP, _yaw[i]) * Basis(Vector3.BACK, _elev[i]) * Basis.from_scale(size)
 	_mm[key].set_instance_transform(_slot[i], Transform3D(b, p))
 	_mm[key].set_instance_custom_data(_slot[i], Color(_phase[i], 0.0, power, 0.0))
-
-
-## Bolting: every fish darts away, turning to face its way, and is gone.
-func _bolt(delta: float, now: float) -> void:
-	var t := now - _scatter_at
-	if t > SCATTER_TIME:
-		visible = false
-		return
-	for i in home.size():
-		_vel[i] *= 1.0 + delta * 2.5
-		home[i] += _vel[i] * delta
-		var v := Vector2(_vel[i].x, _vel[i].y)
-		_yaw_to[i] = 0.0 if v.x >= 0.0 else -PI
-		var s := _spring(_yaw[i], _yaw_v[i], _yaw_to[i], 16.0, delta)
-		_yaw[i] = s.x
-		_yaw_v[i] = s.y
-		_elev[i] = lerpf(_elev[i], atan2(v.y, absf(v.x)), 1.0 - exp(-8.0 * delta))
-		_place(i, home[i], 0.6)
-	for mmi in _mmi:
-		mmi.set_instance_shader_parameter(&"glow_boost", 1.0 + 3.0 * exp(-t * 3.0))
 
 
 ## A critically damped spring from [param x] (moving at [param v]) towards

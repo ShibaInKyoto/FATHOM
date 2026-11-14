@@ -10,6 +10,8 @@ const NOISE_LIFETIME := 0.35
 const SONAR_SPEED := 42.0
 ## The echo's speed (ECHO_SPEED in sonar.gdshaderinc).
 const ECHO_SPEED := 16.0
+## How long a pulse of the Choir's song holds the creatures it passes.
+const HUSH_TIME := 0.5
 
 var layout: LevelLayout
 var field: TerrainField
@@ -234,6 +236,36 @@ func ping(origin: Vector2, ping_range: float, mark_time: float, silent := false,
 	silent_ping = false
 	ping_speed = SONAR_SPEED
 	Events.sonar_pinged.emit(origin, ping_range)
+
+
+## A pulse of the Choir's song rising from [param origin] (the echo, or the
+## tone over Meridian Deep): every creature within [param reach] is hushed
+## for a moment as the pulse passes it, turned down towards the song. Not
+## the Choir's own, a guardian, or anything in a guardian's lair or the
+## Choir's arena; and none while a boss fight is on.
+func choir_wave(origin: Vector2, reach: float) -> void:
+	if boss and boss.active or guardian and guardian.active:
+		return
+	for e in entities:
+		var c := e as Creature
+		if c == null or not c.alive or c.entranced or c is Guardian or c is ChoirOrgan or c is ChoirHeart:
+			continue
+		var d := c.pos.distance_to(origin)
+		if d > reach or in_boss_room(c.pos):
+			continue
+		c.hush_at = time + d / ECHO_SPEED
+		c.hush_end = c.hush_at + HUSH_TIME
+		c.hush_from = origin
+
+
+## Whether [param p] is in the Choir's arena or a guardian's lair.
+func in_boss_room(p: Vector2) -> bool:
+	for room: LevelLayout.Chamber in layout.chambers:
+		if room.kind == &"arena" or (room.kind == &"exit" and guardian != null):
+			var d := (p - room.center) / room.radius
+			if d.length_squared() < 1.2:
+				return true
+	return false
 
 
 func targets_in_radius(p: Vector2, r: float) -> Array[Entity]:

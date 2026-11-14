@@ -2,8 +2,10 @@ extends "res://tools/debug/preview_stage.gd"
 ## Debug helper: stages a Hadal Trench zone, pings once and saves screenshots
 ## of the answer rising from below eleven seconds later.
 ## "film" films from just before the deep stirs until the wave has passed,
-## a frame every fifteenth of a second; "dark" keeps the lamp off.
-## Usage: xvfb-run godot --path . res://tools/debug/preview_echo.tscn -- <out_dir> [seed] [film] [dark]
+## a frame every fifteenth of a second; "dark" keeps the lamp off; "life"
+## puts a school of lanternfish and a few hunters round the sub, to watch the
+## wave hush them as it passes.
+## Usage: xvfb-run godot --path . res://tools/debug/preview_echo.tscn -- <out_dir> [seed] [film] [dark] [life]
 
 var _pinged := false
 var _dark := false
@@ -24,6 +26,13 @@ func _ready() -> void:
 		for i in 120:
 			shot_times.append(8.5 + i / 15.0)
 	_dark = args.has("dark")
+	if args.has("life"):
+		var spots := [[&"shoal", Vector2(7.0, 2.5)], [&"shoal", Vector2(-6.0, -2.0)], [&"lancer", Vector2(9.0, -3.0)],
+			[&"ghostfin", Vector2(-9.0, 3.0)], [&"jelly", Vector2(3.0, 5.0)]]
+		for spot: Array in spots:
+			var c: Creature = LevelPopulator.SPECIES[spot[0]].new()
+			c.pos = level.field.resolve_circle(sub.pos + (spot[1] as Vector2), 1.5)
+			level.add_entity(c)
 
 
 func direct(_dt: float) -> void:

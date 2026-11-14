@@ -104,6 +104,8 @@ func _answer() -> void:
 	# For the sound cues: it comes up from below.
 	Audio.sound_at.emit(&"choir_echo", from)
 	level.ping(from, reach, sub.stats.sonar_mark_time, true, true)
+	# Everything it passes stops for a moment and turns down to it.
+	level.choir_wave(from, reach)
 	if not _explained:
 		_explained = true
 		Events.toast.emit("Eleven seconds later, something far below pinged back.", UiTheme.ACCENT)

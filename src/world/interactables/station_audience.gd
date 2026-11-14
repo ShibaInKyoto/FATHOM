@@ -11,8 +11,10 @@ extends Entity
 ## glow. Each time the tone shifts a pulse rises from the deep through the
 ## station and up the tiers: as it reaches them their lights flare, they
 ## jolt, a ring of light passes through each hunter and they turn as one to
-## where the tone now seems to come from, tier after tier. Hurt or bump a hunter and
-## every member near it wakes and turns on the sub, and the small fish bolt.
+## where the tone now seems to come from, tier after tier. The Choir holds
+## them: nothing the sub does wakes them, hurts them or makes them a target
+## (see [member Creature.trance_held]); they slide aside to let it by. The
+## pulse hushes everything else it passes, too (see [method Level.choir_wave]).
 
 const MEMBERS: Array[StringName] = [&"lancer", &"lancer", &"lancer", &"lancer", &"lancer", &"ghostfin",
 	&"ghostfin", &"ghostfin", &"ghostfin", &"ghostfin", &"jelly", &"jelly", &"jelly", &"jelly", &"puffer", &"puffer",
@@ -37,8 +39,6 @@ const HALO_SHADER := preload("res://src/fx/shaders/trance_halo.gdshader")
 const WAVE_SHADER := preload("res://src/fx/shaders/echo_wave.gdshader")
 ## Seconds between changes of the tone.
 const TONE_PERIOD := Vector2(7.0, 11.0)
-## A member that wakes wakes the rest within this range.
-const WAKE_RADIUS := 10.0
 const HEARING := 60.0
 const NOTICE_RANGE := 28.0
 
@@ -93,6 +93,7 @@ static func gather(level: Level, station: MeridianStation) -> StationAudience:
 			var c: Creature = LevelPopulator.SPECIES[id].new()
 			c.pos = p
 			c.entranced = true
+			c.trance_held = true
 			c.entranced_facing = (focus - p).normalized()
 			c.facing = c.entranced_facing
 			level.add_entity(c)
@@ -126,13 +127,6 @@ func tick(delta: float) -> void:
 			still.append(m)
 	members = still
 	_show_halos()
-	# One that has left the trance (hurt, bumped) brings the rest with it,
-	# and the small fish bolt.
-	for m in members:
-		if not m.entranced:
-			_wake_near(m.pos)
-			if _crowd:
-				_crowd.scatter(level.time, m.pos)
 	var sub := level.player
 	if _crowd:
 		_crowd.tick(delta, level.time, sub.pos if sub else Vector2.INF)
@@ -144,8 +138,8 @@ func tick(delta: float) -> void:
 	if not _explained and sub and sub.alive and sub.pos.distance_to(pos) < NOTICE_RANGE \
 			and members.any(func(m: Creature) -> bool: return m.entranced):
 		_explained = true
-		Events.toast.emit("Hunters hang over the station, facing the floor, perfectly still. Do not wake them.",
-			UiTheme.WARN)
+		Events.toast.emit("Hunters hang over the station, facing the floor, perfectly still. The tone holds them.",
+			UiTheme.ACCENT)
 	# Once the Choir is singing to the sub, the tone is its own.
 	if level.boss and level.boss.active:
 		return
@@ -170,13 +164,6 @@ func listen() -> void:
 		_crowd.pulse(level.time, pos + Vector2(0.0, -2.0), true)
 
 
-func _wake_near(p: Vector2) -> void:
-	for m in members:
-		if m.entranced and m.pos.distance_to(p) < WAKE_RADIUS:
-			m.entranced = false
-			m.alert()
-
-
 ## The tone changes pitch: a pulse rises from the deep through the station
 ## and up the tiers, and as it reaches them the audience turns together,
 ## tier after tier.
@@ -193,6 +180,8 @@ func _shift_tone() -> void:
 			_pulsed[m.get_instance_id()] = level.time + lag
 	if _crowd:
 		_crowd.pulse(level.time, at)
+	# The rest of the gallery's life stops for a moment as it passes.
+	level.choir_wave(_deep, PULSE_RANGE)
 	# Seen rising through the water and charting the cave as it goes.
 	RenderingServer.global_shader_parameter_set(&"echo_ping", Vector4(_deep.x, _deep.y, level.time, PULSE_RANGE))
 	_show_wave()

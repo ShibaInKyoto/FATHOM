@@ -1,8 +1,8 @@
 extends TestCase
 ## Over Meridian Deep hangs an audience held by the Choir's tone (log_05):
 ## still, facing the floor, biting nothing and deaf to sonar; it turns as one
-## when the tone shifts, and hurting one wakes those around it (and sends
-## the small fish round them bolting).
+## when the tone shifts. Nothing wakes it: not a shot, not a bump. And the
+## tone's pulse hushes the other creatures it passes for a moment.
 
 const DT := 1.0 / 20.0
 
@@ -62,7 +62,7 @@ func test_gathered_over_the_station() -> void:
 	other.free()
 
 
-func test_still_and_harmless_until_hurt() -> void:
+func test_held_by_the_tone() -> void:
 	var parts := _final_level()
 	var level: Level = parts[0]
 	var audience := _audience(level)
@@ -70,7 +70,7 @@ func test_still_and_harmless_until_hurt() -> void:
 	for m in audience.members:
 		if m.species == &"lancer":
 			lancer = m
-	# Parked near the lancer but clear of every member (a bump would wake one).
+	# Parked near the lancer but clear of every member.
 	var at := lancer.pos + Vector2(0.0, 6.0)
 	for k in 16:
 		var p := lancer.pos + Vector2.from_angle(TAU * k / 16.0) * 6.0
@@ -107,21 +107,32 @@ func test_still_and_harmless_until_hurt() -> void:
 		if not m.upright:
 			check(m.facing.dot((focus - m.pos).normalized()) > 0.9 and m.facing.y < 0.0,
 				"they turn as one to where the tone is, facing down to the station")
-	# Hurting one wakes it, and those around it.
-	lancer.take_damage(1.0, sub.pos)
-	check(not lancer.entranced, "hurt, it wakes")
+	# Nothing the sub does wakes them: not a shot...
+	var hp := lancer.hp
+	check(not lancer.targetable, "no target for the sub's weapons")
+	lancer.take_damage(5.0, sub.pos)
 	audience.tick(DT)
-	var awake := 0
+	check(lancer.entranced and lancer.hp == hp, "hurt, it neither wakes nor is harmed")
 	for m in audience.members:
-		if not m.entranced:
-			awake += 1
-	check(awake >= 2, "and wakes the rest near it (%d awake)" % awake)
+		check(m.entranced, "and none of the rest wakes")
+	# ...nor a bump: it slides aside and settles back.
+	var home := lancer.pos
+	sub.pos = lancer.pos + Vector2(0.4, 0.0)
+	for i in 30:
+		lancer.tick(DT)
+	check(lancer.entranced, "bumped, it stays held")
+	check(lancer.pos.distance_to(sub.pos) > lancer.radius + Submarine.RADIUS,
+		"and slides aside to let the sub by")
+	check_eq(sub.run.hull, hull, "biting nothing")
+	sub.pos = at
+	for i in 80:
+		lancer.tick(DT)
+	check(lancer.pos.distance_to(home) < 0.4, "then settles back (%.2f m)" % lancer.pos.distance_to(home))
 	var crowd: AudienceCrowd = null
 	for c in audience.get_children():
 		if c is AudienceCrowd:
 			crowd = c
 	check(crowd != null and crowd.count() > 100, "a crowd of small fish round them")
-	check(crowd != null and crowd.get(&"_scatter_at") >= 0.0, "which bolts")
 	level.free()
 
 
@@ -171,3 +182,37 @@ func test_the_lullaby_is_sung_back() -> void:
 	check(Game.meta.wonders.has("lullaby"), "a wonder")
 	Game.meta.wonders = before
 	level.free()
+
+
+func test_the_pulse_hushes_what_it_passes() -> void:
+	var parts := _final_level()
+	var level: Level = parts[0]
+	var audience := _audience(level)
+	_with_sub(level, parts[1], audience.pos + Vector2(0.0, -4.0))
+	# A hunter out in the gallery, swimming past.
+	var lancer: Creature = LevelPopulator.SPECIES[&"lancer"].new()
+	lancer.pos = level.field.resolve_circle(audience.pos + Vector2(-12.0, -3.0), 1.0)
+	level.add_entity(lancer)
+	lancer.vel = Vector2(4.0, 0.0)
+	audience.set(&"_tone_in", 0.0)
+	audience.tick(DT)
+	var deep: Vector2 = audience.get(&"_deep")
+	var reach := lancer.pos.distance_to(deep) / Level.ECHO_SPEED
+	var t := 0.0
+	while t < reach + Level.HUSH_TIME * 0.8:
+		lancer.tick(DT)
+		level.time += DT
+		t += DT
+	check(lancer.vel.length() < 1.0, "it stops as the pulse passes (%.2f m/s)" % lancer.vel.length())
+	check(lancer.facing.dot((deep - lancer.pos).normalized()) > 0.7, "turned down to the song")
+	check(not lancer.entranced, "only for a moment")
+	# Not while the Choir is fighting.
+	level.boss.active = true
+	var other: Creature = LevelPopulator.SPECIES[&"lancer"].new()
+	other.pos = lancer.pos + Vector2(2.0, 0.0)
+	level.add_entity(other)
+	level.choir_wave(deep, 60.0)
+	check(other.hush_at == INF, "the Choir's own fight hushes nothing")
+	level.boss.active = false
+	level.free()
+

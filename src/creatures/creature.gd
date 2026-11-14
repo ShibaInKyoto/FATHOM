@@ -49,8 +49,19 @@ var lock_facing := false
 var ambushable := true
 ## Held by the Choir's tone (see [StationAudience]): hangs still facing
 ## [member entranced_facing], deaf to everything, and bites nothing, until
-## something hurts or bumps it.
+## something hurts or bumps it (unless [member trance_held]).
 var entranced := false
+## Held by the Choir itself, as the audience over Meridian Deep is: nothing
+## wakes it, it takes no harm and is no target; it slides aside to let the
+## sub by and settles back.
+var trance_held := false
+## A pulse of the Choir's song passing holds it from [member hush_at] to
+## [member hush_end] (level time; see [method Level.choir_wave]): it stops,
+## bites nothing, and turns down towards [member hush_from], where the
+## song rose.
+var hush_at := INF
+var hush_end := -INF
+var hush_from := Vector2.ZERO
 var entranced_facing := Vector2(0.0, -1.0)  # World +y is up: facing the floor.
 ## Seconds an entranced creature waits before turning to a new
 ## [member entranced_facing] (so a turn can ripple across a crowd).
@@ -67,6 +78,11 @@ var turn_rate := 0.0
 
 var _stun := 0.0
 var _blind := 0.0
+## Its own lock_facing while a pulse of the Choir's song holds it.
+var _hush_lock := false
+var _hushing := false
+## Where a held member of the audience hangs.
+var _trance_home := Vector2.INF
 var _marked := 0.0
 var _mark_total := 1.0
 var _flash := 0.0
@@ -149,6 +165,17 @@ func tick(delta: float) -> void:
 	if entranced:
 		_hang(delta)
 		return
+	var hushed := level.time >= hush_at and level.time < hush_end
+	if hushed != _hushing:
+		# Its own lock on its facing, kept while the song holds it.
+		_hushing = hushed
+		if hushed:
+			_hush_lock = lock_facing
+		else:
+			lock_facing = _hush_lock
+	if hushed:
+		_hushed(delta)
+		return
 	if _stun > 0.0:
 		_stun -= delta
 		vel = vel.lerp(Vector2.ZERO, 1.0 - exp(-3.0 * delta))
@@ -166,21 +193,54 @@ func tick(delta: float) -> void:
 
 ## Entranced: still in the water but for a slow bob, turning with the rest.
 func _hang(delta: float) -> void:
-	vel = Vector2(0.0, sin(level.time * 0.7 + _phase) * 0.12)
-	pos += vel * delta
+	var sub := level.player
+	if trance_held:
+		_hold(delta, sub)
+	else:
+		vel = Vector2(0.0, sin(level.time * 0.7 + _phase) * 0.12)
+		pos += vel * delta
 	if entranced_lag > 0.0:
 		entranced_lag -= delta
 	elif not upright:
 		facing = facing.slerp(entranced_facing, 1.0 - exp(-2.0 * delta)).normalized()
-	var sub := level.player
-	if sub and sub.alive and pos.distance_squared_to(sub.pos) < pow(radius + Submarine.RADIUS + 0.2, 2.0):
+	if not trance_held and sub and sub.alive \
+			and pos.distance_squared_to(sub.pos) < pow(radius + Submarine.RADIUS + 0.2, 2.0):
 		_wake()
+	_update_visuals(delta)
+
+
+## Held by the Choir: it hangs at its place with a slow bob, sliding aside
+## to let the sub by and settling back after.
+func _hold(delta: float, sub: Submarine) -> void:
+	targetable = false
+	if _trance_home == Vector2.INF:
+		_trance_home = pos
+	var target := _trance_home + Vector2(0.0, sin(level.time * 0.7 + _phase) * 0.17)
+	if sub and sub.alive:
+		var d := target - sub.pos
+		var reach := radius + Submarine.RADIUS + 0.5
+		if d.length_squared() < reach * reach:
+			target = sub.pos + (d.normalized() if d != Vector2.ZERO else Vector2.UP) * reach
+	var was := pos
+	pos = pos.lerp(target, 1.0 - exp(-3.0 * delta))
+	# Slow enough that it keeps facing where it was turned.
+	vel = ((pos - was) / maxf(delta, 0.001)).limit_length(0.15)
+
+
+## Hushed by the song passing: it slows to a stop, bites nothing, and (a
+## free swimmer) turns down towards where the song rose from.
+func _hushed(delta: float) -> void:
+	if not _hush_lock and not upright:
+		lock_facing = true
+		facing = facing.slerp((hush_from - pos).normalized(), 1.0 - exp(-9.0 * delta)).normalized()
+	vel = vel.lerp(Vector2.ZERO, 1.0 - exp(-9.0 * delta))
+	move_and_collide_field(delta * level.creature_pace, 0.2)
 	_update_visuals(delta)
 
 
 ## Breaks the trance: it notices the sub and acts on its own again.
 func _wake() -> void:
-	if not entranced:
+	if not entranced or trance_held:
 		return
 	entranced = false
 	alert()
@@ -405,7 +465,7 @@ func _update_instance_params() -> void:
 # --- Damage and status -------------------------------------------------------
 
 func take_damage(amount: float, from: Vector2, _kind: StringName = &"") -> void:
-	if not alive:
+	if not alive or trance_held and entranced:
 		return
 	_wake()
 	_raise_alarm()
