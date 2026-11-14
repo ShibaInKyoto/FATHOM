@@ -21,6 +21,9 @@ uniform float steady_energy = 1.6;
 uniform float failing_energy = 1.6;
 // The beacon's flash (0..1) as it pings.
 uniform float beacon = 0.0;
+// How much further gone it is (0 the station; 1 a wreck decades down):
+// more rust, more chips, growth higher up.
+uniform float decay = 0.0;
 
 varying vec3 obj_pos;
 varying vec3 world_pos;
@@ -134,13 +137,15 @@ void fragment() {
 		// Rust bleeding down from the seams and fittings, grime running
 		// down the plates in streaks.
 		float bleed = smoothstep(0.5, 0.85, st_noise(vec3(p.x * 11.0, p.y * 0.8, p.z * 11.0)));
-		bleed *= smoothstep(0.35, 0.75, m) * (0.4 + 0.6 * seam + 0.3 * smoothstep(0.8, 0.95, fine));
+		bleed *= smoothstep(0.35 - decay * 0.2, 0.75, m) * (0.4 + 0.6 * seam + 0.3 * smoothstep(0.8, 0.95, fine))
+			* (1.0 + decay);
 		c = mix(c, vec3(0.38, 0.17, 0.06), clamp(bleed * 0.75 + seam * 0.25, 0.0, 1.0));
 		float streaks = st_noise(vec3(p.x * 23.0, p.y * 1.2, p.z * 23.0)) * 0.6 + st_noise(p * 4.0) * 0.4;
 		c *= 1.0 - 0.3 * smoothstep(0.45, 0.8, streaks);
 		c *= 1.0 - seam * 0.35 - rivets * 0.25;
 		// Small chips, mostly along the seams, down to the grey primer.
-		float chips = smoothstep(0.8, 0.84, st_noise(p * 21.0) * 0.55 + fine * 0.25 + seam * 0.25 + m * 0.15);
+		float chips = smoothstep(0.8 - decay * 0.12, 0.84 - decay * 0.1,
+			st_noise(p * 21.0) * 0.55 + fine * 0.25 + seam * 0.25 + m * 0.15);
 		c = mix(c, vec3(0.23, 0.21, 0.2), chips);
 		// A film of the floor's life over everything, thickest low down.
 		c = mix(c, vec3(0.3, 0.29, 0.22), 0.25 * (1.0 - smoothstep(0.5, 4.0, p.y)) + 0.1 * m);
@@ -190,8 +195,8 @@ void fragment() {
 	}
 	// The floor's life crusting the lower parts: dark mats, pale specks of
 	// tube worms through them.
-	float low = 1.0 - smoothstep(0.5, 2.2, p.y + (m - 0.5) * 1.4);
-	float crust = low * smoothstep(0.38, 0.62, st_noise(p * 3.7 + 3.1)) * crusts;
+	float low = 1.0 - smoothstep(0.5 + decay * 1.2, 2.2 + decay * 1.5, p.y + (m - 0.5) * 1.4);
+	float crust = low * smoothstep(0.38, 0.62, st_noise(p * (3.7 + decay * 5.0) + 3.1)) * crusts * (1.0 - decay * 0.8);
 	vec3 crust_col = mix(vec3(0.1, 0.09, 0.08), vec3(0.6, 0.55, 0.46), step(0.82, fine));
 	albedo = mix(albedo, crust_col, crust * 0.85);
 	rough = mix(rough, 0.9, crust);

@@ -11,15 +11,16 @@ const RESEARCH_PER_ZONE := 2
 const BLINK := 1.8
 const COLOR := Color(1.0, 0.72, 0.2)
 
-static var _body_mesh: Mesh
-static var _mast_mesh: Mesh
-static var _shell: StandardMaterial3D
-static var _dark: StandardMaterial3D
+const SHADER := preload("res://src/fx/shaders/equipment.gdshader")
+const CREAM := Color(0.8, 0.78, 0.7)
+const ORANGE := Color(0.92, 0.45, 0.1)
+
+static var _mesh: ArrayMesh
 
 var _recovered := false
 var _t := 0.0
 var _light: OmniLight3D
-var _lamp_mat: StandardMaterial3D
+var _mat: ShaderMaterial
 
 
 ## Lays [param count] probes in the side rooms of [param level], away from
@@ -63,52 +64,106 @@ func setup() -> void:
 	radius = 0.8
 	active_radius = 90.0
 	targetable = true
-	if _body_mesh == null:
-		_body_mesh = MeshKit.lathe(PackedVector2Array([Vector2(0.0, 0.2), Vector2(0.2, 0.45), Vector2(0.8, 0.45),
-			Vector2(1.0, 0.15)]), 1.5, 14, 6, 1.0, 1.0)
-		_mast_mesh = MeshKit.sphere(0.07, 6, 4)
-		_shell = StandardMaterial3D.new()
-		_shell.albedo_color = Color(0.95, 0.62, 0.12)
-		_shell.metallic = 0.3
-		_shell.roughness = 0.45
-		_dark = StandardMaterial3D.new()
-		_dark.albedo_color = Color(0.12, 0.13, 0.15)
-		_dark.metallic = 0.6
+	if _mesh == null:
+		_mesh = build()
+	_mat = ShaderMaterial.new()
+	_mat.shader = SHADER
+	_mat.set_shader_parameter(&"lamp_color", COLOR)
+	_mat.set_shader_parameter(&"sediment_tint", level.biome.sediment_tint)
+	_mat.set_shader_parameter(&"detail", 7.0)
 	var body := MeshInstance3D.new()
-	body.mesh = _body_mesh
-	body.material_override = _shell
-	body.position = Vector3(-0.75, 0.0, 0.0)
-	body.rotation = Vector3(0.0, level.rng.randf_range(-0.5, 0.5), level.rng.randf_range(-0.25, 0.25))
+	body.mesh = _mesh
+	body.material_override = _mat
+	# Lying on the floor where it came to rest, a little askew.
+	body.position = Vector3(0.0, -0.68, 0.0)
+	body.rotation = Vector3(level.rng.randf_range(-0.3, 0.3), level.rng.randf_range(-0.4, 0.4),
+		level.rng.randf_range(-0.12, 0.12))
 	add_child(body)
-	# A stub antenna with a lamp at its tip.
-	var mast := MeshInstance3D.new()
-	var rod := CylinderMesh.new()
-	rod.top_radius = 0.03
-	rod.bottom_radius = 0.04
-	rod.height = 0.7
-	mast.mesh = rod
-	mast.material_override = _dark
-	mast.position = Vector3(0.1, 0.6, 0.0)
-	add_child(mast)
-	var lamp := MeshInstance3D.new()
-	lamp.mesh = _mast_mesh
-	_lamp_mat = MeshKit.emissive_material(COLOR, 4.0)
-	lamp.material_override = _lamp_mat
-	lamp.position = Vector3(0.1, 0.98, 0.0)
-	add_child(lamp)
 	_light = OmniLight3D.new()
 	_light.light_color = COLOR
 	_light.omni_range = 5.0
-	_light.position = Vector3(0.1, 1.0, 0.5)
+	_light.position = Vector3(0.1, 0.1, 0.6)
 	add_child(_light)
 	_t = level.rng.randf() * BLINK
+
+
+## The probe, lying along x (nose at +x), its belly at y = -0.22: a cream
+## pressure housing with an orange nose, a dark sensor collar studded with
+## ports, hydrophones on its back, four tail fins in a shroud, a stub mast
+## with its blinking lamp and a whip antenna, and a lifting eye.
+static func build() -> ArrayMesh:
+	var b := ModelBuilder.new()
+	var cream := Color(CREAM, 0.0)
+	var orange := Color(ORANGE, 0.0)
+	var dark := Color(0.1, 0.1, 0.1, 0.3)
+	var metal := Color(0.7, 0.0, 0.0, 0.2)
+	var r := 0.22
+	# The hull: body, nose, tail cone (lathes along x).
+	_lathe(b, [Vector2(-0.42, r), Vector2(0.18, r)], cream)
+	_lathe(b, [Vector2(0.18, r), Vector2(0.3, r)], orange)
+	_lathe(b, [Vector2(0.3, r * 1.07), Vector2(0.42, r * 1.07)], dark)
+	_lathe(b, [Vector2(0.42, r), Vector2(0.55, r)], cream)
+	var nose: Array = []
+	for k in 9:
+		var t := k / 8.0
+		nose.append(Vector2(0.55 + 0.22 * sin(t * PI * 0.5), r * cos(t * PI * 0.5) + 0.0005))
+	_lathe(b, nose, orange)
+	_lathe(b, [Vector2(-0.72, 0.07), Vector2(-0.62, 0.13), Vector2(-0.42, r)], cream)
+	b.disc(Vector3(-0.72, 0.0, 0.0), Vector3.LEFT, 0.07, dark, 14)
+	b.cylinder(Vector3(-0.78, 0.0, 0.0), Vector3(-0.7, 0.0, 0.0), 0.035, metal, 8)
+	# Reflective tape round the body.
+	for x: float in [-0.3, 0.05]:
+		_lathe(b, [Vector2(x, r * 1.012), Vector2(x + 0.035, r * 1.012)], Color(1, 1, 1, 0.8))
+	# Ports round the sensor collar.
+	for k in 6:
+		var a := TAU * k / 6.0
+		var d := Vector3(0.0, cos(a), sin(a))
+		b.disc(Vector3(0.36, 0.0, 0.0) + d * (r * 1.075), d, 0.025, Color(0, 0, 0, 0.6), 10)
+	# Hydrophones on its back.
+	for x: float in [-0.2, -0.05]:
+		b.capsule(Vector3(x - 0.04, r + 0.03, 0.0), Vector3(x + 0.04, r + 0.03, 0.0), 0.025, dark)
+	# Fins in their shroud.
+	for k in 4:
+		var a := TAU * (k + 0.5) / 4.0
+		var d := Vector3(0.0, cos(a), sin(a))
+		b.plate([Vector3(-0.45, 0.0, 0.0) + d * 0.18, Vector3(-0.6, 0.0, 0.0) + d * 0.1,
+			Vector3(-0.7, 0.0, 0.0) + d * 0.24, Vector3(-0.52, 0.0, 0.0) + d * 0.24], orange)
+	b.torus(Vector3(-0.62, 0.0, 0.0), Vector3.RIGHT, 0.25, 0.018, metal, 24, 6)
+	# The mast, its lamp, the whip antenna; the lifting eye.
+	b.cylinder(Vector3(0.05, r - 0.02, 0.0), Vector3(0.05, r + 0.42, 0.0), 0.022, metal, 8)
+	b.cylinder(Vector3(0.05, r + 0.42, 0.0), Vector3(0.05, r + 0.45, 0.0), 0.05, dark, 12)
+	b.cylinder(Vector3(0.05, r + 0.45, 0.0), Vector3(0.05, r + 0.55, 0.0), 0.04, Color(1, 0, 0, 0.6), 12)
+	b.cylinder(Vector3(0.05, r + 0.55, 0.0), Vector3(0.05, r + 0.57, 0.0), 0.05, dark, 12)
+	b.tube(PackedVector3Array([Vector3(-0.1, r, 0.04), Vector3(-0.12, r + 0.35, 0.05), Vector3(-0.2, r + 0.7, 0.07)]),
+		PackedFloat32Array([0.008, 0.006, 0.003]), 5, metal)
+	b.torus(Vector3(0.25, r + 0.04, 0.0), Vector3.BACK, 0.04, 0.012, metal, 12, 5)
+	return b.commit()
+
+
+## A surface of revolution about x through [param prof] (x, radius).
+static func _lathe(b: ModelBuilder, prof: Array, color: Color) -> void:
+	var around := 24
+	var start := b.verts.size()
+	var count := prof.size()
+	for i in count:
+		var p: Vector2 = prof[i]
+		var d: Vector2 = (prof[mini(i + 1, count - 1)] as Vector2) - prof[maxi(i - 1, 0)]
+		var nn := Vector2(-d.y, d.x).normalized()
+		for j in around + 1:
+			var a := TAU * j / around
+			var dir := Vector3(0.0, cos(a), sin(a))
+			b.add(Vector3(p.x, 0.0, 0.0) + dir * p.y, Vector3(nn.x, 0.0, 0.0) + dir * nn.y, color)
+	for i in count - 1:
+		for j in around:
+			var a := start + i * (around + 1) + j
+			b.quad(a, a + 1, a + around + 2, a + around + 1)
 
 
 func tick(delta: float) -> void:
 	_t += delta
 	var on := fmod(_t, BLINK) < 0.18
 	_light.light_energy = 1.6 if on else 0.05
-	_lamp_mat.emission_energy_multiplier = 5.0 if on else 0.4
+	_mat.set_shader_parameter(&"lamp", 1.0 if on else 0.0)
 	var sub := level.player
 	if sub and sub.alive and sub.pos.distance_to(pos) < Submarine.RADIUS + radius + 0.3:
 		recover(sub)

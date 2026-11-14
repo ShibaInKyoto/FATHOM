@@ -10,6 +10,9 @@ const NOISE_LIFETIME := 0.35
 const SONAR_SPEED := 42.0
 ## The echo's speed (ECHO_SPEED in sonar.gdshaderinc).
 const ECHO_SPEED := 16.0
+## How hard, and from how far, the water rushing down the way down pulls.
+const EXIT_PULL := 4.0
+const EXIT_PULL_RADIUS := 9.0
 ## How long a pulse of the Choir's song holds the creatures it passes.
 const HUSH_TIME := 1.0
 
@@ -121,9 +124,16 @@ func size() -> Vector2:
 
 ## Water current at a point; banded so it reads as streams, not wind.
 func current_at(p: Vector2) -> Vector2:
-	if current == Vector2.ZERO:
-		return Vector2.ZERO
-	return current * (0.55 + 0.45 * sin(p.y * 0.08 + time * 0.25))
+	var flow := Vector2.ZERO
+	if current != Vector2.ZERO:
+		flow = current * (0.55 + 0.45 * sin(p.y * 0.08 + time * 0.25))
+	# The water rushing down into the way down sucks at whatever comes near.
+	if layout and layout.has_exit and not exit_sealed:
+		var to := layout.exit - p
+		var dist := to.length()
+		if dist < EXIT_PULL_RADIUS and dist > 0.01:
+			flow += (to / dist + Vector2(0.0, -0.5)).normalized() * EXIT_PULL * pow(1.0 - dist / EXIT_PULL_RADIUS, 2.0)
+	return flow
 
 
 ## Depth in meters shown on the HUD for a world-space height.

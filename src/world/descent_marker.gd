@@ -1,15 +1,31 @@
 class_name DescentMarker
 extends Node3D
-## The way down: a glowing fissure with water streaming into it. Placed at the
-## zone exit so it reads from a distance even before sonar finds it.
+## The way down: water rushing down into the fissure, sucking at whatever
+## comes near (see [method Level.current_at]): a column of moving water the
+## cave wavers through, narrowing as it is drawn in, silt streaking down
+## through it, and the descent line the Meridian Deep expedition left running
+## down into it, marked with lightsticks and line arrows. Placed at the zone
+## exit. While a guardian lives the way down is still and its lights red.
 
+## The lightsticks' glow.
 const COLOR := Color(0.35, 1.0, 0.75)
-## While a guardian lives the way down glows a warning red and stops flowing.
+## While a guardian lives they glow a warning red and the water is still.
 const SEALED_COLOR := Color(1.0, 0.25, 0.2)
+## The light thrown on the walls of the fissure.
+const WATER_LIGHT := Color(0.7, 0.85, 1.0)
+
+const LINE_TOP := 6.0
+const LINE_BOTTOM := -5.0
+const DRAFT_SHADER := preload("res://src/fx/shaders/downdraft.gdshader")
+const LINE_SHADER := preload("res://src/fx/shaders/equipment.gdshader")
 
 var _light: OmniLight3D
 var _ring: MeshInstance3D
-var _ring_mat: StandardMaterial3D
+var _ring_mat: ShaderMaterial
+var _line: MeshInstance3D
+var _line_mat: ShaderMaterial
+var _sticks: Array[MeshInstance3D] = []
+var _stick_mat: StandardMaterial3D
 var _stream: GPUParticles3D
 var _color := COLOR
 var _t := 0.0
@@ -17,70 +33,137 @@ var _t := 0.0
 
 func _ready() -> void:
 	_light = OmniLight3D.new()
-	_light.light_color = COLOR
-	_light.omni_range = 16.0
-	_light.light_energy = 2.0
-	_light.light_volumetric_fog_energy = 1.5
-	_light.position = Vector3(0, 0, 1.5)
+	_light.light_color = WATER_LIGHT
+	_light.omni_range = 10.0
+	_light.light_energy = 0.6
+	_light.position = Vector3(0, 1.0, 1.5)
 	add_child(_light)
-
+	# Silt streaking down, drawn in from round about and into the fissure.
 	var pm := ParticleProcessMaterial.new()
 	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	pm.emission_box_extents = Vector3(5.0, 1.0, 2.0)
+	pm.emission_box_extents = Vector3(3.5, 2.5, 1.5)
 	pm.direction = Vector3(0, -1, 0)
-	pm.spread = 8.0
-	pm.initial_velocity_min = 2.0
-	pm.initial_velocity_max = 4.0
-	pm.gravity = Vector3(0, -3.0, 0)
-	pm.scale_min = 0.5
-	pm.scale_max = 1.4
+	pm.spread = 6.0
+	pm.initial_velocity_min = 2.5
+	pm.initial_velocity_max = 4.5
+	pm.gravity = Vector3(0, -6.0, 0)
+	pm.radial_accel_min = -2.5
+	pm.radial_accel_max = -1.5
+	pm.particle_flag_align_y = true
+	pm.scale_min = 0.6
+	pm.scale_max = 1.2
 	var g := Gradient.new()
-	g.colors = PackedColorArray([Color(COLOR, 0.0), Color(COLOR, 0.8), Color(COLOR, 0.0)])
-	g.offsets = PackedFloat32Array([0.0, 0.3, 1.0])
+	g.colors = PackedColorArray([Color(WATER_LIGHT, 0.0), Color(WATER_LIGHT, 0.32), Color(WATER_LIGHT, 0.0)])
+	g.offsets = PackedFloat32Array([0.0, 0.35, 1.0])
 	var ramp := GradientTexture1D.new()
 	ramp.gradient = g
 	pm.color_ramp = ramp
 	var quad := QuadMesh.new()
-	quad.size = Vector2(0.18, 0.18)
-	quad.material = Fx.particle_material(Fx.soft_texture(), true, 2.5)
+	quad.size = Vector2(0.035, 0.45)
+	var streak_mat := StandardMaterial3D.new()
+	streak_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	streak_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	streak_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	streak_mat.vertex_color_use_as_albedo = true
+	streak_mat.albedo_texture = Fx.soft_texture()
+	quad.material = streak_mat
 	var stream := GPUParticles3D.new()
 	_stream = stream
-	stream.amount = 70
-	stream.lifetime = 2.6
+	stream.amount = 110
+	stream.lifetime = 2.2
 	stream.process_material = pm
 	stream.draw_pass_1 = quad
-	stream.position = Vector3(0, 8.0, 0)
+	stream.position = Vector3(0, 4.5, 0.4)
 	stream.visibility_aabb = AABB(Vector3(-8, -20, -6), Vector3(16, 30, 12))
 	stream.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(stream)
-
+	# The water itself, rushing down: the cave wavers through it.
 	_ring = MeshInstance3D.new()
 	var q := QuadMesh.new()
-	q.size = Vector2(2, 2)
+	q.size = Vector2(7.5, 14.0)
 	_ring.mesh = q
-	_ring_mat = StandardMaterial3D.new()
-	_ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_ring_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	_ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_ring_mat.albedo_texture = Fx.ring_texture()
-	_ring_mat.albedo_color = Color(_color.r * 1.5, _color.g * 1.5, _color.b * 1.5, 0.6)
+	_ring_mat = ShaderMaterial.new()
+	_ring_mat.shader = DRAFT_SHADER
 	_ring.material_override = _ring_mat
 	_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_ring.position = Vector3(0, 0, 0.3)
+	_ring.position = Vector3(0, 2.0, 0.6)
 	add_child(_ring)
+	# The descent line, its arrows and its lightsticks.
+	_line_mat = ShaderMaterial.new()
+	_line_mat.shader = LINE_SHADER
+	_line_mat.set_shader_parameter(&"detail", 8.0)
+	_line = MeshInstance3D.new()
+	_line.mesh = _line_mesh()
+	_line.material_override = _line_mat
+	add_child(_line)
+	_stick_mat = StandardMaterial3D.new()
+	_stick_mat.albedo_color = Color(0.1, 0.25, 0.15)
+	_stick_mat.emission_enabled = true
+	_stick_mat.emission = _color
+	_stick_mat.emission_energy_multiplier = 4.0
+	var stick := CapsuleMesh.new()
+	stick.radius = 0.035
+	stick.height = 0.32
+	stick.radial_segments = 8
+	stick.rings = 2
+	for k in 4:
+		var mi := MeshInstance3D.new()
+		mi.mesh = stick
+		mi.material_override = _stick_mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi)
+		_sticks.append(mi)
+
+
+## Where the descent line runs at height [param y] (it hangs a little
+## slack, swinging slowly in the current at [param t]).
+static func line_at(y: float, t: float) -> Vector3:
+	var f := inverse_lerp(LINE_TOP, LINE_BOTTOM, y)
+	var swing := sin(t * 0.5) * 0.25 * sin(f * PI)
+	return Vector3(0.35 + swing + 0.4 * f * f, y, -0.4 + 0.2 * f)
+
+
+## The line itself, with its arrows pointing the way down and a weighted
+## float at its top.
+static func _line_mesh() -> ArrayMesh:
+	var b := ModelBuilder.new()
+	var rope := Color(0.85, 0.8, 0.6, 0.0)
+	var pts := PackedVector3Array()
+	var radii := PackedFloat32Array()
+	for i in 21:
+		var y := lerpf(LINE_TOP, LINE_BOTTOM, i / 20.0)
+		pts.append(line_at(y, 0.0))
+		radii.append(0.018)
+	b.tube(pts, radii, 5, rope)
+	# Line arrows: little triangles clipped on, pointing down.
+	for k in 5:
+		var y := lerpf(LINE_TOP - 1.5, LINE_BOTTOM + 1.0, k / 4.0)
+		var at := line_at(y, 0.0)
+		b.plate([at + Vector3(-0.09, 0.08, 0.0), at + Vector3(0.09, 0.08, 0.0), at + Vector3(0.0, -0.12, 0.0),
+			at + Vector3(0.0, -0.12, 0.0)], Color(0.95, 0.45, 0.1, 0.0))
+	var top := line_at(LINE_TOP, 0.0)
+	b.capsule(top + Vector3(0.0, 0.1, 0.0), top + Vector3(0.0, 0.45, 0.0), 0.2, Color(0.95, 0.42, 0.1, 0.0))
+	b.cylinder(top + Vector3(0.0, 0.22, 0.0), top + Vector3(0.0, 0.3, 0.0), 0.205, Color(1, 1, 1, 0.8), 16)
+	return b.commit()
 
 
 func set_sealed(sealed: bool) -> void:
 	_color = SEALED_COLOR if sealed else COLOR
 	if _light:
-		_light.light_color = _color
-		_ring_mat.albedo_color = Color(_color.r * 1.5, _color.g * 1.5, _color.b * 1.5, _ring_mat.albedo_color.a)
+		_light.light_color = SEALED_COLOR if sealed else WATER_LIGHT
+		_light.light_energy = 1.2 if sealed else 0.6
+		_ring_mat.set_shader_parameter(&"flow", 0.0 if sealed else 1.0)
+		_ring_mat.set_shader_parameter(&"strength", 0.0 if sealed else 1.0)
+		_stick_mat.emission = _color
 		_stream.emitting = not sealed
 
 
 func _process(delta: float) -> void:
 	_t += delta
-	var cycle := fmod(_t, 2.0) / 2.0
-	_ring.scale = Vector3.ONE * lerpf(6.0, 1.0, cycle)
-	_ring_mat.albedo_color.a = sin(cycle * PI) * 0.6
-	_light.light_energy = 1.8 + sin(_t * 2.0) * 0.4
+	# The lightsticks hang from the line on short cords, swinging with it.
+	for k in _sticks.size():
+		var y := lerpf(LINE_TOP - 0.8, LINE_BOTTOM + 2.0, k / float(_sticks.size() - 1))
+		var at := line_at(y, _t)
+		var sway := sin(_t * 1.1 + k * 1.7) * 0.25
+		_sticks[k].position = at + Vector3(sin(sway) * 0.2, -0.22, 0.05)
+		_sticks[k].rotation = Vector3(0.0, 0.0, sway)
