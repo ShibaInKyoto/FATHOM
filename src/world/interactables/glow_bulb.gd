@@ -16,6 +16,7 @@ var _harvested := false
 var _mat: ShaderMaterial
 var _light: OmniLight3D
 var _t := 0.0
+var _charge := 1.0
 
 
 func setup() -> void:
@@ -126,6 +127,10 @@ static func _sac(b: ModelBuilder, c: Vector3, half: Vector3, rng: RandomNumberGe
 func tick(delta: float) -> void:
 	_t += delta
 	if _harvested:
+		# Spent: it dims and deflates.
+		_charge = move_toward(_charge, 0.06, delta / 1.4)
+		_mat.set_shader_parameter(&"charge", _charge)
+		_mat.set_shader_parameter(&"pulse", 1.0)
 		return
 	var pulse := 0.85 + 0.15 * sin(_t * 1.7)
 	_mat.set_shader_parameter(&"pulse", pulse)
@@ -149,6 +154,4 @@ func _harvest(sub: Submarine) -> void:
 	Events.toast.emit("Battery +%d" % int(gain), UiTheme.ACCENT)
 	Fx.sparkle(level, pos, color)
 	var tween := create_tween().set_parallel(true)
-	tween.tween_property(_mat, ^"shader_parameter/charge", 0.08, 1.4)
-	tween.tween_property(_mat, ^"shader_parameter/pulse", 1.0, 1.4)
 	tween.tween_property(_light, ^"light_energy", 0.0, 1.2)
