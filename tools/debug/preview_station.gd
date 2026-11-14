@@ -37,13 +37,14 @@ func _ready() -> void:
 	if args.has("close"):
 		var c := Vector3(_station.pos.x, _station.pos.y + PropScatter.surface_offset(MeridianStation.DEPTH) - 0.3,
 			MeridianStation.DEPTH)
-		_views = [[c + Vector3(0, 4.0, 24.0), c + Vector3(0, 3.6, 0)],
-			[c + Vector3(-9.5, 3.2, 6.5), c + Vector3(-6.0, 2.6, 0)],
-			[c + Vector3(13.5, 4.0, 7.0), c + Vector3(10.0, 2.0, 0)],
-			[c + Vector3(1.5, 4.0, 5.2), c + Vector3(0, 3.3, 0)],
-			[c + Vector3(-3.5, 10.5, 8.0), c + Vector3(-1.0, 6.0, 0)],
-			[c + Vector3(-5.0, 1.4, 6.0), c + Vector3(-5.5, 1.0, 0)],
-			[c + Vector3(3.5, 9.6, 5.0), c + Vector3(0.6, 8.4, 0)]]
+		var k := MeridianStation.SCALE
+		_views = [[c + Vector3(0, 4.0, 24.0) * k, c + Vector3(0, 3.6, 0) * k],
+			[c + Vector3(-9.5, 3.2, 6.5) * k, c + Vector3(-6.0, 2.6, 0) * k],
+			[c + Vector3(13.5, 4.0, 7.0) * k, c + Vector3(10.0, 2.0, 0) * k],
+			[c + Vector3(1.5, 4.0, 5.2) * k, c + Vector3(0, 3.3, 0) * k],
+			[c + Vector3(-3.5, 10.5, 8.0) * k, c + Vector3(-1.0, 6.0, 0) * k],
+			[c + Vector3(-5.0, 1.4, 6.0) * k, c + Vector3(-5.5, 1.0, 0) * k],
+			[c + Vector3(3.5, 9.6, 5.0) * k, c + Vector3(0.6, 8.4, 0) * k]]
 		var fill := DirectionalLight3D.new()
 		fill.light_energy = 0.5
 		fill.rotation_degrees = Vector3(-35, 20, 0)

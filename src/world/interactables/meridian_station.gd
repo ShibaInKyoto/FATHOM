@@ -26,6 +26,8 @@ const STATION_SHADER := preload("res://src/fx/shaders/station.gdshader")
 const FLOWSTONE_SHADER := preload("res://src/fx/shaders/flowstone.gdshader")
 ## How far the station leans (it settled unevenly).
 const TILT := 0.035
+## The model's scale (it is built in metres a little smaller than life).
+const SCALE := 1.3
 
 var greeted := false
 ## How far Okafor's lullaby has got: 0 not begun, 1 the speakers, 2 the
@@ -74,6 +76,7 @@ func setup() -> void:
 	# The floor behind the play plane rises, so the rig sits a little higher.
 	rig.position = Vector3(0.0, PropScatter.surface_offset(DEPTH) - 0.3, DEPTH)
 	rig.rotation.z = TILT
+	rig.scale = Vector3.ONE * SCALE
 	add_child(rig)
 	_rig = rig.transform
 	var body := MeshInstance3D.new()
@@ -271,8 +274,12 @@ static func _lump(b: ModelBuilder, c: Vector3, half: Vector3, skirt: float, lump
 
 ## Where the beacon pings from, on the gameplay plane.
 func beacon_pos() -> Vector2:
-	var at := StationModel.beacon_at(_mast_top)
-	return pos + Vector2(at.x, at.y + PropScatter.surface_offset(DEPTH))
+	var rig := _rig
+	if rig == Transform3D.IDENTITY:
+		rig = Transform3D(Basis(Vector3.BACK, TILT).scaled(Vector3.ONE * SCALE),
+			Vector3(0.0, PropScatter.surface_offset(DEPTH) - 0.3, DEPTH))
+	var at := rig * StationModel.beacon_at(_mast_top)
+	return pos + Vector2(at.x, at.y)
 
 
 func tick(delta: float) -> void:

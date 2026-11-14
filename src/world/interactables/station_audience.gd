@@ -3,25 +3,38 @@ extends Entity
 ## "The fauna gathers around the station at night. Lancers, jellies, things I
 ## have no names for, all facing the floor, perfectly still. Like an
 ## audience. Every time the tone changes pitch, they turn together." (log_05)
-## Over the ruins of Meridian Deep hangs a gathering of hunters held by the
-## Choir's tone, in two loose rows over the roof like seats in a gallery:
-## deaf to sonar and engines, biting nothing, a faint violet glow on each.
-## Each time the tone shifts it passes through them as a ring of light, and
-## they turn as one, the turn running across the rows. Hurt or bump one,
-## and every member near it wakes and turns on the sub.
+## Over the ruins of Meridian Deep hangs a great gathering held by the
+## Choir's tone, arched over the station in tiers like a gallery: hundreds
+## of small fish (an [AudienceCrowd]) and among them the hunters (lancers,
+## ghostfins, jellies, puffers), all watching one spot on the station, deaf
+## to sonar and engines, biting nothing, each hunter with a faint violet
+## glow. Each time the tone shifts a pulse rises from the deep through the
+## station and up the tiers: as it reaches them their lights flare, they
+## jolt, a ring of light passes through each hunter and they turn as one to
+## where the tone now seems to come from, tier after tier. Hurt or bump a hunter and
+## every member near it wakes and turns on the sub, and the small fish bolt.
 
-const MEMBERS: Array[StringName] = [&"lancer", &"lancer", &"lancer", &"lancer", &"ghostfin", &"ghostfin", &"ghostfin",
-	&"jelly", &"jelly"]
-## Their seats over the station: two rows above its roof (x across, height
-## over the floor), the middle of each kept clear of the mast.
-const SEATS: Array[Vector2] = [Vector2(-10.5, 7.0), Vector2(-7.0, 7.4), Vector2(-3.5, 7.1), Vector2(3.8, 7.3),
-	Vector2(7.3, 7.0), Vector2(10.8, 7.4), Vector2(-8.8, 10.0), Vector2(-5.2, 10.3), Vector2(-1.8, 10.6),
-	Vector2(2.2, 10.4), Vector2(5.6, 10.1), Vector2(9.1, 10.3)]
-## How long a turn takes to run from one end of the rows to the other.
-const RIPPLE := 0.7
+const MEMBERS: Array[StringName] = [&"lancer", &"lancer", &"lancer", &"lancer", &"lancer", &"ghostfin",
+	&"ghostfin", &"ghostfin", &"ghostfin", &"ghostfin", &"jelly", &"jelly", &"jelly", &"jelly", &"puffer", &"puffer",
+	&"puffer"]
+## How far below the station's floor the pulses rise from (the tiers are
+## arcs round that point, so a pulse reaches each tier all at once).
+const DEEP := 18.0
+## The hunters' tiers (their distance from where the pulses rise), and how
+## high over the floor they keep, so the gallery floor stays passable.
+const HUNTER_TIERS: Array[float] = [26.0, 28.6, 31.2, 33.8]
+const HUNTER_FLOOR := 6.0
+## The small fish's tiers.
+const CROWD_TIERS := Vector2(21.0, 35.5)
+## Where on the station they watch, from its middle (x flips side with
+## each shift of the tone).
+const FOCUS := Vector2(6.5, 1.0)
+## How far each pulse charts the cave as it rises.
+const PULSE_RANGE := 46.0
 ## How long the ring of each shift takes to swell and fade.
 const PULSE_TIME := 1.6
 const HALO_SHADER := preload("res://src/fx/shaders/trance_halo.gdshader")
+const WAVE_SHADER := preload("res://src/fx/shaders/echo_wave.gdshader")
 ## Seconds between changes of the tone.
 const TONE_PERIOD := Vector2(7.0, 11.0)
 ## A member that wakes wakes the rest within this range.
@@ -38,6 +51,13 @@ var _tone_in := 3.0
 var _side := 1.0
 ## While the lullaby is sung back, they hold still, facing the station.
 var _listening := 0.0
+## Where the pulses rise from.
+var _deep := Vector2.ZERO
+## The station's floor, which they watch.
+var _stage := Vector2.ZERO
+var _crowd: AudienceCrowd
+var _pulse_began := -100.0
+var _wave: MeshInstance3D
 ## When each member's ring began (by instance id), in [member Level.time].
 var _pulsed := {}
 var _halos: MultiMeshInstance3D
@@ -47,31 +67,49 @@ var _halos: MultiMeshInstance3D
 static func gather(level: Level, station: MeridianStation) -> StationAudience:
 	var audience := StationAudience.new()
 	audience.pos = station.pos + Vector2(0.0, 7.0)
+	audience._deep = station.pos - Vector2(0.0, DEEP)
+	audience._stage = station.pos
 	level.add_entity(audience)
 	var rng := level.rng
-	var seats := SEATS.duplicate()
-	var heading := Vector2(0.45, -1.0).normalized()
+	var focus := audience.focus()
+	# The hunters' seats: spread round their tiers, clear of each other.
+	var seats := PackedVector2Array()
+	for r in HUNTER_TIERS:
+		var steps := 9
+		for i in steps:
+			var a := PI * (i + rng.randf_range(0.25, 0.75)) / steps
+			var p := audience._deep + Vector2(cos(a), sin(a)) * r
+			if absf(p.x - station.pos.x) > 17.0 or p.y < station.pos.y + HUNTER_FLOOR:
+				continue
+			if level.field.sample(p) >= 2.0:
+				seats.append(p)
+	var placed := PackedVector2Array()
 	for id in MEMBERS:
 		while not seats.is_empty():
-			var seat: Vector2 = seats.pop_at(rng.randi_range(0, seats.size() - 1))
-			var p := Vector2.INF
-			# Where the cave is low, the seat drops a little.
-			for drop: float in [0.0, -1.2, 1.2, -2.4]:
-				var q := station.pos + seat + Vector2(rng.randf_range(-0.5, 0.5), drop + rng.randf_range(-0.3, 0.3))
-				if level.field.sample(q) >= 2.0:
-					p = q
-					break
-			if p == Vector2.INF:
+			var p: Vector2 = seats[rng.randi_range(0, seats.size() - 1)]
+			seats.remove_at(seats.find(p))
+			if not AudienceCrowd._clear_of(p, placed, 2.6):
 				continue
 			var c: Creature = LevelPopulator.SPECIES[id].new()
 			c.pos = p
 			c.entranced = true
-			c.entranced_facing = heading
-			c.facing = heading
+			c.entranced_facing = (focus - p).normalized()
+			c.facing = c.entranced_facing
 			level.add_entity(c)
 			audience.members.append(c)
+			placed.append(p)
 			break
+	# The small fish fill the tiers round them.
+	audience._crowd = AudienceCrowd.new()
+	audience.add_child(audience._crowd)
+	audience._crowd.gather(level, audience._deep, station.pos, CROWD_TIERS, focus, placed)
 	return audience
+
+
+## Where on the station the audience watches: the tone seems to come from
+## over one module, then the other.
+func focus() -> Vector2:
+	return _stage + Vector2(FOCUS.x * _side, FOCUS.y)
 
 
 func setup() -> void:
@@ -88,11 +126,18 @@ func tick(delta: float) -> void:
 			still.append(m)
 	members = still
 	_show_halos()
-	# One that has left the trance (hurt, bumped) brings the rest with it.
+	# One that has left the trance (hurt, bumped) brings the rest with it,
+	# and the small fish bolt.
 	for m in members:
 		if not m.entranced:
 			_wake_near(m.pos)
+			if _crowd:
+				_crowd.scatter(level.time, m.pos)
 	var sub := level.player
+	if _crowd:
+		_crowd.tick(delta, level.time, sub.pos if sub else Vector2.INF)
+	if _wave and _wave.visible and level.time - _pulse_began > PULSE_RANGE / Level.ECHO_SPEED + 3.0:
+		_wave.visible = false
 	if sub and sub.alive and sub.pos.distance_to(pos) < NOTICE_RANGE \
 			and members.any(func(m: Creature) -> bool: return m.entranced):
 		Wonders.witness("audience")
@@ -121,6 +166,8 @@ func listen() -> void:
 			m.entranced_facing = (pos + Vector2(0.0, -2.0) - m.pos).normalized()
 			m.entranced_lag = 0.0
 			_pulsed[m.get_instance_id()] = level.time
+	if _crowd:
+		_crowd.pulse(level.time, pos + Vector2(0.0, -2.0), true)
 
 
 func _wake_near(p: Vector2) -> void:
@@ -130,28 +177,46 @@ func _wake_near(p: Vector2) -> void:
 			m.alert()
 
 
-## The tone changes pitch, and the audience turns together, the turn (and
-## the ring of light that comes with it) running across the rows from the
-## side they turn away from.
+## The tone changes pitch: a pulse rises from the deep through the station
+## and up the tiers, and as it reaches them the audience turns together,
+## tier after tier.
 func _shift_tone() -> void:
 	_side = -_side
 	turns += 1
-	var heading := Vector2(0.45 * _side, -1.0).normalized()
-	var lo := INF
-	var hi := -INF
-	for m in members:
-		lo = minf(lo, m.pos.x)
-		hi = maxf(hi, m.pos.x)
+	var at := focus()
+	_pulse_began = level.time
 	for m in members:
 		if m.entranced:
-			var along := inverse_lerp(lo, hi, m.pos.x) if hi > lo else 0.5
-			var lag := RIPPLE * (along if _side > 0.0 else 1.0 - along)
-			m.entranced_facing = heading
-			m.entranced_lag = lag
+			var lag := AudienceCrowd.arrival(_deep, m.pos)
+			m.entranced_facing = (at - m.pos).normalized()
+			m.entranced_lag = lag + 0.15
 			_pulsed[m.get_instance_id()] = level.time + lag
+	if _crowd:
+		_crowd.pulse(level.time, at)
+	# Seen rising through the water and charting the cave as it goes.
+	RenderingServer.global_shader_parameter_set(&"echo_ping", Vector4(_deep.x, _deep.y, level.time, PULSE_RANGE))
+	_show_wave()
 	var sub := level.player
 	if sub and sub.pos.distance_to(pos) < HEARING:
 		Audio.play_at(&"choir_tone", pos + Vector2(0.0, -8.0), -6.0, 0.0, 1.0 if _side > 0.0 else 0.84)
+
+
+## The sheet the pulse is seen crossing open water on.
+func _show_wave() -> void:
+	if _wave == null:
+		_wave = MeshInstance3D.new()
+		var quad := QuadMesh.new()
+		quad.size = Vector2.ONE * PULSE_RANGE * 2.2
+		_wave.mesh = quad
+		var mat := ShaderMaterial.new()
+		mat.shader = WAVE_SHADER
+		mat.set_shader_parameter(&"strength", 0.2)
+		_wave.material_override = mat
+		_wave.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_wave.top_level = true
+		add_child(_wave)
+	_wave.global_position = Vector3(_deep.x, _deep.y, -0.6)
+	_wave.visible = true
 
 
 ## The glow on each member still held, and the rings passing through them.

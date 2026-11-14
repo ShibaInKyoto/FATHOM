@@ -427,7 +427,7 @@ static func _spawn_stalactites(level: Level, used: PackedVector2Array) -> void:
 		guard += 1
 		var a: LevelLayout.Anchor = layout.anchors[rng.randi() % layout.anchors.size()]
 		if a.normal.y > -0.8 or a.pos.distance_to(layout.start) < 22.0 \
-				or a.pos.distance_to(layout.exit) < _exit_clear(level, 15.0):
+				or a.pos.distance_to(layout.exit) < _exit_clear(level, 15.0) or _in_station_gallery(level, a.pos):
 			continue
 		var size := rng.randf_range(0.8, 1.3)
 		var half := Stalactite.LENGTH * 0.5 * size
@@ -454,6 +454,19 @@ static func _exit_clear(level: Level, clear: float) -> float:
 		return clear
 	var arena: LevelLayout.Chamber = level.layout.chambers_of_kind(&"arena")[0]
 	return maxf(arena.radius.x, arena.radius.y) + 6.0
+
+
+## Whether [param p] is in (or at the walls of) Meridian Deep's gallery,
+## which hazards keep out of: a vent's blast or a falling spike would wake
+## the audience gathered there.
+static func _in_station_gallery(level: Level, p: Vector2) -> bool:
+	for room: LevelLayout.Chamber in level.layout.chambers_of_kind(&"station"):
+		# The gallery is a long capsule: its rounded ends reach past the
+		# chamber's own extent.
+		var d := (p - room.center).abs()
+		if d.x < room.radius.x + 9.0 and d.y < room.radius.y + 5.0:
+			return true
+	return false
 
 
 ## The pilot's last sub lies on the floor somewhere away from the start.
@@ -489,7 +502,7 @@ static func _spawn_vents(level: Level, used: PackedVector2Array) -> void:
 		guard += 1
 		var a: LevelLayout.Anchor = layout.anchors[rng.randi() % layout.anchors.size()]
 		if a.normal.y < 0.75 or a.pos.distance_to(layout.start) < 25.0 \
-				or a.pos.distance_to(layout.exit) < _exit_clear(level, 18.0):
+				or a.pos.distance_to(layout.exit) < _exit_clear(level, 18.0) or _in_station_gallery(level, a.pos):
 			continue
 		if not layout.is_reachable(a.pos + a.normal * 3.0) or not _far_from(a.pos, used, 8.0):
 			continue

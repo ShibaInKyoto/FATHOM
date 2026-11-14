@@ -1,7 +1,8 @@
 extends TestCase
 ## Over Meridian Deep hangs an audience held by the Choir's tone (log_05):
 ## still, facing the floor, biting nothing and deaf to sonar; it turns as one
-## when the tone shifts, and hurting one wakes those around it.
+## when the tone shifts, and hurting one wakes those around it (and sends
+## the small fish round them bolting).
 
 const DT := 1.0 / 20.0
 
@@ -96,13 +97,16 @@ func test_still_and_harmless_until_hurt() -> void:
 	audience.set(&"_tone_in", 0.0)
 	audience.tick(DT)
 	check_eq(audience.turns, before + 1, "the tone changes")
-	for i in 60:
+	# They turn as its pulse rises up through them, the topmost a couple of
+	# seconds after the lowest.
+	for i in 120:
 		for m in audience.members:
 			m.tick(DT)
-	var side := signf(lancer.facing.x)
+	var focus := audience.focus()
 	for m in audience.members:
 		if not m.upright:
-			check(signf(m.facing.x) == side and m.facing.y < 0.0, "they turn as one, facing the floor")
+			check(m.facing.dot((focus - m.pos).normalized()) > 0.9 and m.facing.y < 0.0,
+				"they turn as one to where the tone is, facing down to the station")
 	# Hurting one wakes it, and those around it.
 	lancer.take_damage(1.0, sub.pos)
 	check(not lancer.entranced, "hurt, it wakes")
@@ -112,6 +116,12 @@ func test_still_and_harmless_until_hurt() -> void:
 		if not m.entranced:
 			awake += 1
 	check(awake >= 2, "and wakes the rest near it (%d awake)" % awake)
+	var crowd: AudienceCrowd = null
+	for c in audience.get_children():
+		if c is AudienceCrowd:
+			crowd = c
+	check(crowd != null and crowd.count() > 100, "a crowd of small fish round them")
+	check(crowd != null and crowd.get(&"_scatter_at") >= 0.0, "which bolts")
 	level.free()
 
 
