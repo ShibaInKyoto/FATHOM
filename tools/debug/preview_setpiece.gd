@@ -89,6 +89,9 @@ func _ready() -> void:
 	add_child(_cam)
 	_cam.current = true
 	shot_times = [1.0, 1.4, 1.8, 2.2, 2.8]
+	if _film and _piece == "stalactite":
+		# Wide enough to watch it come loose, fall and break on the floor.
+		_views[0] = [look + Vector3(0, -3.5, 15.0), look + Vector3(0, -3.0, 0)]
 	if _film:
 		shot_times = []
 		for i in 90:

@@ -25,6 +25,7 @@ var _ring_mat: ShaderMaterial
 var _line: MeshInstance3D
 var _line_mat: ShaderMaterial
 var _sticks: Array[MeshInstance3D] = []
+var _inflow: GPUParticles3D
 var _stick_mat: StandardMaterial3D
 var _stream: GPUParticles3D
 var _color := COLOR
@@ -38,45 +39,12 @@ func _ready() -> void:
 	_light.light_energy = 0.6
 	_light.position = Vector3(0, 1.0, 1.5)
 	add_child(_light)
-	# Silt streaking down, drawn in from round about and into the fissure.
-	var pm := ParticleProcessMaterial.new()
-	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	pm.emission_box_extents = Vector3(3.5, 2.5, 1.5)
-	pm.direction = Vector3(0, -1, 0)
-	pm.spread = 6.0
-	pm.initial_velocity_min = 2.5
-	pm.initial_velocity_max = 4.5
-	pm.gravity = Vector3(0, -6.0, 0)
-	pm.radial_accel_min = -2.5
-	pm.radial_accel_max = -1.5
-	pm.particle_flag_align_y = true
-	pm.scale_min = 0.6
-	pm.scale_max = 1.2
-	var g := Gradient.new()
-	g.colors = PackedColorArray([Color(WATER_LIGHT, 0.0), Color(WATER_LIGHT, 0.32), Color(WATER_LIGHT, 0.0)])
-	g.offsets = PackedFloat32Array([0.0, 0.35, 1.0])
-	var ramp := GradientTexture1D.new()
-	ramp.gradient = g
-	pm.color_ramp = ramp
-	var quad := QuadMesh.new()
-	quad.size = Vector2(0.035, 0.45)
-	var streak_mat := StandardMaterial3D.new()
-	streak_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	streak_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	streak_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	streak_mat.vertex_color_use_as_albedo = true
-	streak_mat.albedo_texture = Fx.soft_texture()
-	quad.material = streak_mat
-	var stream := GPUParticles3D.new()
-	_stream = stream
-	stream.amount = 110
-	stream.lifetime = 2.2
-	stream.process_material = pm
-	stream.draw_pass_1 = quad
-	stream.position = Vector3(0, 4.5, 0.4)
-	stream.visibility_aabb = AABB(Vector3(-8, -20, -6), Vector3(16, 30, 12))
-	stream.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(stream)
+	# Silt drawn in from round about and sucked down into the fissure: the
+	# emitters sit at the fissure, so everything is pulled towards it.
+	_stream = _silt(Vector3(4.0, 3.0, 1.5), 7.0, 1.5, -3.5, 110)
+	add_child(_stream)
+	_inflow = _silt(Vector3(6.0, 1.0, 1.5), 2.2, 0.2, -7.0, 60)
+	add_child(_inflow)
 	# The water itself, rushing down: the cave wavers through it.
 	_ring = MeshInstance3D.new()
 	var q := QuadMesh.new()
@@ -113,6 +81,50 @@ func _ready() -> void:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(mi)
 		_sticks.append(mi)
+
+
+## Silt sucked into the fissure: spawned in a box of [param extents] centred
+## [param above] metres over it, falling at [param speed] and pulled in by
+## [param pull] (negative: towards the fissure).
+static func _silt(extents: Vector3, above: float, speed: float, pull: float, amount: int) -> GPUParticles3D:
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	pm.emission_box_extents = extents
+	pm.emission_shape_offset = Vector3(0.0, above, 0.0)
+	pm.direction = Vector3(0, -1, 0)
+	pm.spread = 10.0
+	pm.initial_velocity_min = speed * 0.6
+	pm.initial_velocity_max = speed * 1.2
+	pm.gravity = Vector3(0, -3.5, 0)
+	pm.radial_accel_min = pull * 1.2
+	pm.radial_accel_max = pull * 0.8
+	pm.particle_flag_align_y = true
+	pm.scale_min = 0.6
+	pm.scale_max = 1.2
+	var g := Gradient.new()
+	g.colors = PackedColorArray([Color(WATER_LIGHT, 0.0), Color(WATER_LIGHT, 0.3), Color(WATER_LIGHT, 0.0)])
+	g.offsets = PackedFloat32Array([0.0, 0.3, 1.0])
+	var ramp := GradientTexture1D.new()
+	ramp.gradient = g
+	pm.color_ramp = ramp
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.035, 0.45)
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.vertex_color_use_as_albedo = true
+	mat.albedo_texture = Fx.soft_texture()
+	quad.material = mat
+	var p := GPUParticles3D.new()
+	p.amount = amount
+	p.lifetime = 2.2
+	p.process_material = pm
+	p.draw_pass_1 = quad
+	p.position = Vector3(0, -1.5, 0.4)
+	p.visibility_aabb = AABB(Vector3(-10, -6, -6), Vector3(20, 20, 12))
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return p
 
 
 ## Where the descent line runs at height [param y] (it hangs a little
@@ -156,6 +168,7 @@ func set_sealed(sealed: bool) -> void:
 		_ring_mat.set_shader_parameter(&"strength", 0.0 if sealed else 1.0)
 		_stick_mat.emission = _color
 		_stream.emitting = not sealed
+		_inflow.emitting = not sealed
 
 
 func _process(delta: float) -> void:

@@ -75,18 +75,26 @@ static func build(rng: RandomNumberGenerator) -> ArrayMesh:
 		var t := i / 6.0
 		stalk.append(root.lerp(top, t) + bend * sin(t * PI))
 		sr.append(lerpf(0.11, 0.06, t) * (1.0 + 0.15 * sin(t * 14.0)))
+	# It runs on up inside the sac (so the sac never parts from it, even
+	# deflated), through a fleshy collar where they join.
+	stalk.append(top + Vector3(0.0, 0.32, 0.0))
+	sr.append(0.05)
 	b.tube(stalk, sr, 10, Color(0.6, 0.0, 0.0, FLESH))
-	_sac(b, top + Vector3(0.0, 0.42, 0.0), Vector3(0.48, 0.52, 0.46), rng)
+	b.tube(PackedVector3Array([top - Vector3(0.0, 0.06, 0.0), top + Vector3(0.0, 0.04, 0.0),
+		top + Vector3(0.0, 0.12, 0.0)]), PackedFloat32Array([0.075, 0.11, 0.15]), 12, Color(0.9, 0.0, 0.0, FLESH))
+	_sac(b, top + Vector3(0.0, 0.3, 0.0), Vector3(0.48, 0.52, 0.46), rng)
 	# Two buds on their own short stalks.
 	for k in 2:
 		var a := rng.randf_range(0.0, TAU) if k == 0 else rng.randf_range(0.0, TAU) + PI
 		var d := Vector3(cos(a), 0.0, sin(a))
 		var foot := root + d * 0.12 + Vector3(0.0, 0.06, 0.0)
 		var tip := foot + d * rng.randf_range(0.25, 0.4) + Vector3(0.0, rng.randf_range(0.2, 0.35), 0.0)
-		b.tube(PackedVector3Array([foot, foot.lerp(tip, 0.5) + Vector3(0.0, 0.04, 0.0), tip]),
-			PackedFloat32Array([0.045, 0.035, 0.03]), 7, Color(0.5, 0.0, 0.0, FLESH))
 		var bud := rng.randf_range(0.11, 0.16)
-		_sac(b, tip + Vector3(0.0, bud * 0.8, 0.0), Vector3(bud, bud * 1.15, bud), rng)
+		b.tube(PackedVector3Array([foot, foot.lerp(tip, 0.5) + Vector3(0.0, 0.04, 0.0), tip,
+			tip + Vector3(0.0, bud * 0.7, 0.0)]), PackedFloat32Array([0.045, 0.035, 0.032, 0.025]), 7,
+			Color(0.5, 0.0, 0.0, FLESH))
+		b.ellipsoid(tip + Vector3(0.0, 0.01, 0.0), Vector3(0.045, 0.035, 0.045), Color(0.9, 0.0, 0.0, FLESH), 10, 5)
+		_sac(b, tip + Vector3(0.0, bud * 0.6, 0.0), Vector3(bud, bud * 1.15, bud), rng)
 	return b.commit()
 
 

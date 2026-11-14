@@ -1,9 +1,11 @@
 class_name Stalactite
 extends Entity
-## A loose spike of rock hanging from a cavern ceiling. A very loud noise
-## nearby (a ping, a boost, an explosion), a harpoon strike or a bump shakes
-## it loose: it trembles for a moment, then falls, skewering whatever is
-## below, and shatters with a crack loud enough to bring down its neighbours.
+## A loose stalactite hanging from a cavern ceiling on a cracked plug of
+## rock (see [StalactiteModel]). A very loud noise nearby (a ping, a boost,
+## an explosion), a harpoon strike or a bump shakes it loose: it wobbles on
+## its plug, grit pouring from the crack, then drops, tumbling, skewering
+## whatever is below, and breaks apart with a crack loud enough to bring
+## down its neighbours.
 
 enum State { HANGING, SHAKING, FALLING }
 
@@ -22,7 +24,6 @@ const SHADER := preload("res://src/fx/shaders/dripstone.gdshader")
 ## Seconds between drops falling from the tip.
 const DROP_EVERY := Vector2(2.5, 5.0)
 
-static var _mesh: Mesh
 static var _chunk: Mesh
 static var _materials: Dictionary[StringName, ShaderMaterial] = {}
 ## The first one a pilot sees come loose explains itself, once per session.
@@ -31,7 +32,13 @@ static var _explained := false
 var state := State.HANGING
 var size := 1.0
 var _timer := 0.0
-var _model: MeshInstance3D
+## The stalactite swings on its plug from [member _pivot] (at the ceiling),
+## its three sections under it.
+var _pivot: Node3D
+var _sections: Array[MeshInstance3D] = []
+var _variant := 0
+var _spin := Vector3.ZERO
+var _grit := 0.0
 var _drip_mat: StandardMaterial3D
 var _drop: MeshInstance3D
 var _drop_in := 0.0
@@ -43,30 +50,43 @@ func setup() -> void:
 	radius = 0.9 * size
 	active_radius = 90.0
 	targetable = true
-	if _mesh == null:
-		_mesh = _build_mesh()
+	if _chunk == null:
 		_chunk = _chunk_mesh()
-	_model = MeshInstance3D.new()
-	_model.mesh = _mesh
-	_model.material_override = _material(level.biome)
-	_model.scale = Vector3.ONE * size
-	_model.rotation.y = level.rng.randf() * TAU
-	add_child(_model)
+	_variant = level.rng.randi() % StalactiteModel.VARIANTS
+	_pivot = Node3D.new()
+	_pivot.position = Vector3(0.0, StalactiteModel.CEILING * size, 0.0)
+	_pivot.rotation.y = level.rng.randf() * TAU
+	add_child(_pivot)
+	var mat := _material(level.biome)
+	for mesh in StalactiteModel.sections(_variant):
+		var mi := MeshInstance3D.new()
+		mi.mesh = mesh
+		mi.material_override = mat
+		mi.scale = Vector3.ONE * size
+		mi.position = Vector3(0.0, -StalactiteModel.CEILING * size, 0.0)
+		_pivot.add_child(mi)
+		_sections.append(mi)
 	# A bead of mineral water glowing at the tip marks it in the dark, and
 	# every few seconds a drop falls from it.
 	var drip := MeshInstance3D.new()
-	drip.mesh = MeshKit.sphere(0.05)
+	drip.mesh = MeshKit.sphere(0.045)
 	_drip_mat = MeshKit.emissive_material(level.biome.glow_color, 2.5)
 	drip.material_override = _drip_mat
-	drip.position = Vector3(0.0, -LENGTH * 0.5 - 0.05, 0.0)
+	drip.position = Vector3(0.0, -LENGTH * 0.5 - 0.04, 0.0)
 	drip.scale = Vector3(1.0, 1.3, 1.0)
-	_model.add_child(drip)
+	_sections[2].add_child(drip)
 	_drop = MeshInstance3D.new()
-	_drop.mesh = MeshKit.sphere(0.035)
+	_drop.mesh = MeshKit.sphere(0.03)
 	_drop.material_override = _drip_mat
 	_drop.visible = false
 	add_child(_drop)
 	_drop_in = level.rng.randf_range(0.5, DROP_EVERY.y)
+
+
+## Sets an instance shader parameter on every section.
+func _set_param(param: StringName, value: float) -> void:
+	for mi in _sections:
+		mi.set_instance_shader_parameter(param, value)
 
 
 ## Upper and lower ends of the spike (it hangs centred on [member pos]).
@@ -87,19 +107,40 @@ func tick(delta: float) -> void:
 			_bump_sub()
 		State.SHAKING:
 			_timer -= delta
-			_model.position = Vector3(randf_range(-1.0, 1.0), randf_range(-0.3, 0.3), 0.0) * 0.07 * size
-			_drip_mat.emission_energy_multiplier = randf_range(2.0, 9.0)
-			_model.set_instance_shader_parameter(&"drip", randf_range(1.0, 3.0))
+			_wobble(delta)
 			_bump_sub()
 			if _timer <= 0.0:
 				state = State.FALLING
-				_model.position = Vector3.ZERO
+				_spin = Vector3(randf_range(-0.6, 0.6), 0.0, randf_range(-0.9, 0.9))
+				Fx.ichor(level, base(), level.biome.sediment_tint, 14)
 		State.FALLING:
 			vel.y -= GRAVITY * delta
 			pos += vel * delta
+			# It tumbles a little as it drops.
+			_pivot.rotation.x += _spin.x * delta
+			_pivot.rotation.z += _spin.z * delta
 			_strike()
 			if level.field.sample(tip()) < 0.15:
 				_shatter()
+
+
+## Coming loose: it rocks on its plug, harder as the crack opens, sinking
+## a little, grit trickling out round it; its drip flares.
+func _wobble(delta: float) -> void:
+	var held := 1.0 - _timer / SHAKE_TIME
+	var swing := (0.015 + 0.06 * held) * size
+	var t := level.time * 15.0
+	_pivot.rotation.x = sin(t) * swing
+	_pivot.rotation.z = sin(t * 1.3 + 1.0) * swing * 0.8
+	_pivot.position.y = (StalactiteModel.CEILING - 0.06 * held) * size
+	_set_param(&"crack", held)
+	_set_param(&"drip", 1.0 + 2.0 * held * (0.5 + 0.5 * sin(t * 2.0)))
+	_drip_mat.emission_energy_multiplier = 2.5 + 5.0 * held
+	_grit -= delta
+	if _grit <= 0.0:
+		_grit = 0.18
+		var a := randf() * TAU
+		Fx.ichor(level, base() + Vector2(cos(a) * 0.7, -0.4) * size, level.biome.sediment_tint, 3)
 
 
 ## Every few seconds a drop gathers at the tip and falls, glowing, fading
@@ -185,10 +226,31 @@ func _shatter() -> void:
 	Audio.play_at(&"rock_shatter", at, 0.0)
 	Fx.ichor(level, at, level.biome.sediment_tint, 26)
 	Fx.bubble_burst(level, at, 14, 1.2)
-	Fx.rubble(level, at, _chunk, _model.material_override, 9)
+	_break_apart()
+	Fx.rubble(level, at, _chunk, _sections[0].material_override, 9)
 	Events.shake_requested.emit(0.3)
 	level.emit_noise(at, SHATTER_NOISE, self)
 	despawn()
+
+
+## Its three sections thrown apart where it struck, tumbling, sinking and
+## crumbling away.
+func _break_apart() -> void:
+	var holder := level as Node3D
+	for k in _sections.size():
+		var mi := _sections[k]
+		var xf := mi.global_transform
+		mi.get_parent().remove_child(mi)
+		holder.add_child(mi)
+		mi.global_transform = xf
+		var away := Vector3(randf_range(-1.0, 1.0) * (1.5 + k), randf_range(0.2, 1.2), randf_range(-0.4, 0.4))
+		var tween := mi.create_tween().set_parallel(true)
+		tween.tween_property(mi, ^"global_position", xf.origin + away - Vector3(0.0, 0.4, 0.0), 1.2) \
+			.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+		tween.tween_property(mi, ^"rotation", mi.rotation + Vector3(randf_range(-1.5, 1.5), randf_range(-1.0, 1.0),
+			randf_range(-1.5, 1.5)), 1.2)
+		tween.tween_property(mi, ^"scale", Vector3.ONE * 0.02, 0.6).set_delay(1.4)
+		tween.chain().tween_callback(mi.queue_free)
 
 
 func _explain() -> void:
@@ -206,77 +268,13 @@ static func _material(biome: BiomeDef) -> ShaderMaterial:
 	if not _materials.has(biome.id):
 		var m := ShaderMaterial.new()
 		m.shader = SHADER
+		m.set_shader_parameter(&"rock_albedo", TerrainRenderer.ROCK_ALBEDO)
 		m.set_shader_parameter(&"calcite", biome.rock_tint.lerp(Color(0.86, 0.82, 0.74), 0.6))
 		m.set_shader_parameter(&"rock_tint", biome.rock_tint)
 		m.set_shader_parameter(&"sediment_tint", biome.sediment_tint)
 		m.set_shader_parameter(&"drip_color", biome.glow_color)
 		_materials[biome.id] = m
 	return _materials[biome.id]
-
-
-## A dripstone spike, base up, tip down, centred on the origin: flared where
-## it meets the ceiling, ringed with growth, fluted where water ran down it,
-## two lesser spikes fused to its root, and a thin straw at its tip.
-## COLOR.r is how far down it a point is; COLOR.g a shade of its own.
-static func _build_mesh() -> Mesh:
-	var b := ModelBuilder.new()
-	var noise := FastNoiseLite.new()
-	noise.seed = 31
-	noise.frequency = 1.3
-	_spike(b, noise, Vector3(0.0, LENGTH * 0.5, 0.0), LENGTH, 0.62, 0.0, Vector2.ZERO)
-	_spike(b, noise, Vector3(0.34, LENGTH * 0.5 - 0.1, 0.14), LENGTH * 0.42, 0.26, 0.3, Vector2(0.1, 0.04))
-	_spike(b, noise, Vector3(-0.24, LENGTH * 0.5 - 0.05, -0.26), LENGTH * 0.3, 0.2, 0.6, Vector2(-0.08, -0.07))
-	return b.commit()
-
-
-## One spike hanging from [param top], [param length] long and [param radius]
-## wide below its flare; [param seed_shift] varies its flutes, [param lean]
-## swings its tip (x, z per metre).
-static func _spike(b: ModelBuilder, noise: FastNoiseLite, top: Vector3, length: float, radius: float,
-		seed_shift: float, lean: Vector2) -> void:
-	var rings := 28
-	var around := 20
-	var rows := []
-	var ns := []
-	var shade := []
-	for i in rings + 1:
-		var t := float(i) / rings
-		# Flared root, a long taper, a thin straw at the end.
-		var r := radius * (1.0 + 0.35 * pow(1.0 - minf(t / 0.15, 1.0), 2.0)) * pow(1.0 - t * 0.93, 1.25)
-		if t > 0.9:
-			r = minf(r, radius * 0.07)
-		r *= 1.0 + 0.06 * sin(t * length * 13.0)
-		var c := top + Vector3(lean.x * t * t * length, -t * length, lean.y * t * t * length)
-		var row := PackedVector3Array()
-		var nrow := PackedVector3Array()
-		var srow := PackedFloat32Array()
-		for j in around + 1:
-			var a := TAU * (j % around) / around
-			var flute := sin(a * 9.0 + seed_shift * 5.0 + noise.get_noise_2d(t * 4.0, seed_shift * 9.0) * 2.0)
-			flute = signf(flute) * pow(absf(flute), 0.6)
-			var lump := 1.0 + noise.get_noise_3d(cos(a) * 1.5, t * length * 1.4, sin(a) * 1.5 + seed_shift * 7.0) * 0.18
-			var rr := r * lump * (1.0 + 0.15 * flute * smoothstep(0.05, 0.3, t) * (1.0 - smoothstep(0.85, 0.95, t)))
-			var d := Vector3(cos(a), 0.0, sin(a))
-			row.append(c + d * rr)
-			nrow.append((d + Vector3(0.0, -0.25 + 0.6 * (1.0 - t), 0.0)).normalized())
-			srow.append(0.5 + 0.5 * flute)
-		rows.append(row)
-		ns.append(nrow)
-		shade.append(srow)
-	var start := b.verts.size()
-	for i in rows.size():
-		var row: PackedVector3Array = rows[i]
-		for j in row.size():
-			b.add(row[j], (ns[i] as PackedVector3Array)[j], Color(float(i) / rings, (shade[i] as PackedFloat32Array)[j],
-				0.0, 0.0))
-	var w := around + 1
-	for i in rings:
-		for j in around:
-			var a := start + i * w + j
-			b.quad(a, a + 1, a + w + 1, a + w)
-	var tip: Vector3 = (rows[rings] as PackedVector3Array)[0]
-	var centre := top + Vector3(lean.x * length, -length, lean.y * length)
-	b.disc(centre, Vector3.DOWN, tip.distance_to(centre), Color(1.0, 0.5, 0.0, 0.0), around)
 
 
 ## A lumpy chunk of the same rock, for the pieces it shatters into.
@@ -297,5 +295,5 @@ static func _chunk_mesh() -> Mesh:
 			nrow.append(d)
 		rows.append(row)
 		ns.append(nrow)
-	b.grid(rows, ns, Color(0.6, 0.5, 0.0, 0.0))
+	b.grid(rows, ns, Color(0.4, 0.5, 0.5, 0.0))
 	return b.commit()
