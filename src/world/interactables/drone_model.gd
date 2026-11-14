@@ -33,7 +33,7 @@ const SAW_AT := Vector3(2.32, -0.58, 0.88)
 
 
 static func build() -> ArrayMesh:
-	var b := Builder.new()
+	var b := ModelBuilder.new()
 	_float(b)
 	_frame(b)
 	_sphere(b)
@@ -53,7 +53,7 @@ static func build() -> ArrayMesh:
 
 ## The buoyancy float: a rounded block, its edges softened, with a raised
 ## lifting point and grab rails along its top.
-static func _float(b: Builder) -> void:
+static func _float(b: ModelBuilder) -> void:
 	b.rounded_box(FLOAT_AT, FLOAT_HALF, 7.0, Color(1, 1, 1, PAINT), 40, 20)
 	# A lifting eye on top.
 	b.torus(FLOAT_AT + Vector3(0.1, FLOAT_HALF.y + 0.06, 0.0), Vector3.FORWARD, 0.07, 0.02, Color(1, 1, 1, METAL), 12, 6)
@@ -66,7 +66,7 @@ static func _float(b: Builder) -> void:
 
 ## The open frame under the float: posts, rails and skids, with brackets
 ## at the joints, and the pressure housings and electronics pod inside it.
-static func _frame(b: Builder) -> void:
+static func _frame(b: ModelBuilder) -> void:
 	var c := Color(1, 1, 1, METAL)
 	var r := 0.042
 	var top := FLOAT_AT.y - FLOAT_HALF.y + 0.02
@@ -98,7 +98,7 @@ static func _frame(b: Builder) -> void:
 
 
 ## The pilot's acrylic sphere, seated in a titanium ring with its bolts.
-static func _sphere(b: Builder) -> void:
+static func _sphere(b: ModelBuilder) -> void:
 	b.ellipsoid(SPHERE_AT, Vector3.ONE * SPHERE_R, Color(1, 1, 1, GLASS), 28, 18)
 	var ring_x := SPHERE_AT.x - 0.18
 	var ring_r := sqrt(SPHERE_R * SPHERE_R - 0.18 * 0.18)
@@ -111,7 +111,7 @@ static func _sphere(b: Builder) -> void:
 
 
 ## The lamp bar across the front and its two work lamps.
-static func _lamps(b: Builder) -> void:
+static func _lamps(b: ModelBuilder) -> void:
 	var y := 0.2
 	b.tube(PackedVector3Array([Vector3(1.18, y, -0.58), Vector3(1.18, y, 0.58)]), PackedFloat32Array([0.035, 0.035]), 8,
 		Color(1, 1, 1, METAL))
@@ -126,7 +126,7 @@ static func _lamps(b: Builder) -> void:
 
 
 ## Ducted thrusters: two through the float's top, two at the rear.
-static func _thrusters(b: Builder) -> void:
+static func _thrusters(b: ModelBuilder) -> void:
 	for sx: float in [-0.55, 0.42]:
 		var at := Vector3(sx, FLOAT_AT.y + FLOAT_HALF.y + 0.02, 0.0)
 		b.torus(at, Vector3.UP, 0.2, 0.05, Color(0, 0, 0, DARK), 20, 8)
@@ -142,7 +142,7 @@ static func _thrusters(b: Builder) -> void:
 
 
 ## A propeller in its duct: a hub and four twisted blades.
-static func _propeller(b: Builder, at: Vector3, axis: Vector3, radius: float) -> void:
+static func _propeller(b: ModelBuilder, at: Vector3, axis: Vector3, radius: float) -> void:
 	b.ellipsoid(at, Vector3.ONE * 0.045, Color(1, 1, 1, METAL), 8, 6)
 	var u := axis.cross(Vector3.FORWARD if absf(axis.z) < 0.9 else Vector3.RIGHT).normalized()
 	var v := axis.cross(u)
@@ -158,7 +158,7 @@ static func _propeller(b: Builder, at: Vector3, axis: Vector3, radius: float) ->
 
 ## The manipulator arm on the near side: a turret, upper arm and forearm
 ## each worked by a hydraulic ram, hoses running along it, and the saw.
-static func _arm(b: Builder) -> void:
+static func _arm(b: ModelBuilder) -> void:
 	var steel := Color(1, 1, 1, METAL)
 	var dark := Color(0, 0, 0, DARK)
 	var shoulder := Vector3(0.75, -0.42, 0.7)
@@ -188,7 +188,7 @@ static func _arm(b: Builder) -> void:
 			Color(0, 0, 0, RUBBER) if k == 0 else Color(0.9, 0.85, 0.2, RUBBER))
 
 
-static func _ram(b: Builder, from: Vector3, to: Vector3, r: float) -> void:
+static func _ram(b: ModelBuilder, from: Vector3, to: Vector3, r: float) -> void:
 	var mid := from.lerp(to, 0.55)
 	b.cylinder(from, mid, r, Color(0, 0, 0, DARK), 10)
 	b.cylinder(mid, to, r * 0.55, Color(1.4, 1.4, 1.4, METAL), 8)
@@ -196,7 +196,7 @@ static func _ram(b: Builder, from: Vector3, to: Vector3, r: float) -> void:
 
 ## The rock saw facing the camera: a steel disc rimmed with diamond
 ## segments, its hub, and a guard over its upper half.
-static func _saw(b: Builder, hub: Vector3) -> void:
+static func _saw(b: ModelBuilder, hub: Vector3) -> void:
 	var r := 0.38
 	var steel := Color(1.1, 1.1, 1.1, METAL)
 	b.cylinder(hub - Vector3(0, 0, 0.015), hub + Vector3(0, 0, 0.015), r, steel, 40)
@@ -216,202 +216,3 @@ static func _saw(b: Builder, hub: Vector3) -> void:
 		arc.append(hub + Vector3(cos(a), sin(a), 0.0) * (r + 0.07))
 		radii.append(0.06)
 	b.tube(arc, radii, 8, Color(1, 1, 1, PAINT), false, Vector3(0, 0, 1), 0.55)
-
-
-## Accumulates the model's mesh.
-class Builder:
-	extends RefCounted
-	var verts := PackedVector3Array()
-	var normals := PackedVector3Array()
-	var colors := PackedColorArray()
-	var indices := PackedInt32Array()
-
-	func add(p: Vector3, n: Vector3, c: Color) -> int:
-		verts.append(p)
-		normals.append(n.normalized())
-		colors.append(c)
-		return verts.size() - 1
-
-	## A triangle, wound so its front faces the way its vertices' normals point.
-	func tri(a: int, b: int, c: int) -> void:
-		var n := normals[a] + normals[b] + normals[c]
-		var cr := (verts[b] - verts[a]).cross(verts[c] - verts[a])
-		# Godot's front faces wind clockwise as seen.
-		if cr.dot(n) > 0.0:
-			indices.append_array([a, c, b])
-		else:
-			indices.append_array([a, b, c])
-
-	func quad(a: int, b: int, c: int, d: int) -> void:
-		tri(a, b, c)
-		tri(a, c, d)
-
-	## A grid of rings (each [param cols] + 1 points, the last repeating the
-	## first) with normals [param ns], joined into a surface.
-	func grid(rows: Array, ns: Array, c: Color) -> void:
-		var start := verts.size()
-		var w: int = (rows[0] as PackedVector3Array).size()
-		for i in rows.size():
-			for j in w:
-				add(rows[i][j], ns[i][j], c)
-		for i in rows.size() - 1:
-			for j in w - 1:
-				var a := start + i * w + j
-				quad(a, a + 1, a + w + 1, a + w)
-
-	## A rounded box: a superellipsoid of exponent [param e] (higher, squarer).
-	func rounded_box(c: Vector3, half: Vector3, e: float, color: Color, around: int, rings: int) -> void:
-		var rows := []
-		var ns := []
-		for i in rings + 1:
-			var lat := lerpf(-PI * 0.5, PI * 0.5, float(i) / rings)
-			var row := PackedVector3Array()
-			var nrow := PackedVector3Array()
-			for j in around + 1:
-				var lon := TAU * j / around
-				var d := Vector3(cos(lat) * cos(lon), sin(lat), cos(lat) * sin(lon))
-				var k := pow(pow(absf(d.x), e) + pow(absf(d.y), e) + pow(absf(d.z), e), -1.0 / e)
-				var u := d * k
-				row.append(c + u * half)
-				nrow.append(Vector3(signf(u.x) * pow(absf(u.x), e - 1.0) / half.x,
-					signf(u.y) * pow(absf(u.y), e - 1.0) / half.y, signf(u.z) * pow(absf(u.z), e - 1.0) / half.z))
-			rows.append(row)
-			ns.append(nrow)
-		grid(rows, ns, color)
-
-	func ellipsoid(c: Vector3, half: Vector3, color: Color, around: int, rings: int) -> void:
-		rounded_box(c, half, 2.0, color, around, rings)
-
-	## A capsule from [param a] to [param b].
-	func capsule(a: Vector3, b: Vector3, r: float, color: Color) -> void:
-		var axis := (b - a).normalized()
-		var pts := PackedVector3Array()
-		var radii := PackedFloat32Array()
-		for k in 5:
-			var t := k / 4.0
-			pts.append(a - axis * r * (1.0 - sin(t * PI * 0.5)))
-			radii.append(r * maxf(cos((1.0 - t) * PI * 0.5), 0.01) if k < 4 else r)
-		pts.append(b)
-		radii.append(r)
-		for k in range(1, 5):
-			var t := k / 4.0
-			pts.append(b + axis * r * sin(t * PI * 0.5))
-			radii.append(r * maxf(cos(t * PI * 0.5), 0.01))
-		tube(pts, radii, 16, color)
-
-	## A cylinder from [param a] to [param b], its ends capped.
-	func cylinder(a: Vector3, b: Vector3, r: float, color: Color, sides: int) -> void:
-		tube(PackedVector3Array([a, b]), PackedFloat32Array([r, r]), sides, color)
-		var axis := (b - a).normalized()
-		disc(b, axis, r, color, sides)
-		disc(a, -axis, r, color, sides)
-
-	## A flat disc of [param r] at [param c] facing [param n].
-	func disc(c: Vector3, n: Vector3, r: float, color: Color, sides: int) -> void:
-		var u := n.cross(Vector3.FORWARD if absf(n.z) < 0.9 else Vector3.RIGHT).normalized()
-		var v := n.cross(u)
-		var centre := add(c, n, color)
-		var first := verts.size()
-		for k in sides:
-			var a := TAU * k / sides
-			add(c + (u * cos(a) + v * sin(a)) * r, n, color)
-		for k in sides:
-			tri(centre, first + k, first + (k + 1) % sides)
-
-	## A torus round [param c], its ring square to [param axis].
-	func torus(c: Vector3, axis: Vector3, major: float, minor: float, color: Color, around: int, sides: int) -> void:
-		var u := axis.cross(Vector3.FORWARD if absf(axis.z) < 0.9 else Vector3.RIGHT).normalized()
-		var v := axis.cross(u)
-		var rows := []
-		var ns := []
-		for i in around + 1:
-			var a := TAU * i / around
-			var out := u * cos(a) + v * sin(a)
-			var row := PackedVector3Array()
-			var nrow := PackedVector3Array()
-			for j in sides + 1:
-				var b := TAU * j / sides
-				var n := out * cos(b) + axis * sin(b)
-				row.append(c + out * major + n * minor)
-				nrow.append(n)
-			rows.append(row)
-			ns.append(nrow)
-		grid(rows, ns, color)
-
-	## A tube along [param pts]; [param open_ends] leaves its ends uncapped
-	## (a duct); [param up0] and [param flat] flatten it across that direction.
-	func tube(pts: PackedVector3Array, radii: PackedFloat32Array, sides: int, color: Color, open_ends := false,
-			up0 := Vector3.ZERO, flat := 1.0) -> void:
-		var n := pts.size()
-		var rows := []
-		var ns := []
-		var fwd0 := (pts[1] - pts[0]).normalized()
-		var up := up0 if up0 != Vector3.ZERO else fwd0.cross(Vector3.FORWARD if absf(fwd0.z) < 0.9 else Vector3.RIGHT)
-		for i in n:
-			var fwd := (pts[mini(i + 1, n - 1)] - pts[maxi(i - 1, 0)]).normalized()
-			up = (up - fwd * up.dot(fwd)).normalized()
-			var side := fwd.cross(up)
-			var row := PackedVector3Array()
-			var nrow := PackedVector3Array()
-			for j in sides + 1:
-				var a := TAU * j / sides
-				row.append(pts[i] + (up * cos(a) * flat + side * sin(a)) * radii[i])
-				nrow.append(up * cos(a) / flat + side * sin(a))
-			rows.append(row)
-			ns.append(nrow)
-		grid(rows, ns, color)
-		if open_ends:
-			# The inside of the duct, seen through its mouth.
-			var inner := []
-			var inns := []
-			for i in n:
-				var row := PackedVector3Array()
-				var nrow := PackedVector3Array()
-				for j in sides + 1:
-					var p: Vector3 = rows[i][j]
-					row.append(pts[i] + (p - pts[i]) * 0.9)
-					nrow.append(-(ns[i][j] as Vector3))
-				inner.append(row)
-				inns.append(nrow)
-			grid(inner, inns, color)
-
-	## A beam of rectangular section from [param a] to [param b].
-	func beam(a: Vector3, b: Vector3, half: Vector2, color: Color) -> void:
-		var fwd := (b - a).normalized()
-		var side := fwd.cross(Vector3.BACK).normalized()
-		var up := side.cross(fwd)
-		box((a + b) * 0.5, fwd * a.distance_to(b) * 0.5, up * half.x, side * half.y, color)
-
-	## A box at [param c] with half-axes [param ax], [param ay], [param az].
-	func box(c: Vector3, ax: Vector3, ay: Vector3, az: Vector3, color: Color) -> void:
-		for axis: Array in [[ax, ay, az], [ay, az, ax], [az, ax, ay]]:
-			for sgn: float in [-1.0, 1.0]:
-				var n: Vector3 = axis[0] * sgn
-				var p0 := c + n
-				var u: Vector3 = axis[1]
-				var v: Vector3 = axis[2]
-				var a := add(p0 - u - v, n, color)
-				var b2 := add(p0 + u - v, n, color)
-				var c2 := add(p0 + u + v, n, color)
-				var d := add(p0 - u + v, n, color)
-				quad(a, b2, c2, d)
-
-	## A thin flat plate through four points (both faces).
-	func plate(pts: Array, color: Color) -> void:
-		var n: Vector3 = ((pts[1] as Vector3) - pts[0]).cross((pts[2] as Vector3) - pts[0]).normalized()
-		for sgn: float in [1.0, -1.0]:
-			var ids := []
-			for p: Vector3 in pts:
-				ids.append(add(p + n * 0.006 * sgn, n * sgn, color))
-			quad(ids[0], ids[1], ids[2], ids[3])
-
-	func commit() -> ArrayMesh:
-		var arrays := []
-		arrays.resize(Mesh.ARRAY_MAX)
-		arrays[Mesh.ARRAY_VERTEX] = verts
-		arrays[Mesh.ARRAY_NORMAL] = normals
-		arrays[Mesh.ARRAY_COLOR] = colors
-		arrays[Mesh.ARRAY_INDEX] = indices
-		var mesh := ArrayMesh.new()
-		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-		return mesh

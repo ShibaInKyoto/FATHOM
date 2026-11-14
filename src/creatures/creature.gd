@@ -52,6 +52,9 @@ var ambushable := true
 ## something hurts or bumps it.
 var entranced := false
 var entranced_facing := Vector2(0.0, -1.0)  # World +y is up: facing the floor.
+## Seconds an entranced creature waits before turning to a new
+## [member entranced_facing] (so a turn can ripple across a crowd).
+var entranced_lag := 0.0
 ## How far the spine bends into the curve the creature turns along (0 rigid,
 ## 1 all the way), and the point of the body (model X) that stays put.
 var flex := 0.0
@@ -165,7 +168,9 @@ func tick(delta: float) -> void:
 func _hang(delta: float) -> void:
 	vel = Vector2(0.0, sin(level.time * 0.7 + _phase) * 0.12)
 	pos += vel * delta
-	if not upright:
+	if entranced_lag > 0.0:
+		entranced_lag -= delta
+	elif not upright:
 		facing = facing.slerp(entranced_facing, 1.0 - exp(-2.0 * delta)).normalized()
 	var sub := level.player
 	if sub and sub.alive and pos.distance_squared_to(sub.pos) < pow(radius + Submarine.RADIUS + 0.2, 2.0):

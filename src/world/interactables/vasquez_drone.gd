@@ -217,37 +217,7 @@ func _flowstone(drone: ArrayMesh, xf: Transform3D, facing: float) -> ArrayMesh:
 	var nx := int((hi.x - lo.x) / cell) + 1
 	var ny := int((hi.y - lo.y) / cell) + 1
 	# The drone's height towards the camera over each cell.
-	var top := PackedFloat32Array()
-	top.resize(nx * ny)
-	top.fill(-INF)
-	for t in range(0, idx.size(), 3):
-		var a := pts[idx[t]]
-		var b := pts[idx[t + 1]]
-		var c := pts[idx[t + 2]]
-		# Each corner marks its own cell (for triangles smaller than a cell)...
-		for v: Vector3 in [a, b, c]:
-			var kx := clampi(roundi((v.x - lo.x) / cell), 0, nx - 1)
-			var ky := clampi(roundi((v.y - lo.y) / cell), 0, ny - 1)
-			top[ky * nx + kx] = maxf(top[ky * nx + kx], v.z)
-		# ...and every cell centre the triangle covers takes its height there.
-		var x0 := maxi(ceili((minf(a.x, minf(b.x, c.x)) - lo.x) / cell), 0)
-		var x1 := mini(floori((maxf(a.x, maxf(b.x, c.x)) - lo.x) / cell), nx - 1)
-		var y0 := maxi(ceili((minf(a.y, minf(b.y, c.y)) - lo.y) / cell), 0)
-		var y1 := mini(floori((maxf(a.y, maxf(b.y, c.y)) - lo.y) / cell), ny - 1)
-		var den := (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y)
-		if absf(den) < 1e-9:
-			continue
-		for iy in range(y0, y1 + 1):
-			for ix in range(x0, x1 + 1):
-				var px := lo.x + ix * cell
-				var py := lo.y + iy * cell
-				var wa := ((b.y - c.y) * (px - c.x) + (c.x - b.x) * (py - c.y)) / den
-				var wb := ((c.y - a.y) * (px - c.x) + (a.x - c.x) * (py - c.y)) / den
-				var wc := 1.0 - wa - wb
-				if wa < -0.001 or wb < -0.001 or wc < -0.001:
-					continue
-				var k := iy * nx + ix
-				top[k] = maxf(top[k], a.z * wa + b.z * wb + c.z * wc)
+	var top := Flowstone.raster(pts, idx, lo, cell, nx, ny)
 	# The wall's surface, and the drone's way out of it.
 	var origin := Vector2(xf.origin.x, xf.origin.y)
 	var scale := xf.basis.x.length()
@@ -284,7 +254,7 @@ func _flowstone(drone: ArrayMesh, xf: Transform3D, facing: float) -> ArrayMesh:
 	# Rounded as wax sets: a mound over the drone, widened and blurred so it
 	# runs down into the wall all round, never below what it covers; it
 	# follows the wall's own surface everywhere else.
-	var mound := _blur(_widen(excess, nx, ny, 3), nx, ny, 4.5)
+	var mound := Flowstone.blur(Flowstone.widen(excess, nx, ny, 3), nx, ny, 4.5)
 	var z := PackedFloat32Array()
 	var wax := PackedFloat32Array()
 	z.resize(nx * ny)
@@ -332,50 +302,6 @@ func _flowstone(drone: ArrayMesh, xf: Transform3D, facing: float) -> ArrayMesh:
 	if not index.is_empty():
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, out)
 	return mesh
-
-
-## [param values] (an [param nx] by [param ny] grid) with each cell raised
-## to the highest within [param r] cells.
-static func _widen(values: PackedFloat32Array, nx: int, ny: int, r: int) -> PackedFloat32Array:
-	var out := values.duplicate()
-	for iy in ny:
-		for ix in nx:
-			var m := values[iy * nx + ix]
-			for dy in range(-r, r + 1):
-				for dx in range(-r, r + 1):
-					var x := clampi(ix + dx, 0, nx - 1)
-					var y := clampi(iy + dy, 0, ny - 1)
-					m = maxf(m, values[y * nx + x])
-			out[iy * nx + ix] = m
-	return out
-
-
-## [param values] blurred, [param sigma] cells across.
-static func _blur(values: PackedFloat32Array, nx: int, ny: int, sigma: float) -> PackedFloat32Array:
-	var r := int(ceil(sigma * 2.0))
-	var weights := PackedFloat32Array()
-	var total := 0.0
-	for d in range(-r, r + 1):
-		var w := exp(-float(d * d) / (2.0 * sigma * sigma))
-		weights.append(w)
-		total += w
-	var pass1 := PackedFloat32Array()
-	pass1.resize(nx * ny)
-	for iy in ny:
-		for ix in nx:
-			var sum := 0.0
-			for d in range(-r, r + 1):
-				sum += values[iy * nx + clampi(ix + d, 0, nx - 1)] * weights[d + r]
-			pass1[iy * nx + ix] = sum / total
-	var out := PackedFloat32Array()
-	out.resize(nx * ny)
-	for iy in ny:
-		for ix in nx:
-			var sum := 0.0
-			for d in range(-r, r + 1):
-				sum += pass1[clampi(iy + d, 0, ny - 1) * nx + ix] * weights[d + r]
-			out[iy * nx + ix] = sum / total
-	return out
 
 
 func tick(delta: float) -> void:
