@@ -38,17 +38,21 @@ void fragment() {
 	float ends = smoothstep(0.0, 0.3, down) * (1.0 - smoothstep(0.9, 1.0, down));
 	float k = inside * ends * strength;
 	float t = TIME * flow;
-	float speed = 1.0 + down * 3.0;
-	// The pattern slides down the column (towards -y), quicker lower down.
-	vec2 q = vec2(x * 5.0, local.y * 0.45 + t * speed);
-	float n1 = dn(q) + 0.5 * dn(q * 2.7 + 3.1);
-	float n2 = dn(q + vec2(7.3, 1.7)) + 0.5 * dn(q * 2.3 + 9.2);
+	// The pattern scrolls down the column at a constant rate in a stretched
+	// coordinate that is squeezed lower down, so it rushes faster the lower
+	// it goes (about four times as fast at the fissure as at the top). The
+	// stretch depends on position only, never on time, so it can only ever
+	// move down.
+	float drop = 2.1 * log(1.0 + 3.0 * down);
+	vec2 q = vec2(x * 5.0, drop - t * 1.8);
+	float n1 = dn(q) + 0.5 * dn(q * 1.9 + 3.1);
+	float n2 = dn(q + vec2(7.3, 1.7)) + 0.5 * dn(q * 1.7 + 9.2);
 	vec2 bend = vec2(n1 - 0.75, (n2 - 0.75) * 0.6) * 0.035 * k;
 	// Drawn in towards the middle, the more so lower down.
 	bend.x -= x * 0.015 * k * down;
 	vec3 behind = textureLod(screen, SCREEN_UV + bend, 0.0).rgb;
 	// Fine streaks of silt rushing down through it.
-	float streak = pow(dn(vec2(x * 38.0, local.y * 0.12 + t * speed * 1.4)), 9.0);
+	float streak = pow(dn(vec2(x * 38.0, drop * 0.27 - t * 0.85)), 9.0);
 	float sheen = pow(n1 / 1.5, 4.0) * 0.08;
 	ALBEDO = behind + tint * (streak * 0.5 + sheen) * k;
 	ALPHA = clamp(k * 1.2, 0.0, 1.0);

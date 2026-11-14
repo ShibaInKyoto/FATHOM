@@ -38,7 +38,17 @@ var _pivot: Node3D
 var _sections: Array[MeshInstance3D] = []
 var _variant := 0
 var _spin := Vector3.ZERO
-var _grit := 0.0
+## Coming loose: how long it has been shaking, the side it is tearing away
+## towards, how far it has tilted and sunk, the last jolt (when, which way).
+var _shaken := 0.0
+var _shake_for := SHAKE_TIME
+var _tear := Vector2.ZERO
+var _tilt := 0.0
+var _sink := 0.0
+var _jolt_in := 0.0
+var _jolt_at := -10.0
+var _jolt := Vector2.ZERO
+var _buzz := Vector3.ZERO
 var _drip_mat: StandardMaterial3D
 var _drop: MeshInstance3D
 var _drop_in := 0.0
@@ -111,7 +121,9 @@ func tick(delta: float) -> void:
 			_bump_sub()
 			if _timer <= 0.0:
 				state = State.FALLING
-				_spin = Vector3(randf_range(-0.6, 0.6), 0.0, randf_range(-0.9, 0.9))
+				# It tips on over the way it tore, tumbling a little as it drops.
+				_spin = Vector3(_tear.y * 0.9, 0.0, -_tear.x * 0.9) + Vector3(randf_range(-0.2, 0.2), 0.0,
+					randf_range(-0.2, 0.2))
 				Fx.ichor(level, base(), level.biome.sediment_tint, 14)
 		State.FALLING:
 			vel.y -= GRAVITY * delta
@@ -124,23 +136,38 @@ func tick(delta: float) -> void:
 				_shatter()
 
 
-## Coming loose: it rocks on its plug, harder as the crack opens, sinking
-## a little, grit trickling out round it; its drip flares.
+## Coming loose: it is shaken loose, not swung. It buzzes with a fine,
+## restless vibration that grows as the crack opens; every so often the
+## crack gives a little more, and with a jolt it tilts further towards the
+## side it is tearing away from and drops a hair, grit spilling out, and
+## the jolt rings out through it. Its drip flares.
 func _wobble(delta: float) -> void:
-	var held := 1.0 - _timer / SHAKE_TIME
-	var swing := (0.015 + 0.06 * held) * size
-	var t := level.time * 15.0
-	_pivot.rotation.x = sin(t) * swing
-	_pivot.rotation.z = sin(t * 1.3 + 1.0) * swing * 0.8
-	_pivot.position.y = (StalactiteModel.CEILING - 0.06 * held) * size
+	_shaken += delta
+	var held := clampf(_shaken / maxf(_shake_for, 0.01), 0.0, 1.0)
+	# The buzz: a new small random offset every frame, eased into, so it
+	# shivers rather than swings.
+	var buzz := (0.004 + 0.014 * held) * size
+	var want := Vector3(randf_range(-1.0, 1.0), randf_range(-0.4, 0.4), randf_range(-1.0, 1.0)) * buzz
+	_buzz = _buzz.lerp(want, 1.0 - exp(-40.0 * delta))
+	# The crack gives: a jolt, a little further over and a little lower.
+	_jolt_in -= delta
+	if _jolt_in <= 0.0:
+		_jolt_in = randf_range(0.14, 0.3) * (1.0 - 0.4 * held)
+		_jolt_at = _shaken
+		_jolt = Vector2.from_angle(randf() * TAU) * (0.02 + 0.03 * held)
+		_tilt += (0.008 + 0.018 * held) * size
+		_sink += 0.012 * size
+		var side := Vector2(_tear.x, 0.0) * 0.7
+		Fx.ichor(level, base() + side * size + Vector2(randf_range(-0.4, 0.4), -0.3) * size, level.biome.sediment_tint, 2)
+	# The jolt rings out through it and dies away.
+	var since := _shaken - _jolt_at
+	var ring := _jolt * exp(-since * 9.0) * cos(since * 38.0)
+	_pivot.rotation.x = _tear.y * _tilt + ring.y + _buzz.x
+	_pivot.rotation.z = -_tear.x * _tilt + ring.x + _buzz.z
+	_pivot.position = Vector3(_buzz.y * 0.6, StalactiteModel.CEILING * size - _sink, _buzz.x * 0.4)
 	_set_param(&"crack", held)
-	_set_param(&"drip", 1.0 + 2.0 * held * (0.5 + 0.5 * sin(t * 2.0)))
+	_set_param(&"drip", 1.0 + 2.0 * held * (0.6 + 0.4 * randf()))
 	_drip_mat.emission_energy_multiplier = 2.5 + 5.0 * held
-	_grit -= delta
-	if _grit <= 0.0:
-		_grit = 0.18
-		var a := randf() * TAU
-		Fx.ichor(level, base() + Vector2(cos(a) * 0.7, -0.4) * size, level.biome.sediment_tint, 3)
 
 
 ## Every few seconds a drop gathers at the tip and falls, glowing, fading
@@ -171,6 +198,10 @@ func shake_loose(time := SHAKE_TIME) -> void:
 		return
 	state = State.SHAKING
 	_timer = time
+	_shake_for = time
+	_shaken = 0.0
+	_tear = Vector2.from_angle(randf() * TAU)
+	_jolt_in = 0.05
 	Audio.play_at(&"rock_loose", pos, -2.0)
 	Fx.ichor(level, base(), level.biome.sediment_tint, 8)
 	_explain()

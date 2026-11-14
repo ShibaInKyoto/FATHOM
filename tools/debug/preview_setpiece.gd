@@ -3,6 +3,7 @@ extends "res://tools/debug/preview_stage.gd"
 ## beacon, probe, marker, wreck) from cameras a few metres off, then from the
 ## dive camera. "film" instead films it in action (erupting, falling,
 ## harvested, pinging, blinking, flowing) from the close camera.
+## For the stalactite, "near" films it up close.
 ## Usage: xvfb-run godot --path . res://tools/debug/preview_setpiece.tscn -- <out_dir> <piece> [seed] [film] [dark]
 
 var _piece := ""
@@ -89,13 +90,14 @@ func _ready() -> void:
 	add_child(_cam)
 	_cam.current = true
 	shot_times = [1.0, 1.4, 1.8, 2.2, 2.8]
-	if _film and _piece == "stalactite":
+	if _film and _piece == "stalactite" and not args.has("near"):
 		# Wide enough to watch it come loose, fall and break on the floor.
 		_views[0] = [look + Vector3(0, -3.5, 15.0), look + Vector3(0, -3.0, 0)]
 	if _film:
+		# Run with --fixed-fps 30 for an even 30 frames a second.
 		shot_times = []
-		for i in 90:
-			shot_times.append(1.0 + i / 15.0)
+		for i in 180:
+			shot_times.append(1.0 + i / 30.0)
 
 
 ## A point on open floor a little away from the start, clear of boulders.

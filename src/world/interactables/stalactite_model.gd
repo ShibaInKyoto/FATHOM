@@ -67,42 +67,60 @@ static func _build(variant: int) -> Array:
 	return out
 
 
-## The plug of ceiling rock the spike hangs from: a lumpy slab whose face
-## stands a little out of the ceiling, ringed by the crack it is coming
-## loose along.
+## The plug of ceiling rock the spike hangs from: a closed, lumpy slab of
+## rock whose underside stands a little out of the ceiling (ringed by the
+## crack it is coming loose along) and whose broken top encloses the
+## spike's root, so it reads as solid rock when it falls.
 static func _plug(b: ModelBuilder, noise: FastNoiseLite, rng: RandomNumberGenerator) -> void:
 	var around := 28
-	var rings := 6
-	var radius := rng.randf_range(0.85, 1.0)
+	var radius := rng.randf_range(0.7, 0.8)
+	var thick := LENGTH * 0.5 - CEILING + 0.15
+	var centre := Vector3(0.0, CEILING + thick * 0.4, 0.0)
+	# Each ring: [radius fraction, height over the ceiling's face, crack]. The
+	# top is a broken, lumpy dome of rock, narrower than the underside.
+	var profile := [[0.0, -0.1, 0.0], [0.4, -0.08, 0.0], [0.72, -0.04, 0.2], [0.92, 0.0, 0.6], [1.0, 0.08, 1.0],
+		[0.97, thick * 0.4, 0.6], [0.82, thick * 0.75, 0.0], [0.6, thick * 0.95, 0.0], [0.3, thick + 0.05, 0.0],
+		[0.0, thick + 0.08, 0.0]]
+	var jag := FastNoiseLite.new()
+	jag.seed = rng.randi()
+	jag.frequency = 2.2
 	var rows := []
-	var ns := []
 	var cols := []
-	for i in rings + 1:
-		var f := float(i) / rings
+	for ring: Array in profile:
 		var row := PackedVector3Array()
-		var nrow := PackedVector3Array()
 		var crow := PackedColorArray()
+		var f: float = ring[0]
+		var upper := float(ring[1]) > thick * 0.9
 		for j in around + 1:
 			var a := TAU * (j % around) / around
-			var r := radius * f * (1.0 + noise.get_noise_2d(cos(a) * 3.0, sin(a) * 3.0) * 0.25)
-			var y := CEILING - 0.12 * (1.0 - f * f) - noise.get_noise_2d(cos(a) * r * 4.0, sin(a) * r * 4.0) * 0.05
-			# The rim turns up into the crack.
-			if i == rings:
-				y = CEILING + 0.25
-				r *= 0.97
+			var d := Vector3(cos(a), 0.0, sin(a))
+			var lump := 1.0 + noise.get_noise_2d(cos(a) * 3.0, sin(a) * 3.0) * 0.22
+			# Broken faces above: bigger lumps, growing smoothly up the sides so
+			# the rings never cross.
+			lump += jag.get_noise_2d(d.x * 2.0, d.z * 2.0) * 0.18 * clampf(float(ring[1]) / thick, 0.0, 1.0)
+			var r := radius * f * lump
+			var y: float = CEILING + float(ring[1])
+			y += jag.get_noise_2d(d.x * 3.0, d.z * 3.0) * (0.07 if upper else 0.03) * (1.0 - 0.5 * f)
 			row.append(Vector3(cos(a) * r, y, sin(a) * r))
-			nrow.append(Vector3(cos(a) * f * 0.4, -1.0, sin(a) * f * 0.4).normalized())
-			crow.append(Color(0.0, 0.5, 0.5, smoothstep(0.65, 1.0, f)))
+			crow.append(Color(0.0, 0.5, 0.5, ring[2]))
 		rows.append(row)
-		ns.append(nrow)
 		cols.append(crow)
 	var start := b.verts.size()
-	for i in rows.size():
+	var count := rows.size()
+	for i in count:
 		var row: PackedVector3Array = rows[i]
 		for j in row.size():
-			b.add(row[j], (ns[i] as PackedVector3Array)[j], (cols[i] as PackedColorArray)[j])
+			var across := row[(j + 1) % around] - row[(j + around - 1) % around]
+			var along: Vector3 = (rows[mini(i + 1, count - 1)] as PackedVector3Array)[j] \
+				- (rows[maxi(i - 1, 0)] as PackedVector3Array)[j]
+			var n := across.cross(along).normalized()
+			if i == 0 or i == count - 1 or n == Vector3.ZERO:
+				n = Vector3.DOWN if i == 0 else Vector3.UP
+			if n.dot(row[j] - centre) < 0.0:
+				n = -n
+			b.add(row[j], n, (cols[i] as PackedColorArray)[j])
 	var w := around + 1
-	for i in rings:
+	for i in count - 1:
 		for j in around:
 			var a := start + i * w + j
 			b.quad(a, a + 1, a + w + 1, a + w)
